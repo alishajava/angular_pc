@@ -1,4 +1,4 @@
-# angular_pc
+# vue_pc
 
 Vue 3 + Vite app.
 
