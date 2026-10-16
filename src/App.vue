@@ -1,12 +1,10 @@
 <script setup>
-import { ref } from 'vue'
-
-const count = ref(0)
+import FightGame from './components/FightGame.vue'
 </script>
 
 <template>
   <main>
-    <h1>Hello World</h1>
-    <button type="button" @click="count++">count is {{ count }}</button>
+    <h1>격투 게임</h1>
+    <FightGame />
   </main>
 </template>
