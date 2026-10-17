@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   useShooterStore,
   STAGE_WIDTH,
@@ -13,6 +13,7 @@ import {
   ENEMY_BULLET_W,
   ENEMY_BULLET_H,
 } from '../stores/shooter'
+import { unlockAudio, playShoot, playExplosion, playPlayerHit, playWaveClear, playGameOver } from '../audio'
 
 const store = useShooterStore()
 const canvasRef = ref(null)
@@ -24,6 +25,7 @@ const MOVE_RIGHT_KEYS = ['d', 'arrowright']
 const FIRE_KEYS = [' ', 'spacebar']
 
 function onKeyDown(e) {
+  unlockAudio()
   const key = e.key.toLowerCase()
   if ([...MOVE_LEFT_KEYS, ...MOVE_RIGHT_KEYS, ...FIRE_KEYS, 'enter'].includes(key)) {
     e.preventDefault()
@@ -33,6 +35,32 @@ function onKeyDown(e) {
     store.startGame()
   }
 }
+
+watch(
+  () => store.bullets.length,
+  (n, o) => {
+    if (n > o) playShoot()
+  },
+)
+watch(
+  () => store.score,
+  (n, o) => {
+    if (n > o) playExplosion()
+  },
+)
+watch(
+  () => store.player.lives,
+  (n, o) => {
+    if (n < o) playPlayerHit()
+  },
+)
+watch(
+  () => store.phase,
+  (n) => {
+    if (n === 'waveClear') playWaveClear()
+    else if (n === 'gameOver') playGameOver()
+  },
+)
 
 function onKeyUp(e) {
   heldKeys.delete(e.key.toLowerCase())
