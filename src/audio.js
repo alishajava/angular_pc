@@ -43,11 +43,11 @@ function noiseBurst({ duration = 0.2, volume = 0.2 }) {
   noise.start()
 }
 
-export function playShoot() {
-  tone({ freq: 880, freqEnd: 1400, duration: 0.08, type: 'square', volume: 0.07 })
+export function playAttackSwing() {
+  tone({ freq: 500, freqEnd: 200, duration: 0.08, type: 'square', volume: 0.08 })
 }
 
-export function playExplosion() {
+export function playMonsterDown() {
   noiseBurst({ duration: 0.18, volume: 0.15 })
   tone({ freq: 160, freqEnd: 40, duration: 0.18, type: 'sawtooth', volume: 0.08 })
 }
@@ -56,7 +56,12 @@ export function playPlayerHit() {
   tone({ freq: 300, freqEnd: 80, duration: 0.35, type: 'sawtooth', volume: 0.18 })
 }
 
-export function playWaveClear() {
+export function playPickup() {
+  tone({ freq: 660, duration: 0.09, type: 'triangle', volume: 0.12 })
+  tone({ freq: 990, duration: 0.09, type: 'triangle', volume: 0.12, delay: 0.09 })
+}
+
+export function playLevelUp() {
   const notes = [523.25, 659.25, 783.99, 1046.5]
   notes.forEach((freq, i) => tone({ freq, duration: 0.15, type: 'square', volume: 0.1, delay: i * 0.1 }))
 }

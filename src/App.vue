@@ -1,10 +1,10 @@
 <script setup>
-import ShooterGame from './components/ShooterGame.vue'
+import RpgGame from './components/RpgGame.vue'
 </script>
 
 <template>
   <main>
-    <h1>슈팅 게임</h1>
-    <ShooterGame />
+    <h1>던전 RPG</h1>
+    <RpgGame />
   </main>
 </template>
