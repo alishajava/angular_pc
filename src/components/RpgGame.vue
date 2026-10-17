@@ -23,7 +23,7 @@ function onKeyDown(e) {
   }
   if (!heldKeys.has(key)) justPressed.add(key)
   heldKeys.add(key)
-  if (store.phase === 'gameOver' || store.phase === 'cleared') {
+  if (store.phase === 'intro' || store.phase === 'gameOver' || store.phase === 'cleared') {
     store.startGame()
     return
   }
@@ -189,11 +189,43 @@ function drawHud(ctx) {
   }
 }
 
+const STORY_LINES = [
+  '오랫동안 봉인되어 있던 던전이 다시 열렸다.',
+  '마을을 위협하는 몬스터들이 쏟아져 나오고 있다.',
+  '마지막 남은 모험가인 당신은 던전 깊숙이 들어가',
+  '몬스터들을 물리치고 평화를 되찾아야 한다.',
+]
+
+function drawIntro(ctx) {
+  ctx.fillStyle = '#0d0a1a'
+  ctx.fillRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT)
+
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#ffe066'
+  ctx.font = 'bold 28px sans-serif'
+  ctx.fillText('던전의 봉인', STAGE_WIDTH / 2, STAGE_HEIGHT / 2 - 90)
+
+  ctx.fillStyle = '#ddd'
+  ctx.font = '15px sans-serif'
+  STORY_LINES.forEach((line, i) => {
+    ctx.fillText(line, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 - 30 + i * 24)
+  })
+
+  ctx.fillStyle = '#4fd1ff'
+  ctx.font = 'bold 15px sans-serif'
+  ctx.fillText('아무 키나 눌러 모험을 시작하세요', STAGE_WIDTH / 2, STAGE_HEIGHT / 2 + 90)
+}
+
 function render() {
   const canvas = canvasRef.value
   if (!canvas) return
   const ctx = canvas.getContext('2d')
   ctx.clearRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT)
+
+  if (store.phase === 'intro') {
+    drawIntro(ctx)
+    return
+  }
 
   drawMap(ctx)
   drawPotions(ctx)
@@ -202,21 +234,25 @@ function render() {
   drawHud(ctx)
 
   if (store.phase !== 'playing') {
+    const ended = store.phase === 'gameOver' || store.phase === 'cleared'
+    const boxH = ended ? 104 : 80
     ctx.fillStyle = 'rgba(0,0,0,0.55)'
-    ctx.fillRect(0, STAGE_HEIGHT / 2 - 40, STAGE_WIDTH, 80)
+    ctx.fillRect(0, STAGE_HEIGHT / 2 - boxH / 2, STAGE_WIDTH, boxH)
     ctx.textAlign = 'center'
     ctx.fillStyle = '#fff'
     ctx.font = 'bold 26px sans-serif'
-    ctx.fillText(store.message, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 + 8)
-    if (store.phase === 'gameOver' || store.phase === 'cleared') {
-      ctx.font = '14px sans-serif'
-      ctx.fillText(`KILLS ${store.kills} — 아무 키나 눌러 재시작`, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 + 32)
+    ctx.fillText(store.message, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 - boxH / 2 + 34)
+    if (ended) {
+      ctx.font = '13px sans-serif'
+      ctx.fillStyle = '#ffe066'
+      ctx.fillText(store.ending, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 - boxH / 2 + 58)
+      ctx.fillStyle = '#fff'
+      ctx.fillText(`KILLS ${store.kills} — 아무 키나 눌러 재시작`, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 - boxH / 2 + 82)
     }
   }
 }
 
 onMounted(() => {
-  store.startGame()
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   rafId = requestAnimationFrame(loop)

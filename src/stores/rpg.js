@@ -74,11 +74,12 @@ export const useRpgStore = defineStore('rpg', () => {
   const monsters = reactive([])
   const potions = reactive([])
   const kills = ref(0)
-  const phase = ref('ready') // ready | playing | cleared | gameOver
+  const phase = ref('intro') // intro | ready | playing | cleared | gameOver
   const message = ref('DUNGEON')
   const phaseTimer = ref(1.0)
   const toast = ref('')
   const toastTimer = ref(0)
+  const ending = ref('')
 
   function startGame() {
     const start = tileCenter(...PLAYER_START)
@@ -104,6 +105,7 @@ export const useRpgStore = defineStore('rpg', () => {
 
     kills.value = 0
     message.value = 'DUNGEON'
+    ending.value = ''
     phase.value = 'ready'
     phaseTimer.value = 1.0
   }
@@ -142,6 +144,7 @@ export const useRpgStore = defineStore('rpg', () => {
   }
 
   function update(dt, input) {
+    if (phase.value === 'intro') return
     if (phase.value === 'ready') {
       phaseTimer.value -= dt
       if (phaseTimer.value <= 0) phase.value = 'playing'
@@ -217,6 +220,7 @@ export const useRpgStore = defineStore('rpg', () => {
         if (player.hp <= 0) {
           phase.value = 'gameOver'
           message.value = 'GAME OVER'
+          ending.value = '용사는 쓰러졌다... 던전의 어둠은 계속된다.'
           return
         }
       }
@@ -233,6 +237,7 @@ export const useRpgStore = defineStore('rpg', () => {
     if (monsters.length === 0) {
       phase.value = 'cleared'
       message.value = 'DUNGEON CLEARED!'
+      ending.value = '던전의 몬스터를 모두 물리쳤다. 마을에 다시 평화가 찾아왔다.'
     }
   }
 
@@ -244,6 +249,7 @@ export const useRpgStore = defineStore('rpg', () => {
     kills,
     phase,
     message,
+    ending,
     toast,
     toastTimer,
     startGame,
