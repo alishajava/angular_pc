@@ -23,6 +23,11 @@ const BLOCK_DAMAGE_SCALE = 0.2
 const ROUND_TIME = 60
 const WINS_NEEDED = 2
 
+const FIREBALL_RECOVER = 0.4
+const PROJECTILE_SPEED = 360
+const PROJECTILE_DAMAGE = 8
+const PROJECTILE_HIT_RANGE = 26
+
 function createPlayer(x, facing) {
   return {
     x,
@@ -41,6 +46,7 @@ function createPlayer(x, facing) {
 
 export const useFightStore = defineStore('fight', () => {
   const players = reactive([createPlayer(200, 1), createPlayer(600, -1)])
+  const projectiles = reactive([])
   const wins = reactive([0, 0])
   const round = ref(1)
   const roundTime = ref(ROUND_TIME)
@@ -51,6 +57,7 @@ export const useFightStore = defineStore('fight', () => {
   function resetRound() {
     players[0] = createPlayer(200, 1)
     players[1] = createPlayer(600, -1)
+    projectiles.length = 0
     roundTime.value = ROUND_TIME
     phase.value = 'ready'
     message.value = `ROUND ${round.value}`
@@ -80,6 +87,38 @@ export const useFightStore = defineStore('fight', () => {
     if (!blocked) {
       defender.action = 'hitstun'
       defender.actionTimer = HITSTUN_DURATION
+    }
+  }
+
+  function fireProjectile(p, idx) {
+    if (!p.onGround) return
+    if (p.action === 'punch' || p.action === 'kick' || p.action === 'hitstun' || p.action === 'fireball') return
+    p.action = 'fireball'
+    p.actionTimer = FIREBALL_RECOVER
+    projectiles.push({
+      x: p.x + p.facing * (BODY_WIDTH / 2 + 6),
+      y: p.y - BODY_HEIGHT / 2,
+      vx: p.facing * PROJECTILE_SPEED,
+      facing: p.facing,
+      owner: idx,
+    })
+  }
+
+  function updateProjectiles(dt, p1, p2) {
+    for (const proj of projectiles) {
+      proj.x += proj.vx * dt
+    }
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const proj = projectiles[i]
+      const attacker = proj.owner === 0 ? p1 : p2
+      const target = proj.owner === 0 ? p2 : p1
+      const offStage = proj.x < -30 || proj.x > STAGE_WIDTH + 30
+      if (Math.abs(target.x - proj.x) <= PROJECTILE_HIT_RANGE) {
+        applyHit(attacker, target, PROJECTILE_DAMAGE)
+        projectiles.splice(i, 1)
+      } else if (offStage) {
+        projectiles.splice(i, 1)
+      }
     }
   }
 
@@ -151,7 +190,7 @@ export const useFightStore = defineStore('fight', () => {
     p1.facing = p2.x >= p1.x ? 1 : -1
     p2.facing = p1.x >= p2.x ? 1 : -1
 
-    for (const [p, keys] of [[p1, input.p1], [p2, input.p2]]) {
+    for (const [p, keys, idx] of [[p1, input.p1, 0], [p2, input.p2, 1]]) {
       if (p.actionTimer > 0) {
         p.actionTimer -= dt
         if (p.actionTimer <= 0) {
@@ -159,7 +198,7 @@ export const useFightStore = defineStore('fight', () => {
           p.actionTimer = 0
         }
       }
-      const locked = p.action === 'punch' || p.action === 'kick' || p.action === 'hitstun'
+      const locked = p.action === 'punch' || p.action === 'kick' || p.action === 'hitstun' || p.action === 'fireball'
 
       let moveDir = 0
       if (!locked && p.action !== 'block') {
@@ -195,8 +234,9 @@ export const useFightStore = defineStore('fight', () => {
         else if (p.action === 'block') p.action = 'idle'
       }
 
-      if (!locked && p.onGround) {
-        if (keys.punchPressed) startAttack(p, 'punch')
+      if (!locked) {
+        if (keys.fireballPressed) fireProjectile(p, idx)
+        else if (keys.punchPressed && p.onGround) startAttack(p, 'punch')
         else if (keys.kickPressed) startAttack(p, 'kick')
       }
     }
@@ -211,6 +251,7 @@ export const useFightStore = defineStore('fight', () => {
 
     checkHit(p1, p2)
     checkHit(p2, p1)
+    updateProjectiles(dt, p1, p2)
 
     if (p1.hp <= 0 || p2.hp <= 0 || roundTime.value <= 0) {
       endRound(p1, p2)
@@ -219,6 +260,7 @@ export const useFightStore = defineStore('fight', () => {
 
   return {
     players,
+    projectiles,
     wins,
     round,
     roundTime,

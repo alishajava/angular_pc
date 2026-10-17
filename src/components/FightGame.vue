@@ -34,6 +34,29 @@ const KEY_MAP = {
   m: ['p2', 'kick'],
 }
 
+// Fireball command: down, then forward (toward opponent), then punch - within this window.
+const FIREBALL_WINDOW_MS = 600
+const motionHistory = { p1: [], p2: [] }
+
+function pushMotion(playerKey, type) {
+  const hist = motionHistory[playerKey]
+  const now = performance.now()
+  hist.push({ type, time: now })
+  while (hist.length && now - hist[0].time > FIREBALL_WINDOW_MS) hist.shift()
+}
+
+function checkFireballCommand(playerKey) {
+  const hist = motionHistory[playerKey]
+  const now = performance.now()
+  let sawDown = false
+  for (const ev of hist) {
+    if (now - ev.time > FIREBALL_WINDOW_MS) continue
+    if (ev.type === 'down') sawDown = true
+    else if (ev.type === 'forward' && sawDown) return true
+  }
+  return false
+}
+
 function onKeyDown(e) {
   const key = e.key.toLowerCase()
   if (KEY_MAP[key]) e.preventDefault()
@@ -51,14 +74,33 @@ function onKeyUp(e) {
 
 function buildKeyboardInput() {
   const input = {
-    p1: { left: false, right: false, block: false, jumpPressed: false, punchPressed: false, kickPressed: false },
-    p2: { left: false, right: false, block: false, jumpPressed: false, punchPressed: false, kickPressed: false },
+    p1: { left: false, right: false, block: false, jumpPressed: false, punchPressed: false, kickPressed: false, fireballPressed: false },
+    p2: { left: false, right: false, block: false, jumpPressed: false, punchPressed: false, kickPressed: false, fireballPressed: false },
   }
   for (const [key, [player, action]] of Object.entries(KEY_MAP)) {
-    if (action === 'jump' || action === 'punch' || action === 'kick') {
-      if (justPressed.has(key)) input[player][`${action}Pressed`] = true
-    } else if (heldKeys.has(key)) {
-      input[player][action] = true
+    const pressedNow = justPressed.has(key)
+    if (action === 'jump' || action === 'kick') {
+      if (pressedNow) input[player][`${action}Pressed`] = true
+    } else if (action === 'punch') {
+      if (pressedNow) {
+        if (checkFireballCommand(player)) {
+          input[player].fireballPressed = true
+          motionHistory[player].length = 0
+        } else {
+          input[player].punchPressed = true
+        }
+      }
+    } else if (action === 'block') {
+      if (heldKeys.has(key)) input[player].block = true
+      if (pressedNow) pushMotion(player, 'down')
+    } else if (action === 'left' || action === 'right') {
+      if (heldKeys.has(key)) input[player][action] = true
+      if (pressedNow) {
+        const playerIdx = player === 'p1' ? 0 : 1
+        const facing = store.players[playerIdx].facing
+        const keyDir = action === 'right' ? 1 : -1
+        pushMotion(player, keyDir === facing ? 'forward' : 'back')
+      }
     }
   }
   justPressed.clear()
@@ -86,8 +128,7 @@ function loop(time) {
 function drawPlayer(ctx, p, color) {
   const left = p.x - BODY_WIDTH / 2
   const top = p.y - BODY_HEIGHT
-  const flash = p.action === 'hitstun' && Math.floor(performance.now() / 80) % 2 === 0
-  ctx.fillStyle = flash ? '#ffffff' : color
+  ctx.fillStyle = p.action === 'hitstun' ? '#ffcc80' : color
   ctx.beginPath()
   ctx.roundRect(left, top, BODY_WIDTH, BODY_HEIGHT, 10)
   ctx.fill()
@@ -120,6 +161,29 @@ function drawPlayer(ctx, p, color) {
     ctx.roundRect(p.facing === 1 ? startX : startX - w, limbY, w, limbH, 5)
     ctx.fill()
   }
+
+  if (p.action === 'fireball') {
+    ctx.fillStyle = '#ffb74d'
+    const handX = p.x + p.facing * (BODY_WIDTH / 2 + 8)
+    ctx.beginPath()
+    ctx.arc(handX, top + 36, 9, 0, Math.PI * 2)
+    ctx.fill()
+  }
+}
+
+function drawProjectile(ctx, proj) {
+  const glow = ctx.createRadialGradient(proj.x, proj.y, 2, proj.x, proj.y, 16)
+  glow.addColorStop(0, '#fff3c4')
+  glow.addColorStop(1, 'rgba(255,152,0,0)')
+  ctx.fillStyle = glow
+  ctx.beginPath()
+  ctx.arc(proj.x, proj.y, 16, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.fillStyle = '#ff9800'
+  ctx.beginPath()
+  ctx.arc(proj.x, proj.y, 8, 0, Math.PI * 2)
+  ctx.fill()
 }
 
 function drawHpBar(ctx, x, align, hp, maxHp, label, winCount) {
@@ -172,6 +236,9 @@ function render() {
   const [p1, p2] = store.players
   drawPlayer(ctx, p1, '#4f8ff7')
   drawPlayer(ctx, p2, '#f75f5f')
+  for (const proj of store.projectiles) {
+    drawProjectile(ctx, proj)
+  }
 
   drawHpBar(ctx, 20, 'left', p1.hp, p1.maxHp, 'P1', store.wins[0])
   drawHpBar(ctx, STAGE_WIDTH - 20, 'right', p2.hp, p2.maxHp, 'P2', store.wins[1])
@@ -216,9 +283,10 @@ onUnmounted(() => {
     </div>
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
     <div class="controls">
-      <div><strong>Player 1</strong>: A/D 이동 · W 점프 · S 막기 · J 펀치 · K 킥</div>
+      <div><strong>Player 1</strong>: A/D 이동 · W 점프 · S 막기 · J 펀치 · K 킥 (공중에서도 가능)</div>
       <div v-if="vsCpu"><strong>Player 2</strong>: 컴퓨터(CPU)가 조작합니다</div>
-      <div v-else><strong>Player 2</strong>: ←/→ 이동 · ↑ 점프 · ↓ 막기 · N 펀치 · M 킥</div>
+      <div v-else><strong>Player 2</strong>: ←/→ 이동 · ↑ 점프 · ↓ 막기 · N 펀치 · M 킥 (공중에서도 가능)</div>
+      <div>장풍: 아래(S/↓) → 상대 방향(앞) → 펀치(J/N) 순서로 입력</div>
     </div>
   </div>
 </template>
