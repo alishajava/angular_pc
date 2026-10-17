@@ -9,6 +9,7 @@ export const BODY_HEIGHT = 90
 
 const GRAVITY = 1800
 const MOVE_SPEED = 220
+const AIR_MOVE_SPEED = 220
 const JUMP_VELOCITY = -620
 const PUNCH_RANGE = 70
 const KICK_RANGE = 85
@@ -208,6 +209,8 @@ export const useFightStore = defineStore('fight', () => {
       if (moveDir !== 0 && p.onGround) {
         p.x += moveDir * MOVE_SPEED * dt
         p.action = 'walk'
+      } else if (moveDir !== 0 && !p.onGround) {
+        p.x += moveDir * AIR_MOVE_SPEED * dt
       } else if (p.onGround && !locked && p.action !== 'block') {
         p.action = 'idle'
       }
