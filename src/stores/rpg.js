@@ -49,7 +49,7 @@ const MONSTER_SPAWNS = [
   [4, 1],
   [9, 2],
   [2, 5],
-  [7, 5],
+  [6, 5],
   [10, 7],
 ]
 const POTION_SPAWNS = [

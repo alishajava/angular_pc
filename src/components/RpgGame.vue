@@ -23,8 +23,9 @@ function onKeyDown(e) {
   }
   if (!heldKeys.has(key)) justPressed.add(key)
   heldKeys.add(key)
-  if (key === 'enter' && (store.phase === 'gameOver' || store.phase === 'cleared')) {
+  if (store.phase === 'gameOver' || store.phase === 'cleared') {
     store.startGame()
+    return
   }
 }
 
@@ -209,7 +210,7 @@ function render() {
     ctx.fillText(store.message, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 + 8)
     if (store.phase === 'gameOver' || store.phase === 'cleared') {
       ctx.font = '14px sans-serif'
-      ctx.fillText(`KILLS ${store.kills} — Press ENTER to restart`, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 + 32)
+      ctx.fillText(`KILLS ${store.kills} — 아무 키나 눌러 재시작`, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 + 32)
     }
   }
 }
@@ -231,7 +232,7 @@ onUnmounted(() => {
 <template>
   <div class="rpg-game">
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
-    <div class="controls">WASD/방향키 이동 · Space/J 공격 · 클리어/게임오버 시 Enter로 재시작</div>
+    <div class="controls">WASD/방향키 이동 · Space/J 공격 · 클리어/게임오버 시 아무 키나 눌러 재시작</div>
   </div>
 </template>
 
