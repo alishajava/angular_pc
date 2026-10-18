@@ -32,7 +32,6 @@ const DIALOGUE_DURATION = 3.2
 const DIALOGUE = {
   weapon: { speaker: '대장장이', text: '이 검을 받아가게! (공격력 +5)' },
   herb: { speaker: '약초상', text: '특제 비약일세, 마셔두게! (최대 체력 +10)' },
-  tavern: { speaker: '선술집 주인', text: '던전 가장 깊은 곳에 우두머리가 있다고 하더군...' },
   villager1: { speaker: '마을 사람', text: '요즘 몬스터들이 자꾸 마을 근처를 어슬렁거려요...' },
   villager2: { speaker: '마을 사람', text: '조심하세요, 던전은 위험하다고 들었어요.' },
   elder: { speaker: '촌장', text: '던전의 몬스터를 모두 물리치고 평화를 되찾아주게. 이것이 자네의 임무일세.' },
@@ -101,6 +100,7 @@ export const useTownStore = defineStore('town', () => {
 
   function triggerInteraction(item) {
     if (item.type === 'gate') return 'enterDungeon'
+    if (item.type === 'tavern') return 'enterTavern'
 
     if (item.type === 'elder' && questDone.value) {
       dialogueSpeaker.value = '촌장'
@@ -149,7 +149,8 @@ export const useTownStore = defineStore('town', () => {
       const overlapping = Math.abs(player.x - item.x) < PLAYER_HALF + 14 && Math.abs(player.y - item.y) < PLAYER_HALF + 14
       if (overlapping && !item.touching) {
         item.touching = true
-        if (triggerInteraction(item) === 'enterDungeon') return 'enterDungeon'
+        const result = triggerInteraction(item)
+        if (result === 'enterDungeon' || result === 'enterTavern') return result
       } else if (!overlapping) {
         item.touching = false
       }

@@ -56,6 +56,7 @@ function loop(time) {
 
   const result = store.update(dt, buildInput())
   if (result === 'enterDungeon') flow.goToDungeon()
+  else if (result === 'enterTavern') flow.goToTavern()
   render()
 
   rafId = requestAnimationFrame(loop)
@@ -223,7 +224,7 @@ onUnmounted(() => {
   <div class="town-scene">
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
     <div class="controls">
-      WASD/방향키 이동 · 상점 주인·마을 사람·촌장에게 부딪히면 대화 · 던전 입구로 가면 입장 · I 스탯 보기 · M 음악 켜기/끄기
+      WASD/방향키 이동 · 상점 주인·마을 사람·촌장에게 부딪히면 대화 · 선술집은 안으로 입장 · 던전 입구로 가면 입장 · I 스탯 보기 · M 음악 켜기/끄기
     </div>
   </div>
 </template>
