@@ -3,7 +3,7 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { useTownStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
 import { PLAYER_MAX_HP, PLAYER_BASE_ATTACK } from '../stores/rpg'
-import { unlockAudio, playPickup, toggleMusic, isMusicEnabled } from '../audio'
+import { unlockAudio, playPickup, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
 import { drawHero, drawVillager, drawElder, drawGate } from '../sprites'
 import { wrapText } from '../canvasText'
 
@@ -206,6 +206,7 @@ function render() {
 }
 
 onMounted(() => {
+  setMusicTrack('town')
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   rafId = requestAnimationFrame(loop)

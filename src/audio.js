@@ -73,7 +73,8 @@ export function playGameOver() {
 
 // Looping background music: a short melody + a low bass note under each
 // step, rescheduled note-by-note with setTimeout for as long as it's on.
-const MUSIC_MELODY = [
+// Two tracks (town / dungeon) so the mood changes with the scene.
+const MUSIC_TOWN = [
   { freq: 392, bass: 196, dur: 0.45 },
   { freq: 440, bass: 196, dur: 0.45 },
   { freq: 523.25, bass: 261.63, dur: 0.45 },
@@ -90,15 +91,44 @@ const MUSIC_MELODY = [
   { freq: 349.23, bass: 196, dur: 0.9 },
 ]
 
+const MUSIC_DUNGEON = [
+  { freq: 293.66, bass: 146.83, dur: 0.35 },
+  { freq: 349.23, bass: 146.83, dur: 0.35 },
+  { freq: 293.66, bass: 174.61, dur: 0.35 },
+  { freq: 261.63, bass: 174.61, dur: 0.35 },
+  { freq: 293.66, bass: 146.83, dur: 0.7 },
+  { freq: 349.23, bass: 164.81, dur: 0.35 },
+  { freq: 392, bass: 164.81, dur: 0.35 },
+  { freq: 349.23, bass: 146.83, dur: 0.35 },
+  { freq: 293.66, bass: 146.83, dur: 0.35 },
+  { freq: 261.63, bass: 130.81, dur: 0.7 },
+]
+
+const TRACKS = {
+  town: { melody: MUSIC_TOWN, lead: 'triangle', leadVolume: 0.05, bassVolume: 0.04 },
+  dungeon: { melody: MUSIC_DUNGEON, lead: 'sawtooth', leadVolume: 0.045, bassVolume: 0.05 },
+}
+
+let currentTrack = 'town'
 let musicEnabled = false
 let musicTimeoutId = null
 
 function scheduleMusic(index) {
   if (!musicEnabled) return
-  const step = MUSIC_MELODY[index % MUSIC_MELODY.length]
-  tone({ freq: step.freq, duration: step.dur * 0.9, type: 'triangle', volume: 0.05 })
-  tone({ freq: step.bass, duration: step.dur * 0.9, type: 'sine', volume: 0.04 })
+  const track = TRACKS[currentTrack]
+  const step = track.melody[index % track.melody.length]
+  tone({ freq: step.freq, duration: step.dur * 0.9, type: track.lead, volume: track.leadVolume })
+  tone({ freq: step.bass, duration: step.dur * 0.9, type: 'sine', volume: track.bassVolume })
   musicTimeoutId = setTimeout(() => scheduleMusic(index + 1), step.dur * 1000)
+}
+
+export function setMusicTrack(name) {
+  if (currentTrack === name) return
+  currentTrack = name
+  if (musicEnabled) {
+    clearTimeout(musicTimeoutId)
+    scheduleMusic(0)
+  }
 }
 
 export function setMusicEnabled(enabled) {

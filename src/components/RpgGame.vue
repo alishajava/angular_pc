@@ -3,7 +3,7 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRpgStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT, ATTACK_VISUAL_DURATION } from '../stores/rpg'
 import { useTownStore } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
-import { unlockAudio, playAttackSwing, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver, toggleMusic, isMusicEnabled } from '../audio'
+import { unlockAudio, playAttackSwing, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
 import { drawHero, drawMonster, drawSlash, FACE_ANGLE } from '../sprites'
 
 const store = useRpgStore()
@@ -261,6 +261,7 @@ function render() {
 
 onMounted(() => {
   store.startGame()
+  setMusicTrack('dungeon')
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   rafId = requestAnimationFrame(loop)
