@@ -71,6 +71,7 @@ export const useTownStore = defineStore('town', () => {
   const interactables = reactive(buildInteractables())
 
   const quest = ref('')
+  const questDone = ref(false)
   const bonusAttack = ref(0)
   const bonusMaxHp = ref(0)
 
@@ -83,6 +84,7 @@ export const useTownStore = defineStore('town', () => {
     player.x = start.x
     player.y = start.y
     player.facing = 'down'
+    dialogueTimer.value = 0
     for (const it of interactables) it.touching = false
   }
 
@@ -91,8 +93,23 @@ export const useTownStore = defineStore('town', () => {
     enterTown()
   }
 
+  function completeQuest() {
+    if (!quest.value) return
+    questDone.value = true
+    quest.value = '완료: 던전의 몬스터를 모두 처치했다 (촌장에게 알리러 가자)'
+  }
+
   function triggerInteraction(item) {
     if (item.type === 'gate') return 'enterDungeon'
+
+    if (item.type === 'elder' && questDone.value) {
+      dialogueSpeaker.value = '촌장'
+      dialogueText.value = '정말 고맙네! 자네 덕분에 마을에 평화가 돌아왔어. 자네는 진정한 영웅일세.'
+      dialogueTimer.value = DIALOGUE_DURATION
+      quest.value = ''
+      return null
+    }
+
     const line = DIALOGUE[item.type]
     dialogueSpeaker.value = line.speaker
     dialogueText.value = line.text
@@ -146,6 +163,7 @@ export const useTownStore = defineStore('town', () => {
     player,
     interactables,
     quest,
+    questDone,
     bonusAttack,
     bonusMaxHp,
     dialogueSpeaker,
@@ -153,6 +171,7 @@ export const useTownStore = defineStore('town', () => {
     dialogueTimer,
     beginAdventure,
     enterTown,
+    completeQuest,
     update,
   }
 })

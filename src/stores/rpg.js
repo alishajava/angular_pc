@@ -228,6 +228,7 @@ export const useRpgStore = defineStore('rpg', () => {
       phase.value = 'cleared'
       message.value = 'DUNGEON CLEARED!'
       ending.value = '던전의 몬스터를 모두 물리쳤다. 마을에 다시 평화가 찾아왔다.'
+      useTownStore().completeQuest()
     }
   }
 
