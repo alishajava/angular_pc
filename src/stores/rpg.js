@@ -46,22 +46,12 @@ const PLAYER_HALF = 12
 const PLAYER_SPEED = 130
 export const PLAYER_MAX_HP = 30
 export const PLAYER_BASE_ATTACK = 8
-const ATTACK_COOLDOWN = 0.4
-const ATTACK_RANGE = 28
-const ATTACK_WIDTH = 24
-export const ATTACK_VISUAL_DURATION = 0.22
-const INVULN_DURATION = 0.6
 
-const FIREBALL_COOLDOWN = 1.2
 const FIREBALL_DAMAGE = 12
-const FIREBALL_SPEED = 260
-export const FIREBALL_RADIUS = 7
-const DIR_VEC = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }
 
 const MONSTER_HALF = 10
 const MONSTER_SPEED = 65
 const MONSTER_DETECT_RADIUS = 160
-const MONSTER_CONTACT_COOLDOWN = 0.8
 const MONSTER_MAX_HP = 14
 const MONSTER_DAMAGE = 6
 const BOSS_MAX_HP = 50
@@ -69,6 +59,10 @@ const BOSS_DAMAGE = 11
 const POTION_HEAL = 15
 const MONSTER_COIN_REWARD = 5
 const BOSS_COIN_REWARD = 50
+
+const FLEE_COOLDOWN = 1.0 // grace period before a fled-from monster can re-engage
+const PLAYER_TURN_DELAY = 0.8 // pause after the player's action before the monster replies
+const END_TURN_DELAY = 1.0 // pause after victory/defeat/flee before returning control
 
 // Hand-placed spawn points (col, row) on floor tiles of MAP above.
 // The boss waits in the farthest corner from the entrance (deepest,
@@ -95,6 +89,10 @@ const POTION_SPAWNS = [
 ]
 const PLAYER_START = [1, 1]
 
+function rollDamage(base) {
+  return Math.max(1, base + Math.floor(Math.random() * 5) - 2)
+}
+
 export const useRpgStore = defineStore('rpg', () => {
   const player = reactive({
     x: 0,
@@ -103,15 +101,9 @@ export const useRpgStore = defineStore('rpg', () => {
     hp: PLAYER_MAX_HP,
     maxHp: PLAYER_MAX_HP,
     attack: PLAYER_BASE_ATTACK,
-    attackCooldown: 0,
-    swingTimer: 0,
-    swingFacing: 'down',
-    invulnTimer: 0,
-    fireballCooldown: 0,
   })
   const monsters = reactive([])
   const potions = reactive([])
-  const fireballs = reactive([])
   const kills = ref(0)
   const phase = ref('ready') // ready | playing | cleared | gameOver
   const message = ref('DUNGEON')
@@ -119,6 +111,20 @@ export const useRpgStore = defineStore('rpg', () => {
   const toast = ref('')
   const toastTimer = ref(0)
   const ending = ref('')
+
+  // Dragon-Quest-style turn-based battle, entered when a roaming monster
+  // catches the player on the dungeon map.
+  const battle = reactive({
+    active: false,
+    monsterIndex: -1,
+    turn: 'player', // player | monsterPending | victory | defeat | fled
+    log: '',
+    timer: 0,
+    fireballReady: true,
+    effect: null, // 'attack' | 'fireball' | null
+    effectTimer: 0,
+    actionId: 0,
+  })
 
   function startGame() {
     const town = useTownStore()
@@ -129,11 +135,6 @@ export const useRpgStore = defineStore('rpg', () => {
     player.maxHp = PLAYER_MAX_HP + town.bonusMaxHp
     player.hp = player.maxHp
     player.attack = PLAYER_BASE_ATTACK + town.bonusAttack
-    player.attackCooldown = 0
-    player.swingTimer = 0
-    player.invulnTimer = 0
-    player.fireballCooldown = 0
-    fireballs.length = 0
 
     monsters.length = 0
     for (const [col, row, kind] of MONSTER_SPAWNS) {
@@ -160,42 +161,144 @@ export const useRpgStore = defineStore('rpg', () => {
     ending.value = ''
     phase.value = 'ready'
     phaseTimer.value = 1.0
+    battle.active = false
   }
 
   function canMoveTo(x, y, half) {
     return canMoveToTile(grid, COLS, ROWS, TILE, x, y, half)
   }
 
-  function attackHitbox(x, y, facing) {
-    const w = ATTACK_WIDTH
-    const len = ATTACK_RANGE
-    if (facing === 'up') return { x: x - w / 2, y: y - len - PLAYER_HALF, w, h: len }
-    if (facing === 'down') return { x: x - w / 2, y: y + PLAYER_HALF, w, h: len }
-    if (facing === 'left') return { x: x - len - PLAYER_HALF, y: y - w / 2, w: len, h: w }
-    return { x: x + PLAYER_HALF, y: y - w / 2, w: len, h: w }
-  }
-
-  function overlapsHitbox(rect, mx, my, half) {
-    return mx + half > rect.x && mx - half < rect.x + rect.w && my + half > rect.y && my - half < rect.y + rect.h
-  }
-
   function blockedByMonster(x, y, half) {
     return monsters.some((m) => Math.hypot(x - m.x, y - m.y) < half + MONSTER_HALF)
   }
 
-  function damageMonster(index, amount) {
+  function startBattle(index) {
     const m = monsters[index]
-    m.hp -= amount
-    if (m.hp <= 0) {
-      kills.value++
-      useTownStore().addCoins(m.coinReward)
-      if (kills.value % 3 === 0) {
-        player.attack += 1
-        toast.value = 'ATTACK UP!'
-        toastTimer.value = 1.4
-      }
-      monsters.splice(index, 1)
+    battle.active = true
+    battle.monsterIndex = index
+    battle.turn = 'player'
+    battle.log = `${m.isBoss ? '보스' : '몬스터'}이(가) 나타났다!`
+    battle.timer = 0
+    battle.fireballReady = true
+    battle.effect = null
+    battle.effectTimer = 0
+  }
+
+  function battleAttack() {
+    if (!battle.active || battle.turn !== 'player') return
+    const m = monsters[battle.monsterIndex]
+    const dmg = rollDamage(player.attack)
+    m.hp -= dmg
+    battle.log = `용사의 공격! ${dmg}의 피해를 입혔다!`
+    battle.effect = 'attack'
+    battle.effectTimer = 0.3
+    battle.actionId++
+    advanceAfterPlayerAction(m)
+  }
+
+  function battleFireball() {
+    if (!battle.active || battle.turn !== 'player') return
+    if (!battle.fireballReady) {
+      battle.log = '아직 파이어볼을 쓸 수 없다!'
+      return
     }
+    const m = monsters[battle.monsterIndex]
+    const dmg = rollDamage(FIREBALL_DAMAGE)
+    m.hp -= dmg
+    battle.fireballReady = false
+    battle.log = `파이어볼! ${dmg}의 피해를 입혔다!`
+    battle.effect = 'fireball'
+    battle.effectTimer = 0.35
+    battle.actionId++
+    advanceAfterPlayerAction(m)
+  }
+
+  function battleFlee() {
+    if (!battle.active || battle.turn !== 'player') return
+    const m = monsters[battle.monsterIndex]
+    if (m.isBoss) {
+      battle.log = '보스에게서는 도망칠 수 없다!'
+      battle.turn = 'monsterPending'
+      battle.timer = PLAYER_TURN_DELAY
+      return
+    }
+    if (Math.random() < 0.75) {
+      battle.turn = 'fled'
+      battle.log = '도망쳤다!'
+      battle.timer = END_TURN_DELAY
+    } else {
+      battle.log = '도망칠 수 없었다!'
+      battle.turn = 'monsterPending'
+      battle.timer = PLAYER_TURN_DELAY
+    }
+  }
+
+  function advanceAfterPlayerAction(m) {
+    if (m.hp <= 0) {
+      battle.turn = 'victory'
+      battle.timer = END_TURN_DELAY
+    } else {
+      battle.turn = 'monsterPending'
+      battle.timer = PLAYER_TURN_DELAY
+    }
+  }
+
+  function resolveMonsterTurn() {
+    const m = monsters[battle.monsterIndex]
+    const dmg = rollDamage(m.damage)
+    player.hp = Math.max(0, player.hp - dmg)
+    battle.log = `${m.isBoss ? '보스' : '몬스터'}의 공격! ${dmg}의 피해를 받았다!`
+    if (player.hp <= 0) {
+      battle.turn = 'defeat'
+      battle.timer = END_TURN_DELAY
+    } else {
+      battle.turn = 'player'
+      battle.timer = 0
+      battle.fireballReady = true
+    }
+  }
+
+  function finishVictory() {
+    const m = monsters[battle.monsterIndex]
+    kills.value++
+    useTownStore().addCoins(m.coinReward)
+    if (kills.value % 3 === 0) {
+      player.attack += 1
+      toast.value = 'ATTACK UP!'
+      toastTimer.value = 1.4
+    }
+    monsters.splice(battle.monsterIndex, 1)
+    battle.active = false
+    if (monsters.length === 0) {
+      phase.value = 'cleared'
+      message.value = 'DUNGEON CLEARED!'
+      ending.value = '던전의 몬스터를 모두 물리쳤다. 마을에 다시 평화가 찾아왔다.'
+      useTownStore().completeQuest()
+    }
+  }
+
+  function finishDefeat() {
+    battle.active = false
+    phase.value = 'gameOver'
+    message.value = 'GAME OVER'
+    ending.value = '용사는 쓰러졌다... 던전의 어둠은 계속된다.'
+  }
+
+  function finishFlee() {
+    const m = monsters[battle.monsterIndex]
+    m.contactCooldown = FLEE_COOLDOWN
+    battle.active = false
+  }
+
+  function updateBattle(dt) {
+    if (battle.effectTimer > 0) battle.effectTimer -= dt
+    if (battle.timer <= 0) return
+    battle.timer -= dt
+    if (battle.timer > 0) return
+    if (battle.turn === 'monsterPending') resolveMonsterTurn()
+    else if (battle.turn === 'victory') finishVictory()
+    else if (battle.turn === 'defeat') finishDefeat()
+    else if (battle.turn === 'fled') finishFlee()
   }
 
   function update(dt, input) {
@@ -207,9 +310,11 @@ export const useRpgStore = defineStore('rpg', () => {
     if (phase.value !== 'playing') return
 
     if (toastTimer.value > 0) toastTimer.value -= dt
-    if (player.attackCooldown > 0) player.attackCooldown -= dt
-    if (player.swingTimer > 0) player.swingTimer -= dt
-    if (player.invulnTimer > 0) player.invulnTimer -= dt
+
+    if (battle.active) {
+      updateBattle(dt)
+      return
+    }
 
     let dx = 0
     let dy = 0
@@ -229,51 +334,8 @@ export const useRpgStore = defineStore('rpg', () => {
     const tryY = player.y + dy * PLAYER_SPEED * dt
     if (canMoveTo(player.x, tryY, PLAYER_HALF) && !blockedByMonster(player.x, tryY, PLAYER_HALF)) player.y = tryY
 
-    if (input.attackPressed && player.attackCooldown <= 0) {
-      player.attackCooldown = ATTACK_COOLDOWN
-      player.swingTimer = ATTACK_VISUAL_DURATION
-      player.swingFacing = player.facing
-      const hitbox = attackHitbox(player.x, player.y, player.facing)
-      for (let i = monsters.length - 1; i >= 0; i--) {
-        const m = monsters[i]
-        if (overlapsHitbox(hitbox, m.x, m.y, MONSTER_HALF)) {
-          damageMonster(i, player.attack)
-        }
-      }
-    }
-
-    if (player.fireballCooldown > 0) player.fireballCooldown -= dt
-    if (input.fireballPressed && player.fireballCooldown <= 0) {
-      player.fireballCooldown = FIREBALL_COOLDOWN
-      const dv = DIR_VEC[player.facing]
-      fireballs.push({
-        x: player.x + dv[0] * PLAYER_HALF,
-        y: player.y + dv[1] * PLAYER_HALF,
-        vx: dv[0] * FIREBALL_SPEED,
-        vy: dv[1] * FIREBALL_SPEED,
-      })
-    }
-    for (let i = fireballs.length - 1; i >= 0; i--) {
-      const f = fireballs[i]
-      f.x += f.vx * dt
-      f.y += f.vy * dt
-      if (!canMoveTo(f.x, f.y, FIREBALL_RADIUS)) {
-        fireballs.splice(i, 1)
-        continue
-      }
-      let hit = false
-      for (let j = monsters.length - 1; j >= 0; j--) {
-        const m = monsters[j]
-        if (Math.hypot(f.x - m.x, f.y - m.y) < FIREBALL_RADIUS + MONSTER_HALF) {
-          damageMonster(j, FIREBALL_DAMAGE)
-          hit = true
-          break
-        }
-      }
-      if (hit) fireballs.splice(i, 1)
-    }
-
-    for (const m of monsters) {
+    for (let i = 0; i < monsters.length; i++) {
+      const m = monsters[i]
       if (m.contactCooldown > 0) m.contactCooldown -= dt
       const mdx = player.x - m.x
       const mdy = player.y - m.y
@@ -285,20 +347,12 @@ export const useRpgStore = defineStore('rpg', () => {
         if (canMoveTo(m.x, m.y + my, MONSTER_HALF)) m.y += my
       }
       if (
-        player.invulnTimer <= 0 &&
         m.contactCooldown <= 0 &&
         Math.abs(player.x - m.x) < PLAYER_HALF + MONSTER_HALF &&
         Math.abs(player.y - m.y) < PLAYER_HALF + MONSTER_HALF
       ) {
-        player.hp = Math.max(0, player.hp - m.damage)
-        player.invulnTimer = INVULN_DURATION
-        m.contactCooldown = MONSTER_CONTACT_COOLDOWN
-        if (player.hp <= 0) {
-          phase.value = 'gameOver'
-          message.value = 'GAME OVER'
-          ending.value = '용사는 쓰러졌다... 던전의 어둠은 계속된다.'
-          return
-        }
+        startBattle(i)
+        return
       }
     }
 
@@ -309,13 +363,6 @@ export const useRpgStore = defineStore('rpg', () => {
         potions.splice(i, 1)
       }
     }
-
-    if (monsters.length === 0) {
-      phase.value = 'cleared'
-      message.value = 'DUNGEON CLEARED!'
-      ending.value = '던전의 몬스터를 모두 물리쳤다. 마을에 다시 평화가 찾아왔다.'
-      useTownStore().completeQuest()
-    }
   }
 
   return {
@@ -323,14 +370,17 @@ export const useRpgStore = defineStore('rpg', () => {
     player,
     monsters,
     potions,
-    fireballs,
     kills,
     phase,
     message,
     ending,
     toast,
     toastTimer,
+    battle,
     startGame,
     update,
+    battleAttack,
+    battleFireball,
+    battleFlee,
   }
 })

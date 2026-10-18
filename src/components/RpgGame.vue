@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRpgStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT, WORLD_HEIGHT, ATTACK_VISUAL_DURATION } from '../stores/rpg'
+import { useRpgStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT, WORLD_HEIGHT } from '../stores/rpg'
 import { useTownStore } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
 import { unlockAudio, playAttackSwing, playFireball, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
@@ -13,7 +13,6 @@ const canvasRef = ref(null)
 const showStats = ref(false)
 
 const heldKeys = new Set()
-const justPressed = new Set()
 
 const MOVE_UP = ['w', 'arrowup']
 const MOVE_DOWN = ['s', 'arrowdown']
@@ -21,14 +20,14 @@ const MOVE_LEFT = ['a', 'arrowleft']
 const MOVE_RIGHT = ['d', 'arrowright']
 const ATTACK_KEYS = [' ', 'spacebar', 'j']
 const FIREBALL_KEYS = ['k']
+const FLEE_KEYS = ['r']
 
 function onKeyDown(e) {
   unlockAudio()
   const key = e.key.toLowerCase()
-  if ([...MOVE_UP, ...MOVE_DOWN, ...MOVE_LEFT, ...MOVE_RIGHT, ...ATTACK_KEYS, ...FIREBALL_KEYS, 'enter', 'escape'].includes(key)) {
+  if ([...MOVE_UP, ...MOVE_DOWN, ...MOVE_LEFT, ...MOVE_RIGHT, ...ATTACK_KEYS, ...FIREBALL_KEYS, ...FLEE_KEYS, 'enter', 'escape'].includes(key)) {
     e.preventDefault()
   }
-  if (!heldKeys.has(key)) justPressed.add(key)
   heldKeys.add(key)
   if (key === 'i') showStats.value = !showStats.value
   if (key === 'm') toggleMusic()
@@ -42,6 +41,11 @@ function onKeyDown(e) {
     flow.goToTown()
     return
   }
+  if (store.battle.active && store.battle.turn === 'player') {
+    if (ATTACK_KEYS.includes(key)) store.battleAttack()
+    else if (FIREBALL_KEYS.includes(key)) store.battleFireball()
+    else if (FLEE_KEYS.includes(key)) store.battleFlee()
+  }
 }
 
 function onKeyUp(e) {
@@ -49,29 +53,19 @@ function onKeyUp(e) {
 }
 
 function buildInput() {
-  const attackPressed = ATTACK_KEYS.some((k) => justPressed.has(k))
-  const fireballPressed = FIREBALL_KEYS.some((k) => justPressed.has(k))
-  justPressed.clear()
   return {
     up: MOVE_UP.some((k) => heldKeys.has(k)),
     down: MOVE_DOWN.some((k) => heldKeys.has(k)),
     left: MOVE_LEFT.some((k) => heldKeys.has(k)),
     right: MOVE_RIGHT.some((k) => heldKeys.has(k)),
-    attackPressed,
-    fireballPressed,
   }
 }
 
 watch(
-  () => store.player.swingTimer,
-  (n, o) => {
-    if (n > o) playAttackSwing()
-  },
-)
-watch(
-  () => store.player.fireballCooldown,
-  (n, o) => {
-    if (n > o) playFireball()
+  () => store.battle.actionId,
+  () => {
+    if (store.battle.effect === 'attack') playAttackSwing()
+    else if (store.battle.effect === 'fireball') playFireball()
   },
 )
 watch(
@@ -163,15 +157,7 @@ function drawMonsters(ctx) {
 
 function drawPlayer(ctx) {
   const p = store.player
-  ctx.save()
-  ctx.globalAlpha = p.invulnTimer > 0 ? 0.55 : 1
   drawHero(ctx, p.x, p.y, p.facing)
-  ctx.restore()
-
-  if (p.swingTimer > 0) {
-    const progress = 1 - p.swingTimer / ATTACK_VISUAL_DURATION
-    drawSlash(ctx, p.x, p.y, FACE_ANGLE[p.swingFacing], progress)
-  }
 }
 
 function drawHud(ctx) {
@@ -195,20 +181,11 @@ function drawHud(ctx) {
   ctx.fillStyle = '#ffd700'
   ctx.fillText(`${town.coins} 코인`, STAGE_WIDTH - 10, 40)
 
-  ctx.textAlign = 'left'
-  ctx.font = '11px sans-serif'
-  ctx.fillStyle = p.fireballCooldown <= 0 ? '#ff9f43' : '#777'
-  ctx.fillText(
-    p.fireballCooldown <= 0 ? '[K] 파이어볼 준비' : `[K] 파이어볼 ${p.fireballCooldown.toFixed(1)}s`,
-    16,
-    38,
-  )
-
   if (town.quest) {
     ctx.textAlign = 'left'
     ctx.font = '11px sans-serif'
     ctx.fillStyle = '#ffe066'
-    ctx.fillText(`임무: ${town.quest}`, 16, 54)
+    ctx.fillText(`임무: ${town.quest}`, 16, 38)
   }
 
   if (store.toastTimer > 0) {
@@ -226,6 +203,81 @@ function drawHud(ctx) {
     STAGE_WIDTH - 10,
     STAGE_HEIGHT - 10,
   )
+}
+
+function drawBattle(ctx) {
+  const b = store.battle
+  const m = store.monsters[b.monsterIndex]
+  if (!m) return
+  const p = store.player
+
+  ctx.fillStyle = '#1a1030'
+  ctx.fillRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT)
+
+  // monster
+  const mx = STAGE_WIDTH / 2
+  const my = STAGE_HEIGHT * 0.36
+  ctx.save()
+  ctx.translate(mx, my)
+  ctx.scale(m.isBoss ? 2.2 : 1.8, m.isBoss ? 2.2 : 1.8)
+  if (m.isBoss) drawBoss(ctx, 0, 0)
+  else drawMonster(ctx, 0, 0)
+  ctx.restore()
+
+  if (b.effectTimer > 0) {
+    if (b.effect === 'attack') drawSlash(ctx, mx, my, FACE_ANGLE.down, 1 - b.effectTimer / 0.3)
+    else if (b.effect === 'fireball') drawFireball(ctx, mx, my - 10)
+  }
+
+  const barW = m.isBoss ? 160 : 110
+  const barY = my - (m.isBoss ? 80 : 60)
+  ctx.fillStyle = '#000'
+  ctx.fillRect(mx - barW / 2, barY, barW, 10)
+  ctx.fillStyle = m.isBoss ? '#d4af37' : '#4caf50'
+  ctx.fillRect(mx - barW / 2, barY, barW * Math.max(0, m.hp / m.maxHp), 10)
+  ctx.textAlign = 'center'
+  ctx.fillStyle = m.isBoss ? '#ffd700' : '#fff'
+  ctx.font = 'bold 13px sans-serif'
+  ctx.fillText(m.isBoss ? 'BOSS' : '몬스터', mx, barY - 8)
+
+  // message log
+  const logY = STAGE_HEIGHT * 0.58
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'
+  ctx.fillRect(20, logY, STAGE_WIDTH - 40, 46)
+  ctx.fillStyle = '#fff'
+  ctx.font = '14px sans-serif'
+  ctx.textAlign = 'center'
+  ctx.fillText(b.log, STAGE_WIDTH / 2, logY + 28)
+
+  // player hp + commands
+  const cmdY = logY + 62
+  ctx.fillStyle = '#000'
+  ctx.fillRect(20, cmdY, 160, 14)
+  ctx.fillStyle = p.hp / p.maxHp > 0.3 ? '#4caf50' : '#e53935'
+  ctx.fillRect(20, cmdY, 160 * (p.hp / p.maxHp), 14)
+  ctx.strokeStyle = '#fff'
+  ctx.strokeRect(20, cmdY, 160, 14)
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 11px sans-serif'
+  ctx.fillText(`용사 HP ${p.hp}/${p.maxHp}`, 24, cmdY + 11)
+
+  ctx.textAlign = 'center'
+  ctx.font = 'bold 14px sans-serif'
+  if (b.turn === 'player') {
+    ctx.fillStyle = '#4fd1ff'
+    ctx.fillText('어떻게 할까?', STAGE_WIDTH / 2, cmdY + 44)
+    ctx.font = '13px sans-serif'
+    ctx.fillStyle = '#fff'
+    ctx.fillText('[Space] 공격', STAGE_WIDTH / 2, cmdY + 68)
+    ctx.fillStyle = b.fireballReady ? '#ff9f43' : '#777'
+    ctx.fillText(b.fireballReady ? '[K] 파이어볼' : '[K] 파이어볼 (불가)', STAGE_WIDTH / 2, cmdY + 88)
+    ctx.fillStyle = '#fff'
+    ctx.fillText('[R] 도망', STAGE_WIDTH / 2, cmdY + 108)
+  } else {
+    ctx.fillStyle = '#aaa'
+    ctx.fillText('...', STAGE_WIDTH / 2, cmdY + 44)
+  }
 }
 
 function drawStats(ctx) {
@@ -271,16 +323,18 @@ function render() {
   const ctx = canvas.getContext('2d')
   ctx.clearRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT)
 
-  const cameraY = Math.max(0, Math.min(store.player.y - STAGE_HEIGHT / 2, WORLD_HEIGHT - STAGE_HEIGHT))
-
-  ctx.save()
-  ctx.translate(0, -cameraY)
-  drawMap(ctx)
-  drawPotions(ctx)
-  drawMonsters(ctx)
-  for (const f of store.fireballs) drawFireball(ctx, f.x, f.y)
-  drawPlayer(ctx)
-  ctx.restore()
+  if (store.battle.active) {
+    drawBattle(ctx)
+  } else {
+    const cameraY = Math.max(0, Math.min(store.player.y - STAGE_HEIGHT / 2, WORLD_HEIGHT - STAGE_HEIGHT))
+    ctx.save()
+    ctx.translate(0, -cameraY)
+    drawMap(ctx)
+    drawPotions(ctx)
+    drawMonsters(ctx)
+    drawPlayer(ctx)
+    ctx.restore()
+  }
 
   drawHud(ctx)
 
@@ -324,7 +378,7 @@ onUnmounted(() => {
   <div class="rpg-game">
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
     <div class="controls">
-      WASD/방향키 이동 · Space/J 공격 · K 파이어볼 · I 스탯 보기 · M 음악 켜기/끄기 · Esc 마을로 돌아가기 · 클리어/게임오버 시 아무 키나 눌러 마을로
+      WASD/방향키 이동 · 몬스터와 부딪히면 전투 시작 · 전투 중 Space 공격 · K 파이어볼 · R 도망 · I 스탯 보기 · M 음악 켜기/끄기 · Esc 마을로 돌아가기
     </div>
   </div>
 </template>
