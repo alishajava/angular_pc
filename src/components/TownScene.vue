@@ -2,12 +2,14 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useTownStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
+import { PLAYER_MAX_HP, PLAYER_BASE_ATTACK } from '../stores/rpg'
 import { unlockAudio, playPickup } from '../audio'
 import { drawHero, drawVillager, drawElder, drawGate } from '../sprites'
 
 const store = useTownStore()
 const flow = useFlowStore()
 const canvasRef = ref(null)
+const showStats = ref(false)
 
 const heldKeys = new Set()
 
@@ -21,6 +23,7 @@ function onKeyDown(e) {
   const key = e.key.toLowerCase()
   if ([...MOVE_UP, ...MOVE_DOWN, ...MOVE_LEFT, ...MOVE_RIGHT].includes(key)) e.preventDefault()
   heldKeys.add(key)
+  if (key === 'i') showStats.value = !showStats.value
   if (store.phase === 'intro') store.beginAdventure()
 }
 
@@ -99,6 +102,9 @@ function drawHud(ctx) {
   ctx.fillStyle = '#fff'
   ctx.font = 'bold 13px sans-serif'
   ctx.fillText(store.quest ? `임무: ${store.quest}` : '마을을 둘러보세요', 10, 20)
+  ctx.textAlign = 'right'
+  ctx.font = '11px sans-serif'
+  ctx.fillText('[I] 스탯 보기', STAGE_WIDTH - 10, 20)
 
   if (store.dialogueTimer > 0) {
     ctx.fillStyle = 'rgba(0,0,0,0.65)'
@@ -139,6 +145,42 @@ function drawIntro(ctx) {
   ctx.fillText('아무 키나 눌러 시작하세요', STAGE_WIDTH / 2, STAGE_HEIGHT / 2 + 90)
 }
 
+function drawStats(ctx) {
+  const totalAttack = PLAYER_BASE_ATTACK + store.bonusAttack
+  const totalMaxHp = PLAYER_MAX_HP + store.bonusMaxHp
+  const w = 260
+  const h = 150
+  const x = (STAGE_WIDTH - w) / 2
+  const y = (STAGE_HEIGHT - h) / 2
+
+  ctx.fillStyle = 'rgba(10, 10, 20, 0.9)'
+  ctx.beginPath()
+  ctx.roundRect(x, y, w, h, 8)
+  ctx.fill()
+  ctx.strokeStyle = '#4fd1ff'
+  ctx.stroke()
+
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#ffe066'
+  ctx.font = 'bold 16px sans-serif'
+  ctx.fillText('모험가 스탯', STAGE_WIDTH / 2, y + 26)
+
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#fff'
+  ctx.font = '13px sans-serif'
+  const lines = [
+    `공격력: ${PLAYER_BASE_ATTACK} (+${store.bonusAttack} 보너스) = ${totalAttack}`,
+    `최대 체력: ${PLAYER_MAX_HP} (+${store.bonusMaxHp} 보너스) = ${totalMaxHp}`,
+    `임무: ${store.quest || '아직 없음 (촌장에게 말을 걸어보세요)'}`,
+  ]
+  lines.forEach((line, i) => ctx.fillText(line, x + 16, y + 56 + i * 22))
+
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#aaa'
+  ctx.font = '11px sans-serif'
+  ctx.fillText('[I] 닫기', STAGE_WIDTH / 2, y + h - 12)
+}
+
 function render() {
   const canvas = canvasRef.value
   if (!canvas) return
@@ -154,6 +196,7 @@ function render() {
   drawInteractables(ctx)
   drawPlayer(ctx)
   drawHud(ctx)
+  if (showStats.value) drawStats(ctx)
 }
 
 onMounted(() => {
@@ -173,7 +216,7 @@ onUnmounted(() => {
   <div class="town-scene">
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
     <div class="controls">
-      WASD/방향키 이동 · 상점 주인·마을 사람·촌장에게 부딪히면 대화 · 던전 입구로 가면 입장
+      WASD/방향키 이동 · 상점 주인·마을 사람·촌장에게 부딪히면 대화 · 던전 입구로 가면 입장 · I 스탯 보기
     </div>
   </div>
 </template>

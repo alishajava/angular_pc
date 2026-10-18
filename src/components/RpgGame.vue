@@ -10,6 +10,7 @@ const store = useRpgStore()
 const town = useTownStore()
 const flow = useFlowStore()
 const canvasRef = ref(null)
+const showStats = ref(false)
 
 const heldKeys = new Set()
 const justPressed = new Set()
@@ -28,6 +29,7 @@ function onKeyDown(e) {
   }
   if (!heldKeys.has(key)) justPressed.add(key)
   heldKeys.add(key)
+  if (key === 'i') showStats.value = !showStats.value
   if (store.phase === 'gameOver' || store.phase === 'cleared') {
     town.enterTown()
     flow.goToTown()
@@ -188,6 +190,47 @@ function drawHud(ctx) {
     ctx.font = 'bold 18px sans-serif'
     ctx.fillText(store.toast, STAGE_WIDTH / 2, 50)
   }
+
+  ctx.textAlign = 'right'
+  ctx.fillStyle = '#aaa'
+  ctx.font = '11px sans-serif'
+  ctx.fillText('[I] 스탯 보기', STAGE_WIDTH - 10, STAGE_HEIGHT - 10)
+}
+
+function drawStats(ctx) {
+  const p = store.player
+  const w = 260
+  const h = 150
+  const x = (STAGE_WIDTH - w) / 2
+  const y = (STAGE_HEIGHT - h) / 2
+
+  ctx.fillStyle = 'rgba(10, 10, 20, 0.9)'
+  ctx.beginPath()
+  ctx.roundRect(x, y, w, h, 8)
+  ctx.fill()
+  ctx.strokeStyle = '#4fd1ff'
+  ctx.stroke()
+
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#ffe066'
+  ctx.font = 'bold 16px sans-serif'
+  ctx.fillText('모험가 스탯', STAGE_WIDTH / 2, y + 26)
+
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#fff'
+  ctx.font = '13px sans-serif'
+  const lines = [
+    `체력: ${p.hp} / ${p.maxHp}`,
+    `공격력: ${p.attack} (마을 보너스 +${town.bonusAttack})`,
+    `처치 수: ${store.kills}`,
+    `임무: ${town.quest || '없음'}`,
+  ]
+  lines.forEach((line, i) => ctx.fillText(line, x + 16, y + 52 + i * 22))
+
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#aaa'
+  ctx.font = '11px sans-serif'
+  ctx.fillText('[I] 닫기', STAGE_WIDTH / 2, y + h - 12)
 }
 
 function render() {
@@ -219,6 +262,8 @@ function render() {
       ctx.fillText(`KILLS ${store.kills} — 아무 키나 눌러 마을로`, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 - boxH / 2 + 82)
     }
   }
+
+  if (showStats.value) drawStats(ctx)
 }
 
 onMounted(() => {
@@ -238,7 +283,7 @@ onUnmounted(() => {
 <template>
   <div class="rpg-game">
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
-    <div class="controls">WASD/방향키 이동 · Space/J 공격 · 클리어/게임오버 시 아무 키나 눌러 마을로</div>
+    <div class="controls">WASD/방향키 이동 · Space/J 공격 · I 스탯 보기 · 클리어/게임오버 시 아무 키나 눌러 마을로</div>
   </div>
 </template>
 

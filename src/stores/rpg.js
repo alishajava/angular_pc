@@ -30,8 +30,8 @@ function tileCenter(col, row) {
 
 const PLAYER_HALF = 12
 const PLAYER_SPEED = 130
-const PLAYER_MAX_HP = 30
-const PLAYER_BASE_ATTACK = 8
+export const PLAYER_MAX_HP = 30
+export const PLAYER_BASE_ATTACK = 8
 const ATTACK_COOLDOWN = 0.4
 const ATTACK_RANGE = 28
 const ATTACK_WIDTH = 24
