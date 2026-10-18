@@ -44,15 +44,19 @@ const MONSTER_DETECT_RADIUS = 160
 const MONSTER_CONTACT_COOLDOWN = 0.8
 const MONSTER_MAX_HP = 14
 const MONSTER_DAMAGE = 6
+const BOSS_MAX_HP = 50
+const BOSS_DAMAGE = 11
 const POTION_HEAL = 15
 
 // Hand-placed spawn points (col, row) on floor tiles of MAP above.
+// The boss waits in the farthest corner from the entrance, per the
+// tavern keeper's rumor.
 const MONSTER_SPAWNS = [
   [4, 1],
   [9, 2],
   [2, 5],
   [6, 5],
-  [10, 7],
+  [10, 7, 'boss'],
 ]
 const POTION_SPAWNS = [
   [6, 3],
@@ -97,9 +101,18 @@ export const useRpgStore = defineStore('rpg', () => {
     player.invulnTimer = 0
 
     monsters.length = 0
-    for (const [col, row] of MONSTER_SPAWNS) {
+    for (const [col, row, kind] of MONSTER_SPAWNS) {
       const pos = tileCenter(col, row)
-      monsters.push({ ...pos, hp: MONSTER_MAX_HP, maxHp: MONSTER_MAX_HP, contactCooldown: 0 })
+      const isBoss = kind === 'boss'
+      const hp = isBoss ? BOSS_MAX_HP : MONSTER_MAX_HP
+      monsters.push({
+        ...pos,
+        hp,
+        maxHp: hp,
+        damage: isBoss ? BOSS_DAMAGE : MONSTER_DAMAGE,
+        isBoss,
+        contactCooldown: 0,
+      })
     }
     potions.length = 0
     for (const [col, row] of POTION_SPAWNS) {
@@ -204,7 +217,7 @@ export const useRpgStore = defineStore('rpg', () => {
         Math.abs(player.x - m.x) < PLAYER_HALF + MONSTER_HALF &&
         Math.abs(player.y - m.y) < PLAYER_HALF + MONSTER_HALF
       ) {
-        player.hp = Math.max(0, player.hp - MONSTER_DAMAGE)
+        player.hp = Math.max(0, player.hp - m.damage)
         player.invulnTimer = INVULN_DURATION
         m.contactCooldown = MONSTER_CONTACT_COOLDOWN
         if (player.hp <= 0) {

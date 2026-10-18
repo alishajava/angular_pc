@@ -79,18 +79,19 @@ export function drawElder(ctx, x, y) {
   ctx.restore()
 }
 
-export function drawMonster(ctx, x, y) {
+export function drawMonster(ctx, x, y, { scale = 1, bodyColor = '#5a9b4a', bellyColor = '#7fc26b' } = {}) {
   ctx.save()
   ctx.translate(x, y)
+  ctx.scale(scale, scale)
 
-  ctx.fillStyle = '#5a9b4a'
+  ctx.fillStyle = bodyColor
   block(ctx, -9, -2, 18, 13, 5)
 
-  ctx.fillStyle = '#7fc26b'
+  ctx.fillStyle = bellyColor
   block(ctx, -5, 2, 10, 8, 3)
 
   // ears
-  ctx.fillStyle = '#5a9b4a'
+  ctx.fillStyle = bodyColor
   ctx.beginPath()
   ctx.moveTo(-7, -9)
   ctx.lineTo(-13, -15)
@@ -131,6 +132,27 @@ export function drawMonster(ctx, x, y) {
   ctx.closePath()
   ctx.fill()
 
+  ctx.restore()
+}
+
+// A bigger, darker goblin chief wearing a crown.
+export function drawBoss(ctx, x, y) {
+  drawMonster(ctx, x, y, { scale: 1.8, bodyColor: '#6b3fa0', bellyColor: '#9a6fc2' })
+
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.scale(1.8, 1.8)
+  ctx.fillStyle = '#ffd700'
+  ctx.beginPath()
+  ctx.moveTo(-6, -15)
+  ctx.lineTo(-6, -21)
+  ctx.lineTo(-2, -16)
+  ctx.lineTo(0, -22)
+  ctx.lineTo(2, -16)
+  ctx.lineTo(6, -21)
+  ctx.lineTo(6, -15)
+  ctx.closePath()
+  ctx.fill()
   ctx.restore()
 }
 

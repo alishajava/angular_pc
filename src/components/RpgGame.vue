@@ -4,7 +4,7 @@ import { useRpgStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT, ATTACK_VISUAL
 import { useTownStore } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
 import { unlockAudio, playAttackSwing, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
-import { drawHero, drawMonster, drawSlash, FACE_ANGLE } from '../sprites'
+import { drawHero, drawMonster, drawBoss, drawSlash, FACE_ANGLE } from '../sprites'
 
 const store = useRpgStore()
 const town = useTownStore()
@@ -129,13 +129,21 @@ function drawPotions(ctx) {
 
 function drawMonsters(ctx) {
   for (const m of store.monsters) {
-    drawMonster(ctx, m.x, m.y)
+    if (m.isBoss) drawBoss(ctx, m.x, m.y)
+    else drawMonster(ctx, m.x, m.y)
 
-    const barW = 22
+    const barW = m.isBoss ? 40 : 22
+    const barY = m.isBoss ? -34 : -20
     ctx.fillStyle = '#000'
-    ctx.fillRect(m.x - barW / 2, m.y - 20, barW, 4)
-    ctx.fillStyle = '#4caf50'
-    ctx.fillRect(m.x - barW / 2, m.y - 20, barW * (m.hp / m.maxHp), 4)
+    ctx.fillRect(m.x - barW / 2, m.y + barY, barW, 4)
+    ctx.fillStyle = m.isBoss ? '#d4af37' : '#4caf50'
+    ctx.fillRect(m.x - barW / 2, m.y + barY, barW * (m.hp / m.maxHp), 4)
+    if (m.isBoss) {
+      ctx.textAlign = 'center'
+      ctx.fillStyle = '#ffd700'
+      ctx.font = 'bold 11px sans-serif'
+      ctx.fillText('BOSS', m.x, m.y + barY - 4)
+    }
   }
 }
 
