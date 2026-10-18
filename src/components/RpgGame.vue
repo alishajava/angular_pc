@@ -1,10 +1,10 @@
 <script setup>
 import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRpgStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT } from '../stores/rpg'
+import { useRpgStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT, ATTACK_VISUAL_DURATION } from '../stores/rpg'
 import { useTownStore } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
 import { unlockAudio, playAttackSwing, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver } from '../audio'
-import { drawHero, drawMonster } from '../sprites'
+import { drawHero, drawMonster, drawSlash, FACE_ANGLE } from '../sprites'
 
 const store = useRpgStore()
 const town = useTownStore()
@@ -146,16 +146,8 @@ function drawPlayer(ctx) {
   ctx.restore()
 
   if (p.swingTimer > 0) {
-    const w = 24
-    const len = 28
-    const dv = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[p.swingFacing]
-    const cx = p.x + dv[0] * (len / 2 + 10)
-    const cy = p.y + dv[1] * (len / 2 + 10)
-    ctx.fillStyle = 'rgba(255, 241, 118, 0.7)'
-    ctx.beginPath()
-    if (dv[0] !== 0) ctx.roundRect(cx - len / 2, cy - w / 2, len, w, 5)
-    else ctx.roundRect(cx - w / 2, cy - len / 2, w, len, 5)
-    ctx.fill()
+    const progress = 1 - p.swingTimer / ATTACK_VISUAL_DURATION
+    drawSlash(ctx, p.x, p.y, FACE_ANGLE[p.swingFacing], progress)
   }
 }
 

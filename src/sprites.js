@@ -153,3 +153,46 @@ export function drawGate(ctx, x, y) {
 
   ctx.restore()
 }
+
+// Facing direction -> angle (radians) the sword swing sweeps around.
+export const FACE_ANGLE = { right: 0, down: Math.PI / 2, left: Math.PI, up: -Math.PI / 2 }
+
+// A sword-slash swipe: a fading crescent trail plus a small blade that
+// travels along the arc as `progress` goes from 0 (swing start) to 1 (end).
+export function drawSlash(ctx, x, y, angle, progress) {
+  const innerR = 13
+  const outerR = 29
+  const sweep = Math.PI * 0.55
+  const start = angle - sweep / 2
+  const reveal = start + sweep * Math.min(1, progress * 1.6)
+  const alpha = progress < 0.7 ? 1 : Math.max(0, 1 - (progress - 0.7) / 0.3)
+
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.globalAlpha = alpha
+
+  ctx.fillStyle = '#f5f8ff'
+  ctx.beginPath()
+  ctx.arc(0, 0, outerR, start, reveal)
+  ctx.arc(0, 0, innerR, reveal, start, true)
+  ctx.closePath()
+  ctx.fill()
+
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.arc(0, 0, outerR, start, reveal)
+  ctx.stroke()
+
+  // the blade itself, riding the tip of the swing
+  ctx.translate(Math.cos(reveal) * 21, Math.sin(reveal) * 21)
+  ctx.rotate(reveal + Math.PI / 2)
+  ctx.fillStyle = '#e8ecf5'
+  ctx.fillRect(-2, -15, 4, 20)
+  ctx.fillStyle = '#c9a227'
+  ctx.fillRect(-6, 4, 12, 3)
+  ctx.fillStyle = '#5a3e1b'
+  ctx.fillRect(-2, 7, 4, 6)
+
+  ctx.restore()
+}
