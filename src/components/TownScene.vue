@@ -6,6 +6,7 @@ import { PLAYER_MAX_HP, PLAYER_BASE_ATTACK } from '../stores/rpg'
 import { unlockAudio, playPickup, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
 import { drawHero, drawVillager, drawElder, drawGate } from '../sprites'
 import { wrapText } from '../canvasText'
+import { hasSave } from '../save'
 
 const store = useTownStore()
 const flow = useFlowStore()
@@ -27,6 +28,8 @@ function onKeyDown(e) {
   if (key === 'i') showStats.value = !showStats.value
   if (key === 'm') toggleMusic()
   if (key === 'enter' && store.pendingPurchase) store.confirmPurchase()
+  if (key === 'p' && store.phase === 'town') store.saveProgress()
+  if (key === 'l') store.loadProgress()
   if (store.phase === 'intro') store.beginAdventure()
 }
 
@@ -112,7 +115,7 @@ function drawHud(ctx) {
   ctx.fillText(`${store.coins} 코인`, STAGE_WIDTH - 10, 20)
   ctx.font = '11px sans-serif'
   ctx.fillStyle = '#fff'
-  ctx.fillText(`[I] 스탯 보기 · [M] 음악 ${isMusicEnabled() ? 'ON' : 'OFF'}`, STAGE_WIDTH - 10, 36)
+  ctx.fillText(`[I] 스탯 · [M] 음악 ${isMusicEnabled() ? 'ON' : 'OFF'} · [P] 저장 · [L] 불러오기`, STAGE_WIDTH - 10, 36)
 
   if (store.dialogueTimer > 0) {
     ctx.textAlign = 'left'
@@ -155,6 +158,12 @@ function drawIntro(ctx) {
   ctx.fillStyle = '#4fd1ff'
   ctx.font = 'bold 15px sans-serif'
   ctx.fillText('아무 키나 눌러 시작하세요', STAGE_WIDTH / 2, STAGE_HEIGHT / 2 + 90)
+
+  if (hasSave()) {
+    ctx.fillStyle = '#ffe066'
+    ctx.font = '13px sans-serif'
+    ctx.fillText('[L] 저장된 모험 불러오기', STAGE_WIDTH / 2, STAGE_HEIGHT / 2 + 120)
+  }
 }
 
 function drawStats(ctx) {
@@ -230,7 +239,7 @@ onUnmounted(() => {
   <div class="town-scene">
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
     <div class="controls">
-      WASD/방향키 이동 · 상점 주인·마을 사람·촌장에게 부딪히면 대화 · 선술집은 안으로 입장 · 던전 입구로 가면 입장 · I 스탯 보기 · M 음악 켜기/끄기
+      WASD/방향키 이동 · 상점 주인·마을 사람·촌장에게 부딪히면 대화 · 선술집은 안으로 입장 · 던전 입구로 가면 입장 · I 스탯 보기 · M 음악 켜기/끄기 · P 저장 · L 불러오기
     </div>
   </div>
 </template>

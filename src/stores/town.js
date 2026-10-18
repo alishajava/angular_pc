@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { reactive, ref } from 'vue'
 import { parseGrid, canMoveTo, tileCenter } from '../mapUtils'
+import { writeSave, readSave } from '../save'
 
 // Fixed small town layout. '#' = wall, everything else is walkable floor.
 // Letters mark where an interactable stands (the tile itself is still floor).
@@ -104,6 +105,46 @@ export const useTownStore = defineStore('town', () => {
 
   function addCoins(amount) {
     coins.value += amount
+  }
+
+  function saveProgress() {
+    const visitedTypes = interactables.filter((it) => it.visited).map((it) => it.type)
+    const ok = writeSave({
+      coins: coins.value,
+      bonusAttack: bonusAttack.value,
+      bonusMaxHp: bonusMaxHp.value,
+      quest: quest.value,
+      questDone: questDone.value,
+      questRewarded: questRewarded.value,
+      visitedTypes,
+    })
+    dialogueSpeaker.value = '시스템'
+    dialogueText.value = ok ? '진행 상태를 저장했습니다.' : '저장에 실패했습니다.'
+    dialogueTimer.value = DIALOGUE_DURATION
+  }
+
+  function loadProgress() {
+    const data = readSave()
+    if (!data) {
+      dialogueSpeaker.value = '시스템'
+      dialogueText.value = '저장된 데이터가 없습니다.'
+      dialogueTimer.value = DIALOGUE_DURATION
+      return false
+    }
+    coins.value = data.coins ?? STARTING_COINS
+    bonusAttack.value = data.bonusAttack ?? 0
+    bonusMaxHp.value = data.bonusMaxHp ?? 0
+    quest.value = data.quest ?? ''
+    questDone.value = !!data.questDone
+    questRewarded.value = !!data.questRewarded
+    for (const it of interactables) {
+      it.visited = (data.visitedTypes || []).includes(it.type)
+    }
+    if (phase.value === 'intro') beginAdventure()
+    dialogueSpeaker.value = '시스템'
+    dialogueText.value = '진행 상태를 불러왔습니다.'
+    dialogueTimer.value = DIALOGUE_DURATION
+    return true
   }
 
   function completeQuest() {
@@ -233,6 +274,8 @@ export const useTownStore = defineStore('town', () => {
     addCoins,
     completeQuest,
     confirmPurchase,
+    saveProgress,
+    loadProgress,
     update,
   }
 })

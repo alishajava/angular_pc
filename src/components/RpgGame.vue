@@ -25,7 +25,7 @@ const FIREBALL_KEYS = ['k']
 function onKeyDown(e) {
   unlockAudio()
   const key = e.key.toLowerCase()
-  if ([...MOVE_UP, ...MOVE_DOWN, ...MOVE_LEFT, ...MOVE_RIGHT, ...ATTACK_KEYS, ...FIREBALL_KEYS, 'enter'].includes(key)) {
+  if ([...MOVE_UP, ...MOVE_DOWN, ...MOVE_LEFT, ...MOVE_RIGHT, ...ATTACK_KEYS, ...FIREBALL_KEYS, 'enter', 'escape'].includes(key)) {
     e.preventDefault()
   }
   if (!heldKeys.has(key)) justPressed.add(key)
@@ -33,6 +33,11 @@ function onKeyDown(e) {
   if (key === 'i') showStats.value = !showStats.value
   if (key === 'm') toggleMusic()
   if (store.phase === 'gameOver' || store.phase === 'cleared') {
+    town.enterTown()
+    flow.goToTown()
+    return
+  }
+  if (key === 'escape') {
     town.enterTown()
     flow.goToTown()
     return
@@ -216,7 +221,11 @@ function drawHud(ctx) {
   ctx.textAlign = 'right'
   ctx.fillStyle = '#aaa'
   ctx.font = '11px sans-serif'
-  ctx.fillText(`[I] 스탯 보기 · [M] 음악 ${isMusicEnabled() ? 'ON' : 'OFF'}`, STAGE_WIDTH - 10, STAGE_HEIGHT - 10)
+  ctx.fillText(
+    `[I] 스탯 · [M] 음악 ${isMusicEnabled() ? 'ON' : 'OFF'} · [Esc] 마을로`,
+    STAGE_WIDTH - 10,
+    STAGE_HEIGHT - 10,
+  )
 }
 
 function drawStats(ctx) {
@@ -315,7 +324,7 @@ onUnmounted(() => {
   <div class="rpg-game">
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
     <div class="controls">
-      WASD/방향키 이동 · Space/J 공격 · K 파이어볼 · I 스탯 보기 · M 음악 켜기/끄기 · 클리어/게임오버 시 아무 키나 눌러 마을로
+      WASD/방향키 이동 · Space/J 공격 · K 파이어볼 · I 스탯 보기 · M 음악 켜기/끄기 · Esc 마을로 돌아가기 · 클리어/게임오버 시 아무 키나 눌러 마을로
     </div>
   </div>
 </template>
