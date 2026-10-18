@@ -70,3 +70,51 @@ export function playGameOver() {
   const notes = [392, 349.23, 293.66, 196]
   notes.forEach((freq, i) => tone({ freq, duration: 0.3, type: 'sawtooth', volume: 0.14, delay: i * 0.18 }))
 }
+
+// Looping background music: a short melody + a low bass note under each
+// step, rescheduled note-by-note with setTimeout for as long as it's on.
+const MUSIC_MELODY = [
+  { freq: 392, bass: 196, dur: 0.45 },
+  { freq: 440, bass: 196, dur: 0.45 },
+  { freq: 523.25, bass: 261.63, dur: 0.45 },
+  { freq: 440, bass: 261.63, dur: 0.45 },
+  { freq: 392, bass: 174.61, dur: 0.45 },
+  { freq: 349.23, bass: 174.61, dur: 0.45 },
+  { freq: 392, bass: 196, dur: 0.9 },
+  { freq: 440, bass: 220, dur: 0.45 },
+  { freq: 523.25, bass: 220, dur: 0.45 },
+  { freq: 587.33, bass: 293.66, dur: 0.45 },
+  { freq: 523.25, bass: 293.66, dur: 0.45 },
+  { freq: 440, bass: 174.61, dur: 0.45 },
+  { freq: 392, bass: 174.61, dur: 0.45 },
+  { freq: 349.23, bass: 196, dur: 0.9 },
+]
+
+let musicEnabled = false
+let musicTimeoutId = null
+
+function scheduleMusic(index) {
+  if (!musicEnabled) return
+  const step = MUSIC_MELODY[index % MUSIC_MELODY.length]
+  tone({ freq: step.freq, duration: step.dur * 0.9, type: 'triangle', volume: 0.05 })
+  tone({ freq: step.bass, duration: step.dur * 0.9, type: 'sine', volume: 0.04 })
+  musicTimeoutId = setTimeout(() => scheduleMusic(index + 1), step.dur * 1000)
+}
+
+export function setMusicEnabled(enabled) {
+  musicEnabled = enabled
+  if (musicTimeoutId) {
+    clearTimeout(musicTimeoutId)
+    musicTimeoutId = null
+  }
+  if (musicEnabled) scheduleMusic(0)
+}
+
+export function toggleMusic() {
+  setMusicEnabled(!musicEnabled)
+  return musicEnabled
+}
+
+export function isMusicEnabled() {
+  return musicEnabled
+}

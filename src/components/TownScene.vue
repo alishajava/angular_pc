@@ -3,7 +3,7 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { useTownStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
 import { PLAYER_MAX_HP, PLAYER_BASE_ATTACK } from '../stores/rpg'
-import { unlockAudio, playPickup } from '../audio'
+import { unlockAudio, playPickup, toggleMusic, isMusicEnabled } from '../audio'
 import { drawHero, drawVillager, drawElder, drawGate } from '../sprites'
 import { wrapText } from '../canvasText'
 
@@ -25,6 +25,7 @@ function onKeyDown(e) {
   if ([...MOVE_UP, ...MOVE_DOWN, ...MOVE_LEFT, ...MOVE_RIGHT].includes(key)) e.preventDefault()
   heldKeys.add(key)
   if (key === 'i') showStats.value = !showStats.value
+  if (key === 'm') toggleMusic()
   if (store.phase === 'intro') store.beginAdventure()
 }
 
@@ -105,7 +106,7 @@ function drawHud(ctx) {
   ctx.fillText(store.quest ? `임무: ${store.quest}` : '마을을 둘러보세요', 10, 20)
   ctx.textAlign = 'right'
   ctx.font = '11px sans-serif'
-  ctx.fillText('[I] 스탯 보기', STAGE_WIDTH - 10, 20)
+  ctx.fillText(`[I] 스탯 보기 · [M] 음악 ${isMusicEnabled() ? 'ON' : 'OFF'}`, STAGE_WIDTH - 10, 20)
 
   if (store.dialogueTimer > 0) {
     ctx.textAlign = 'left'
@@ -221,7 +222,7 @@ onUnmounted(() => {
   <div class="town-scene">
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
     <div class="controls">
-      WASD/방향키 이동 · 상점 주인·마을 사람·촌장에게 부딪히면 대화 · 던전 입구로 가면 입장 · I 스탯 보기
+      WASD/방향키 이동 · 상점 주인·마을 사람·촌장에게 부딪히면 대화 · 던전 입구로 가면 입장 · I 스탯 보기 · M 음악 켜기/끄기
     </div>
   </div>
 </template>
