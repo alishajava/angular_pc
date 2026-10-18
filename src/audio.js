@@ -47,6 +47,11 @@ export function playAttackSwing() {
   tone({ freq: 500, freqEnd: 200, duration: 0.08, type: 'square', volume: 0.08 })
 }
 
+export function playFireball() {
+  tone({ freq: 220, freqEnd: 660, duration: 0.18, type: 'sawtooth', volume: 0.1 })
+  noiseBurst({ duration: 0.1, volume: 0.06 })
+}
+
 export function playMonsterDown() {
   noiseBurst({ duration: 0.18, volume: 0.15 })
   tone({ freq: 160, freqEnd: 40, duration: 0.18, type: 'sawtooth', volume: 0.08 })

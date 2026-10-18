@@ -218,3 +218,21 @@ export function drawSlash(ctx, x, y, angle, progress) {
 
   ctx.restore()
 }
+
+export function drawFireball(ctx, x, y) {
+  ctx.save()
+  const glow = ctx.createRadialGradient(x, y, 1, x, y, 14)
+  glow.addColorStop(0, '#fff3c4')
+  glow.addColorStop(0.5, '#ff9f43')
+  glow.addColorStop(1, 'rgba(255, 87, 34, 0)')
+  ctx.fillStyle = glow
+  ctx.beginPath()
+  ctx.arc(x, y, 14, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.fillStyle = '#fff3c4'
+  ctx.beginPath()
+  ctx.arc(x, y, 5, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}

@@ -38,6 +38,12 @@ const ATTACK_WIDTH = 24
 export const ATTACK_VISUAL_DURATION = 0.22
 const INVULN_DURATION = 0.6
 
+const FIREBALL_COOLDOWN = 1.2
+const FIREBALL_DAMAGE = 12
+const FIREBALL_SPEED = 260
+export const FIREBALL_RADIUS = 7
+const DIR_VEC = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }
+
 const MONSTER_HALF = 10
 const MONSTER_SPEED = 65
 const MONSTER_DETECT_RADIUS = 160
@@ -76,9 +82,11 @@ export const useRpgStore = defineStore('rpg', () => {
     swingTimer: 0,
     swingFacing: 'down',
     invulnTimer: 0,
+    fireballCooldown: 0,
   })
   const monsters = reactive([])
   const potions = reactive([])
+  const fireballs = reactive([])
   const kills = ref(0)
   const phase = ref('ready') // ready | playing | cleared | gameOver
   const message = ref('DUNGEON')
@@ -99,6 +107,8 @@ export const useRpgStore = defineStore('rpg', () => {
     player.attackCooldown = 0
     player.swingTimer = 0
     player.invulnTimer = 0
+    player.fireballCooldown = 0
+    fireballs.length = 0
 
     monsters.length = 0
     for (const [col, row, kind] of MONSTER_SPAWNS) {
@@ -147,6 +157,20 @@ export const useRpgStore = defineStore('rpg', () => {
     return monsters.some((m) => Math.hypot(x - m.x, y - m.y) < half + MONSTER_HALF)
   }
 
+  function damageMonster(index, amount) {
+    const m = monsters[index]
+    m.hp -= amount
+    if (m.hp <= 0) {
+      kills.value++
+      if (kills.value % 3 === 0) {
+        player.attack += 1
+        toast.value = 'ATTACK UP!'
+        toastTimer.value = 1.4
+      }
+      monsters.splice(index, 1)
+    }
+  }
+
   function update(dt, input) {
     if (phase.value === 'ready') {
       phaseTimer.value -= dt
@@ -186,18 +210,40 @@ export const useRpgStore = defineStore('rpg', () => {
       for (let i = monsters.length - 1; i >= 0; i--) {
         const m = monsters[i]
         if (overlapsHitbox(hitbox, m.x, m.y, MONSTER_HALF)) {
-          m.hp -= player.attack
-          if (m.hp <= 0) {
-            kills.value++
-            if (kills.value % 3 === 0) {
-              player.attack += 1
-              toast.value = 'ATTACK UP!'
-              toastTimer.value = 1.4
-            }
-            monsters.splice(i, 1)
-          }
+          damageMonster(i, player.attack)
         }
       }
+    }
+
+    if (player.fireballCooldown > 0) player.fireballCooldown -= dt
+    if (input.fireballPressed && player.fireballCooldown <= 0) {
+      player.fireballCooldown = FIREBALL_COOLDOWN
+      const dv = DIR_VEC[player.facing]
+      fireballs.push({
+        x: player.x + dv[0] * PLAYER_HALF,
+        y: player.y + dv[1] * PLAYER_HALF,
+        vx: dv[0] * FIREBALL_SPEED,
+        vy: dv[1] * FIREBALL_SPEED,
+      })
+    }
+    for (let i = fireballs.length - 1; i >= 0; i--) {
+      const f = fireballs[i]
+      f.x += f.vx * dt
+      f.y += f.vy * dt
+      if (!canMoveTo(f.x, f.y, FIREBALL_RADIUS)) {
+        fireballs.splice(i, 1)
+        continue
+      }
+      let hit = false
+      for (let j = monsters.length - 1; j >= 0; j--) {
+        const m = monsters[j]
+        if (Math.hypot(f.x - m.x, f.y - m.y) < FIREBALL_RADIUS + MONSTER_HALF) {
+          damageMonster(j, FIREBALL_DAMAGE)
+          hit = true
+          break
+        }
+      }
+      if (hit) fireballs.splice(i, 1)
     }
 
     for (const m of monsters) {
@@ -250,6 +296,7 @@ export const useRpgStore = defineStore('rpg', () => {
     player,
     monsters,
     potions,
+    fireballs,
     kills,
     phase,
     message,

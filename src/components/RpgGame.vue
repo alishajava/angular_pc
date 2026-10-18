@@ -3,8 +3,8 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRpgStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT, ATTACK_VISUAL_DURATION } from '../stores/rpg'
 import { useTownStore } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
-import { unlockAudio, playAttackSwing, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
-import { drawHero, drawMonster, drawBoss, drawSlash, FACE_ANGLE } from '../sprites'
+import { unlockAudio, playAttackSwing, playFireball, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
+import { drawHero, drawMonster, drawBoss, drawSlash, drawFireball, FACE_ANGLE } from '../sprites'
 
 const store = useRpgStore()
 const town = useTownStore()
@@ -20,11 +20,12 @@ const MOVE_DOWN = ['s', 'arrowdown']
 const MOVE_LEFT = ['a', 'arrowleft']
 const MOVE_RIGHT = ['d', 'arrowright']
 const ATTACK_KEYS = [' ', 'spacebar', 'j']
+const FIREBALL_KEYS = ['k']
 
 function onKeyDown(e) {
   unlockAudio()
   const key = e.key.toLowerCase()
-  if ([...MOVE_UP, ...MOVE_DOWN, ...MOVE_LEFT, ...MOVE_RIGHT, ...ATTACK_KEYS, 'enter'].includes(key)) {
+  if ([...MOVE_UP, ...MOVE_DOWN, ...MOVE_LEFT, ...MOVE_RIGHT, ...ATTACK_KEYS, ...FIREBALL_KEYS, 'enter'].includes(key)) {
     e.preventDefault()
   }
   if (!heldKeys.has(key)) justPressed.add(key)
@@ -44,6 +45,7 @@ function onKeyUp(e) {
 
 function buildInput() {
   const attackPressed = ATTACK_KEYS.some((k) => justPressed.has(k))
+  const fireballPressed = FIREBALL_KEYS.some((k) => justPressed.has(k))
   justPressed.clear()
   return {
     up: MOVE_UP.some((k) => heldKeys.has(k)),
@@ -51,6 +53,7 @@ function buildInput() {
     left: MOVE_LEFT.some((k) => heldKeys.has(k)),
     right: MOVE_RIGHT.some((k) => heldKeys.has(k)),
     attackPressed,
+    fireballPressed,
   }
 }
 
@@ -58,6 +61,12 @@ watch(
   () => store.player.swingTimer,
   (n, o) => {
     if (n > o) playAttackSwing()
+  },
+)
+watch(
+  () => store.player.fireballCooldown,
+  (n, o) => {
+    if (n > o) playFireball()
   },
 )
 watch(
@@ -178,11 +187,20 @@ function drawHud(ctx) {
   ctx.font = 'bold 14px sans-serif'
   ctx.fillText(`ATK ${p.attack}  KILLS ${store.kills}`, STAGE_WIDTH - 10, 24)
 
+  ctx.textAlign = 'left'
+  ctx.font = '11px sans-serif'
+  ctx.fillStyle = p.fireballCooldown <= 0 ? '#ff9f43' : '#777'
+  ctx.fillText(
+    p.fireballCooldown <= 0 ? '[K] 파이어볼 준비' : `[K] 파이어볼 ${p.fireballCooldown.toFixed(1)}s`,
+    16,
+    38,
+  )
+
   if (town.quest) {
     ctx.textAlign = 'left'
     ctx.font = '11px sans-serif'
     ctx.fillStyle = '#ffe066'
-    ctx.fillText(`임무: ${town.quest}`, 16, 40)
+    ctx.fillText(`임무: ${town.quest}`, 16, 54)
   }
 
   if (store.toastTimer > 0) {
@@ -243,6 +261,7 @@ function render() {
   drawMap(ctx)
   drawPotions(ctx)
   drawMonsters(ctx)
+  for (const f of store.fireballs) drawFireball(ctx, f.x, f.y)
   drawPlayer(ctx)
   drawHud(ctx)
 
@@ -285,7 +304,9 @@ onUnmounted(() => {
 <template>
   <div class="rpg-game">
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
-    <div class="controls">WASD/방향키 이동 · Space/J 공격 · I 스탯 보기 · M 음악 켜기/끄기 · 클리어/게임오버 시 아무 키나 눌러 마을로</div>
+    <div class="controls">
+      WASD/방향키 이동 · Space/J 공격 · K 파이어볼 · I 스탯 보기 · M 음악 켜기/끄기 · 클리어/게임오버 시 아무 키나 눌러 마을로
+    </div>
   </div>
 </template>
 
