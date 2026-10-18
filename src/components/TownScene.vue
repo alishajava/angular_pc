@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { useTownStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
 import { unlockAudio, playPickup } from '../audio'
+import { drawHero, drawVillager, drawElder, drawGate } from '../sprites'
 
 const store = useTownStore()
 const flow = useFlowStore()
@@ -55,14 +56,14 @@ function loop(time) {
   rafId = requestAnimationFrame(loop)
 }
 
-const TYPE_LABEL = {
-  weapon: ['W', '#e67e22'],
-  herb: ['H', '#2ecc71'],
-  tavern: ['T', '#9b59b6'],
-  villager1: ['N', '#95a5a6'],
-  villager2: ['N', '#95a5a6'],
-  elder: ['E', '#f1c40f'],
-  gate: ['▼', '#4fd1ff'],
+const TYPE_INFO = {
+  weapon: { label: '대장장이', outfit: '#e67e22' },
+  herb: { label: '약초상', outfit: '#2ecc71' },
+  tavern: { label: '선술집', outfit: '#9b59b6' },
+  villager1: { label: '마을 사람', outfit: '#8c9bab', hair: '#3a2f20' },
+  villager2: { label: '마을 사람', outfit: '#b08968', hair: '#1c1c1c' },
+  elder: { label: '촌장' },
+  gate: { label: '던전 입구' },
 }
 
 function drawMap(ctx) {
@@ -76,29 +77,21 @@ function drawMap(ctx) {
 
 function drawInteractables(ctx) {
   for (const item of store.interactables) {
-    const [label, color] = TYPE_LABEL[item.type]
-    ctx.fillStyle = color
-    ctx.beginPath()
-    ctx.roundRect(item.x - 14, item.y - 14, 28, 28, 6)
-    ctx.fill()
+    const info = TYPE_INFO[item.type]
+    if (item.type === 'gate') drawGate(ctx, item.x, item.y)
+    else if (item.type === 'elder') drawElder(ctx, item.x, item.y)
+    else drawVillager(ctx, item.x, item.y, info.outfit, info.hair)
+
     ctx.fillStyle = '#fff'
-    ctx.font = 'bold 14px sans-serif'
+    ctx.font = 'bold 11px sans-serif'
     ctx.textAlign = 'center'
-    ctx.fillText(label, item.x, item.y + 5)
+    ctx.fillText(info.label, item.x, item.y + 26)
   }
 }
 
 function drawPlayer(ctx) {
   const p = store.player
-  ctx.fillStyle = '#4fd1ff'
-  ctx.beginPath()
-  ctx.arc(p.x, p.y, 12, 0, Math.PI * 2)
-  ctx.fill()
-  const dv = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[p.facing]
-  ctx.fillStyle = '#fff'
-  ctx.beginPath()
-  ctx.arc(p.x + dv[0] * 7, p.y + dv[1] * 7, 3, 0, Math.PI * 2)
-  ctx.fill()
+  drawHero(ctx, p.x, p.y, p.facing)
 }
 
 function drawHud(ctx) {
@@ -180,7 +173,7 @@ onUnmounted(() => {
   <div class="town-scene">
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
     <div class="controls">
-      WASD/방향키 이동 · 상점(W/H/T)·주민(N)·촌장(E)에 부딪히면 대화 · 던전 입구(▼)로 가면 입장
+      WASD/방향키 이동 · 상점 주인·마을 사람·촌장에게 부딪히면 대화 · 던전 입구로 가면 입장
     </div>
   </div>
 </template>

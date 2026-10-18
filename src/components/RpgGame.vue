@@ -4,6 +4,7 @@ import { useRpgStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT } from '../sto
 import { useTownStore } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
 import { unlockAudio, playAttackSwing, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver } from '../audio'
+import { drawHero, drawMonster } from '../sprites'
 
 const store = useRpgStore()
 const town = useTownStore()
@@ -125,10 +126,7 @@ function drawPotions(ctx) {
 
 function drawMonsters(ctx) {
   for (const m of store.monsters) {
-    ctx.fillStyle = '#ff6b6b'
-    ctx.beginPath()
-    ctx.arc(m.x, m.y, 10, 0, Math.PI * 2)
-    ctx.fill()
+    drawMonster(ctx, m.x, m.y)
 
     const barW = 22
     ctx.fillStyle = '#000'
@@ -142,16 +140,7 @@ function drawPlayer(ctx) {
   const p = store.player
   ctx.save()
   ctx.globalAlpha = p.invulnTimer > 0 ? 0.55 : 1
-  ctx.fillStyle = '#4fd1ff'
-  ctx.beginPath()
-  ctx.arc(p.x, p.y, 12, 0, Math.PI * 2)
-  ctx.fill()
-
-  const dirVec = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[p.facing]
-  ctx.fillStyle = '#fff'
-  ctx.beginPath()
-  ctx.arc(p.x + dirVec[0] * 7, p.y + dirVec[1] * 7, 3, 0, Math.PI * 2)
-  ctx.fill()
+  drawHero(ctx, p.x, p.y, p.facing)
   ctx.restore()
 
   if (p.swingTimer > 0) {
