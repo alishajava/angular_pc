@@ -1,9 +1,13 @@
 <script setup>
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRpgStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT } from '../stores/rpg'
+import { useTownStore } from '../stores/town'
+import { useFlowStore } from '../stores/flow'
 import { unlockAudio, playAttackSwing, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver } from '../audio'
 
 const store = useRpgStore()
+const town = useTownStore()
+const flow = useFlowStore()
 const canvasRef = ref(null)
 
 const heldKeys = new Set()
@@ -23,8 +27,9 @@ function onKeyDown(e) {
   }
   if (!heldKeys.has(key)) justPressed.add(key)
   heldKeys.add(key)
-  if (store.phase === 'intro' || store.phase === 'gameOver' || store.phase === 'cleared') {
-    store.startGame()
+  if (store.phase === 'gameOver' || store.phase === 'cleared') {
+    town.enterTown()
+    flow.goToTown()
     return
   }
 }
@@ -181,6 +186,13 @@ function drawHud(ctx) {
   ctx.font = 'bold 14px sans-serif'
   ctx.fillText(`ATK ${p.attack}  KILLS ${store.kills}`, STAGE_WIDTH - 10, 24)
 
+  if (town.quest) {
+    ctx.textAlign = 'left'
+    ctx.font = '11px sans-serif'
+    ctx.fillStyle = '#ffe066'
+    ctx.fillText(`임무: ${town.quest}`, 16, 40)
+  }
+
   if (store.toastTimer > 0) {
     ctx.textAlign = 'center'
     ctx.fillStyle = '#ffe066'
@@ -189,43 +201,11 @@ function drawHud(ctx) {
   }
 }
 
-const STORY_LINES = [
-  '오랫동안 봉인되어 있던 던전이 다시 열렸다.',
-  '마을을 위협하는 몬스터들이 쏟아져 나오고 있다.',
-  '마지막 남은 모험가인 당신은 던전 깊숙이 들어가',
-  '몬스터들을 물리치고 평화를 되찾아야 한다.',
-]
-
-function drawIntro(ctx) {
-  ctx.fillStyle = '#0d0a1a'
-  ctx.fillRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT)
-
-  ctx.textAlign = 'center'
-  ctx.fillStyle = '#ffe066'
-  ctx.font = 'bold 28px sans-serif'
-  ctx.fillText('던전의 봉인', STAGE_WIDTH / 2, STAGE_HEIGHT / 2 - 90)
-
-  ctx.fillStyle = '#ddd'
-  ctx.font = '15px sans-serif'
-  STORY_LINES.forEach((line, i) => {
-    ctx.fillText(line, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 - 30 + i * 24)
-  })
-
-  ctx.fillStyle = '#4fd1ff'
-  ctx.font = 'bold 15px sans-serif'
-  ctx.fillText('아무 키나 눌러 모험을 시작하세요', STAGE_WIDTH / 2, STAGE_HEIGHT / 2 + 90)
-}
-
 function render() {
   const canvas = canvasRef.value
   if (!canvas) return
   const ctx = canvas.getContext('2d')
   ctx.clearRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT)
-
-  if (store.phase === 'intro') {
-    drawIntro(ctx)
-    return
-  }
 
   drawMap(ctx)
   drawPotions(ctx)
@@ -247,12 +227,13 @@ function render() {
       ctx.fillStyle = '#ffe066'
       ctx.fillText(store.ending, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 - boxH / 2 + 58)
       ctx.fillStyle = '#fff'
-      ctx.fillText(`KILLS ${store.kills} — 아무 키나 눌러 재시작`, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 - boxH / 2 + 82)
+      ctx.fillText(`KILLS ${store.kills} — 아무 키나 눌러 마을로`, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 - boxH / 2 + 82)
     }
   }
 }
 
 onMounted(() => {
+  store.startGame()
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   rafId = requestAnimationFrame(loop)
@@ -268,7 +249,7 @@ onUnmounted(() => {
 <template>
   <div class="rpg-game">
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
-    <div class="controls">WASD/방향키 이동 · Space/J 공격 · 클리어/게임오버 시 아무 키나 눌러 재시작</div>
+    <div class="controls">WASD/방향키 이동 · Space/J 공격 · 클리어/게임오버 시 아무 키나 눌러 마을로</div>
   </div>
 </template>
 

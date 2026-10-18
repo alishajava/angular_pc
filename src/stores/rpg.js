@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
 import { reactive, ref } from 'vue'
+import { parseGrid, canMoveTo as canMoveToTile, tileCenter as tileCenterOf } from '../mapUtils'
+import { useTownStore } from './town'
 
 // Fixed small dungeon layout. '#' = wall, '.' = floor.
 const MAP = [
@@ -21,9 +23,9 @@ export const ROWS = MAP.length
 export const STAGE_WIDTH = COLS * TILE
 export const STAGE_HEIGHT = ROWS * TILE
 
-const grid = MAP.map((row) => [...row].map((ch) => (ch === '#' ? 1 : 0)))
+const grid = parseGrid(MAP)
 function tileCenter(col, row) {
-  return { x: col * TILE + TILE / 2, y: row * TILE + TILE / 2 }
+  return tileCenterOf(col, row, TILE)
 }
 
 const PLAYER_HALF = 12
@@ -74,7 +76,7 @@ export const useRpgStore = defineStore('rpg', () => {
   const monsters = reactive([])
   const potions = reactive([])
   const kills = ref(0)
-  const phase = ref('intro') // intro | ready | playing | cleared | gameOver
+  const phase = ref('ready') // ready | playing | cleared | gameOver
   const message = ref('DUNGEON')
   const phaseTimer = ref(1.0)
   const toast = ref('')
@@ -82,13 +84,14 @@ export const useRpgStore = defineStore('rpg', () => {
   const ending = ref('')
 
   function startGame() {
+    const town = useTownStore()
     const start = tileCenter(...PLAYER_START)
     player.x = start.x
     player.y = start.y
     player.facing = 'down'
-    player.hp = PLAYER_MAX_HP
-    player.maxHp = PLAYER_MAX_HP
-    player.attack = PLAYER_BASE_ATTACK
+    player.maxHp = PLAYER_MAX_HP + town.bonusMaxHp
+    player.hp = player.maxHp
+    player.attack = PLAYER_BASE_ATTACK + town.bonusAttack
     player.attackCooldown = 0
     player.swingTimer = 0
     player.invulnTimer = 0
@@ -111,19 +114,7 @@ export const useRpgStore = defineStore('rpg', () => {
   }
 
   function canMoveTo(x, y, half) {
-    const corners = [
-      [x - half, y - half],
-      [x + half, y - half],
-      [x - half, y + half],
-      [x + half, y + half],
-    ]
-    for (const [cx, cy] of corners) {
-      const col = Math.floor(cx / TILE)
-      const row = Math.floor(cy / TILE)
-      if (row < 0 || row >= ROWS || col < 0 || col >= COLS) return false
-      if (grid[row][col] === 1) return false
-    }
-    return true
+    return canMoveToTile(grid, COLS, ROWS, TILE, x, y, half)
   }
 
   function attackHitbox(x, y, facing) {
@@ -144,7 +135,6 @@ export const useRpgStore = defineStore('rpg', () => {
   }
 
   function update(dt, input) {
-    if (phase.value === 'intro') return
     if (phase.value === 'ready') {
       phaseTimer.value -= dt
       if (phaseTimer.value <= 0) phase.value = 'playing'
