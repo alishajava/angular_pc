@@ -17,7 +17,7 @@ const MAP = [
   '############',
 ]
 
-export const TILE = 40
+export const TILE = 52
 export const COLS = MAP[0].length
 export const ROWS = MAP.length
 export const STAGE_WIDTH = COLS * TILE

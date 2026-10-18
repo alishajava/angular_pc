@@ -5,6 +5,7 @@ import { useFlowStore } from '../stores/flow'
 import { PLAYER_MAX_HP, PLAYER_BASE_ATTACK } from '../stores/rpg'
 import { unlockAudio, playPickup } from '../audio'
 import { drawHero, drawVillager, drawElder, drawGate } from '../sprites'
+import { wrapText } from '../canvasText'
 
 const store = useTownStore()
 const flow = useFlowStore()
@@ -107,14 +108,18 @@ function drawHud(ctx) {
   ctx.fillText('[I] 스탯 보기', STAGE_WIDTH - 10, 20)
 
   if (store.dialogueTimer > 0) {
-    ctx.fillStyle = 'rgba(0,0,0,0.65)'
-    ctx.fillRect(0, STAGE_HEIGHT - 56, STAGE_WIDTH, 56)
+    ctx.textAlign = 'left'
+    ctx.font = '13px sans-serif'
+    const lines = wrapText(ctx, store.dialogueText, STAGE_WIDTH - 24)
+    const boxH = 32 + lines.length * 18
+    ctx.fillStyle = 'rgba(0,0,0,0.7)'
+    ctx.fillRect(0, STAGE_HEIGHT - boxH, STAGE_WIDTH, boxH)
     ctx.fillStyle = '#ffe066'
     ctx.font = 'bold 13px sans-serif'
-    ctx.fillText(store.dialogueSpeaker, 12, STAGE_HEIGHT - 34)
+    ctx.fillText(store.dialogueSpeaker, 12, STAGE_HEIGHT - boxH + 18)
     ctx.fillStyle = '#fff'
     ctx.font = '13px sans-serif'
-    ctx.fillText(store.dialogueText, 12, STAGE_HEIGHT - 14)
+    lines.forEach((line, i) => ctx.fillText(line, 12, STAGE_HEIGHT - boxH + 38 + i * 18))
   }
 }
 
