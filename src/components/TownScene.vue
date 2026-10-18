@@ -26,6 +26,7 @@ function onKeyDown(e) {
   heldKeys.add(key)
   if (key === 'i') showStats.value = !showStats.value
   if (key === 'm') toggleMusic()
+  if (key === 'enter' && store.pendingPurchase) store.confirmPurchase()
   if (store.phase === 'intro') store.beginAdventure()
 }
 
@@ -106,8 +107,12 @@ function drawHud(ctx) {
   ctx.font = 'bold 13px sans-serif'
   ctx.fillText(store.quest ? `임무: ${store.quest}` : '마을을 둘러보세요', 10, 20)
   ctx.textAlign = 'right'
+  ctx.font = 'bold 13px sans-serif'
+  ctx.fillStyle = '#ffd700'
+  ctx.fillText(`${store.coins} 코인`, STAGE_WIDTH - 10, 20)
   ctx.font = '11px sans-serif'
-  ctx.fillText(`[I] 스탯 보기 · [M] 음악 ${isMusicEnabled() ? 'ON' : 'OFF'}`, STAGE_WIDTH - 10, 20)
+  ctx.fillStyle = '#fff'
+  ctx.fillText(`[I] 스탯 보기 · [M] 음악 ${isMusicEnabled() ? 'ON' : 'OFF'}`, STAGE_WIDTH - 10, 36)
 
   if (store.dialogueTimer > 0) {
     ctx.textAlign = 'left'
@@ -155,8 +160,8 @@ function drawIntro(ctx) {
 function drawStats(ctx) {
   const totalAttack = PLAYER_BASE_ATTACK + store.bonusAttack
   const totalMaxHp = PLAYER_MAX_HP + store.bonusMaxHp
-  const w = 260
-  const h = 150
+  const w = 280
+  const h = 170
   const x = (STAGE_WIDTH - w) / 2
   const y = (STAGE_HEIGHT - h) / 2
 
@@ -178,6 +183,7 @@ function drawStats(ctx) {
   const lines = [
     `공격력: ${PLAYER_BASE_ATTACK} (+${store.bonusAttack} 보너스) = ${totalAttack}`,
     `최대 체력: ${PLAYER_MAX_HP} (+${store.bonusMaxHp} 보너스) = ${totalMaxHp}`,
+    `코인: ${store.coins}`,
     `임무: ${store.quest || '아직 없음 (촌장에게 말을 걸어보세요)'}`,
   ]
   lines.forEach((line, i) => ctx.fillText(line, x + 16, y + 56 + i * 22))

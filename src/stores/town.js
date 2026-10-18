@@ -28,10 +28,16 @@ const PLAYER_START = [1, 1]
 const PLAYER_HALF = 12
 const PLAYER_SPEED = 130
 const DIALOGUE_DURATION = 3.2
+const PURCHASE_DIALOGUE_DURATION = 4.5
+
+export const STARTING_COINS = 20
+export const QUEST_REWARD = 50
+
+const SHOP_PRICES = { weapon: 15, herb: 15 }
 
 const DIALOGUE = {
-  weapon: { speaker: '대장장이', text: '이 검을 받아가게! (공격력 +5)' },
-  herb: { speaker: '약초상', text: '특제 비약일세, 마셔두게! (최대 체력 +10)' },
+  weapon: { speaker: '대장장이', offer: '이 검을 받아가게! 공격력이 +5 올라간다네.' },
+  herb: { speaker: '약초상', offer: '특제 비약일세! 최대 체력이 +10 늘어난다네.' },
   villager1: { speaker: '마을 사람', text: '요즘 몬스터들이 자꾸 마을 근처를 어슬렁거려요...' },
   villager2: { speaker: '마을 사람', text: '조심하세요, 던전은 위험하다고 들었어요.' },
   elder: { speaker: '촌장', text: '던전의 몬스터를 모두 물리치고 평화를 되찾아주게. 이것이 자네의 임무일세.' },
@@ -69,14 +75,17 @@ export const useTownStore = defineStore('town', () => {
   const player = reactive({ x: 0, y: 0, facing: 'down' })
   const interactables = reactive(buildInteractables())
 
+  const coins = ref(STARTING_COINS)
   const quest = ref('')
   const questDone = ref(false)
+  const questRewarded = ref(false)
   const bonusAttack = ref(0)
   const bonusMaxHp = ref(0)
 
   const dialogueSpeaker = ref('')
   const dialogueText = ref('')
   const dialogueTimer = ref(0)
+  const pendingPurchase = ref(null) // 'weapon' | 'herb' | null
 
   function enterTown() {
     const start = tileCenter(...PLAYER_START, TILE)
@@ -84,6 +93,7 @@ export const useTownStore = defineStore('town', () => {
     player.y = start.y
     player.facing = 'down'
     dialogueTimer.value = 0
+    pendingPurchase.value = null
     for (const it of interactables) it.touching = false
   }
 
@@ -92,21 +102,70 @@ export const useTownStore = defineStore('town', () => {
     enterTown()
   }
 
+  function addCoins(amount) {
+    coins.value += amount
+  }
+
   function completeQuest() {
     if (!quest.value) return
     questDone.value = true
     quest.value = '완료: 던전의 몬스터를 모두 처치했다 (촌장에게 알리러 가자)'
   }
 
+  function confirmPurchase() {
+    const type = pendingPurchase.value
+    if (!type) return
+    pendingPurchase.value = null
+    const price = SHOP_PRICES[type]
+    const item = interactables.find((it) => it.type === type)
+    if (coins.value < price) {
+      dialogueText.value = `코인이 부족하다네... (${price}코인 필요, 보유 ${coins.value}코인)`
+      dialogueTimer.value = DIALOGUE_DURATION
+      return
+    }
+    coins.value -= price
+    item.visited = true
+    if (type === 'weapon') bonusAttack.value += 5
+    if (type === 'herb') bonusMaxHp.value += 10
+    dialogueSpeaker.value = DIALOGUE[type].speaker
+    dialogueText.value = '구매 완료! 고맙네.'
+    dialogueTimer.value = DIALOGUE_DURATION
+  }
+
   function triggerInteraction(item) {
     if (item.type === 'gate') return 'enterDungeon'
     if (item.type === 'tavern') return 'enterTavern'
 
-    if (item.type === 'elder' && questDone.value) {
-      dialogueSpeaker.value = '촌장'
-      dialogueText.value = '정말 고맙네! 자네 덕분에 마을에 평화가 돌아왔어. 자네는 진정한 영웅일세.'
-      dialogueTimer.value = DIALOGUE_DURATION
-      quest.value = ''
+    if (item.type === 'elder') {
+      if (questDone.value && !questRewarded.value) {
+        questRewarded.value = true
+        coins.value += QUEST_REWARD
+        dialogueSpeaker.value = '촌장'
+        dialogueText.value = `정말 고맙네! 포상으로 ${QUEST_REWARD}코인을 주겠네. 자네는 진정한 영웅일세.`
+        dialogueTimer.value = DIALOGUE_DURATION
+        quest.value = ''
+        return null
+      }
+      if (questRewarded.value) {
+        dialogueSpeaker.value = '촌장'
+        dialogueText.value = '수고했네, 모험가 양반. 마을에 평화가 찾아왔어.'
+        dialogueTimer.value = DIALOGUE_DURATION
+        return null
+      }
+    }
+
+    if (item.type === 'weapon' || item.type === 'herb') {
+      if (item.visited) {
+        dialogueSpeaker.value = DIALOGUE[item.type].speaker
+        dialogueText.value = '이미 구매했다네. 또 올 텐가?'
+        dialogueTimer.value = DIALOGUE_DURATION
+        return null
+      }
+      const price = SHOP_PRICES[item.type]
+      dialogueSpeaker.value = DIALOGUE[item.type].speaker
+      dialogueText.value = `${DIALOGUE[item.type].offer} 가격은 ${price}코인일세. (보유 ${coins.value}코인) [Enter] 구매`
+      dialogueTimer.value = PURCHASE_DIALOGUE_DURATION
+      pendingPurchase.value = item.type
       return null
     }
 
@@ -114,18 +173,15 @@ export const useTownStore = defineStore('town', () => {
     dialogueSpeaker.value = line.speaker
     dialogueText.value = line.text
     dialogueTimer.value = DIALOGUE_DURATION
-    if (!item.visited) {
-      item.visited = true
-      if (item.type === 'weapon') bonusAttack.value += 5
-      if (item.type === 'herb') bonusMaxHp.value += 10
-      if (item.type === 'elder') quest.value = '던전의 몬스터를 모두 처치하라'
-    }
     return null
   }
 
   function update(dt, input) {
     if (phase.value !== 'town') return
-    if (dialogueTimer.value > 0) dialogueTimer.value -= dt
+    if (dialogueTimer.value > 0) {
+      dialogueTimer.value -= dt
+      if (dialogueTimer.value <= 0) pendingPurchase.value = null
+    }
 
     let dx = 0
     let dy = 0
@@ -163,6 +219,7 @@ export const useTownStore = defineStore('town', () => {
     phase,
     player,
     interactables,
+    coins,
     quest,
     questDone,
     bonusAttack,
@@ -170,9 +227,12 @@ export const useTownStore = defineStore('town', () => {
     dialogueSpeaker,
     dialogueText,
     dialogueTimer,
+    pendingPurchase,
     beginAdventure,
     enterTown,
+    addCoins,
     completeQuest,
+    confirmPurchase,
     update,
   }
 })

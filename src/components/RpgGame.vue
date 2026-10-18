@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRpgStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT, ATTACK_VISUAL_DURATION } from '../stores/rpg'
+import { useRpgStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT, WORLD_HEIGHT, ATTACK_VISUAL_DURATION } from '../stores/rpg'
 import { useTownStore } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
 import { unlockAudio, playAttackSwing, playFireball, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
@@ -186,6 +186,9 @@ function drawHud(ctx) {
   ctx.textAlign = 'right'
   ctx.font = 'bold 14px sans-serif'
   ctx.fillText(`ATK ${p.attack}  KILLS ${store.kills}`, STAGE_WIDTH - 10, 24)
+  ctx.font = 'bold 13px sans-serif'
+  ctx.fillStyle = '#ffd700'
+  ctx.fillText(`${town.coins} 코인`, STAGE_WIDTH - 10, 40)
 
   ctx.textAlign = 'left'
   ctx.font = '11px sans-serif'
@@ -218,8 +221,8 @@ function drawHud(ctx) {
 
 function drawStats(ctx) {
   const p = store.player
-  const w = 260
-  const h = 150
+  const w = 280
+  const h = 170
   const x = (STAGE_WIDTH - w) / 2
   const y = (STAGE_HEIGHT - h) / 2
 
@@ -242,6 +245,7 @@ function drawStats(ctx) {
     `체력: ${p.hp} / ${p.maxHp}`,
     `공격력: ${p.attack} (마을 보너스 +${town.bonusAttack})`,
     `처치 수: ${store.kills}`,
+    `코인: ${town.coins}`,
     `임무: ${town.quest || '없음'}`,
   ]
   lines.forEach((line, i) => ctx.fillText(line, x + 16, y + 52 + i * 22))
@@ -258,11 +262,17 @@ function render() {
   const ctx = canvas.getContext('2d')
   ctx.clearRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT)
 
+  const cameraY = Math.max(0, Math.min(store.player.y - STAGE_HEIGHT / 2, WORLD_HEIGHT - STAGE_HEIGHT))
+
+  ctx.save()
+  ctx.translate(0, -cameraY)
   drawMap(ctx)
   drawPotions(ctx)
   drawMonsters(ctx)
   for (const f of store.fireballs) drawFireball(ctx, f.x, f.y)
   drawPlayer(ctx)
+  ctx.restore()
+
   drawHud(ctx)
 
   if (store.phase !== 'playing') {

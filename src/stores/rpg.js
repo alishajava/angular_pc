@@ -3,9 +3,10 @@ import { reactive, ref } from 'vue'
 import { parseGrid, canMoveTo as canMoveToTile, tileCenter as tileCenterOf } from '../mapUtils'
 import { useTownStore } from './town'
 
-// Fixed small dungeon layout. '#' = wall, '.' = floor.
-const MAP = [
-  '############',
+// One continuous dungeon made of 3 connected maze sections, stacked
+// vertically and joined by a single-tile gap in the shared border row.
+// '#' = wall, '.' = floor.
+const SECTION = [
   '#..........#',
   '#.##.####..#',
   '#.#......#.#',
@@ -14,14 +15,27 @@ const MAP = [
   '#.###..###.#',
   '#..........#',
   '#.####.##..#',
-  '############',
+]
+
+const MAP = [
+  '############', // section 1 top (outer wall)
+  ...SECTION,
+  '#.##########', // section 1 bottom, gap at col 1 leads down
+  '#.##########', // section 2 top, gap at col 1
+  ...SECTION,
+  '#.##########', // section 2 bottom, gap at col 1 leads down
+  '#.##########', // section 3 top, gap at col 1
+  ...SECTION,
+  '############', // section 3 bottom (dungeon end)
 ]
 
 export const TILE = 52
 export const COLS = MAP[0].length
 export const ROWS = MAP.length
+const VIEWPORT_ROWS = 10
 export const STAGE_WIDTH = COLS * TILE
-export const STAGE_HEIGHT = ROWS * TILE
+export const STAGE_HEIGHT = VIEWPORT_ROWS * TILE
+export const WORLD_HEIGHT = ROWS * TILE
 
 const grid = parseGrid(MAP)
 function tileCenter(col, row) {
@@ -53,20 +67,31 @@ const MONSTER_DAMAGE = 6
 const BOSS_MAX_HP = 50
 const BOSS_DAMAGE = 11
 const POTION_HEAL = 15
+const MONSTER_COIN_REWARD = 5
+const BOSS_COIN_REWARD = 50
 
 // Hand-placed spawn points (col, row) on floor tiles of MAP above.
-// The boss waits in the farthest corner from the entrance, per the
-// tavern keeper's rumor.
+// The boss waits in the farthest corner from the entrance (deepest,
+// 3rd section), per the tavern keeper's rumor.
 const MONSTER_SPAWNS = [
+  // section 1
   [4, 1],
   [9, 2],
-  [2, 5],
-  [6, 5],
-  [10, 7, 'boss'],
+  // section 2
+  [2, 15],
+  [6, 15],
+  [9, 12],
+  // section 3
+  [9, 22],
+  [6, 25],
+  [10, 27, 'boss'],
 ]
 const POTION_SPAWNS = [
   [6, 3],
-  [3, 7],
+  [8, 14],
+  [3, 17],
+  [5, 21],
+  [8, 24],
 ]
 const PLAYER_START = [1, 1]
 
@@ -120,6 +145,7 @@ export const useRpgStore = defineStore('rpg', () => {
         hp,
         maxHp: hp,
         damage: isBoss ? BOSS_DAMAGE : MONSTER_DAMAGE,
+        coinReward: isBoss ? BOSS_COIN_REWARD : MONSTER_COIN_REWARD,
         isBoss,
         contactCooldown: 0,
       })
@@ -162,6 +188,7 @@ export const useRpgStore = defineStore('rpg', () => {
     m.hp -= amount
     if (m.hp <= 0) {
       kills.value++
+      useTownStore().addCoins(m.coinReward)
       if (kills.value % 3 === 0) {
         player.attack += 1
         toast.value = 'ATTACK UP!'
