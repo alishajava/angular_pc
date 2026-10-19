@@ -59,6 +59,7 @@ const BOSS_DAMAGE = 11
 const POTION_HEAL = 15
 const MONSTER_COIN_REWARD = 5
 const BOSS_COIN_REWARD = 50
+const HEROINE_ATTACK = 6
 
 const FLEE_COOLDOWN = 1.0 // grace period before a fled-from monster can re-engage
 const PLAYER_TURN_DELAY = 0.8 // pause after the player's action before the monster replies
@@ -104,6 +105,7 @@ export const useRpgStore = defineStore('rpg', () => {
   })
   const monsters = reactive([])
   const potions = reactive([])
+  const companion = reactive({ active: false })
   const kills = ref(0)
   const phase = ref('ready') // ready | playing | cleared | gameOver
   const message = ref('DUNGEON')
@@ -135,6 +137,7 @@ export const useRpgStore = defineStore('rpg', () => {
     player.maxHp = PLAYER_MAX_HP + town.bonusMaxHp
     player.hp = player.maxHp
     player.attack = PLAYER_BASE_ATTACK + town.bonusAttack
+    companion.active = town.companionJoined
 
     monsters.length = 0
     for (const [col, row, kind] of MONSTER_SPAWNS) {
@@ -237,6 +240,23 @@ export const useRpgStore = defineStore('rpg', () => {
     if (m.hp <= 0) {
       battle.turn = 'victory'
       battle.timer = END_TURN_DELAY
+    } else if (companion.active) {
+      battle.turn = 'companionPending'
+      battle.timer = PLAYER_TURN_DELAY
+    } else {
+      battle.turn = 'monsterPending'
+      battle.timer = PLAYER_TURN_DELAY
+    }
+  }
+
+  function resolveCompanionTurn() {
+    const m = monsters[battle.monsterIndex]
+    const dmg = rollDamage(HEROINE_ATTACK)
+    m.hp -= dmg
+    battle.log = `히로인의 공격! ${dmg}의 피해를 입혔다!`
+    if (m.hp <= 0) {
+      battle.turn = 'victory'
+      battle.timer = END_TURN_DELAY
     } else {
       battle.turn = 'monsterPending'
       battle.timer = PLAYER_TURN_DELAY
@@ -295,7 +315,8 @@ export const useRpgStore = defineStore('rpg', () => {
     if (battle.timer <= 0) return
     battle.timer -= dt
     if (battle.timer > 0) return
-    if (battle.turn === 'monsterPending') resolveMonsterTurn()
+    if (battle.turn === 'companionPending') resolveCompanionTurn()
+    else if (battle.turn === 'monsterPending') resolveMonsterTurn()
     else if (battle.turn === 'victory') finishVictory()
     else if (battle.turn === 'defeat') finishDefeat()
     else if (battle.turn === 'fled') finishFlee()
@@ -370,6 +391,7 @@ export const useRpgStore = defineStore('rpg', () => {
     player,
     monsters,
     potions,
+    companion,
     kills,
     phase,
     message,

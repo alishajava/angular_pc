@@ -4,7 +4,7 @@ import { useTownStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT } from '../st
 import { useFlowStore } from '../stores/flow'
 import { PLAYER_MAX_HP, PLAYER_BASE_ATTACK } from '../stores/rpg'
 import { unlockAudio, playPickup, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
-import { drawHero, drawVillager, drawElder, drawGate } from '../sprites'
+import { drawHero, drawHeroine, drawVillager, drawElder, drawGate } from '../sprites'
 import { wrapText } from '../canvasText'
 import { hasSave } from '../save'
 
@@ -74,6 +74,7 @@ const TYPE_INFO = {
   villager2: { label: '마을 사람', outfit: '#b08968', hair: '#1c1c1c' },
   elder: { label: '촌장' },
   gate: { label: '던전 입구' },
+  heroine: { label: '히로인' },
 }
 
 function drawMap(ctx) {
@@ -90,6 +91,7 @@ function drawInteractables(ctx) {
     const info = TYPE_INFO[item.type]
     if (item.type === 'gate') drawGate(ctx, item.x, item.y)
     else if (item.type === 'elder') drawElder(ctx, item.x, item.y)
+    else if (item.type === 'heroine') drawHeroine(ctx, item.x, item.y)
     else drawVillager(ctx, item.x, item.y, info.outfit, info.hair)
 
     ctx.fillStyle = '#fff'
@@ -170,7 +172,7 @@ function drawStats(ctx) {
   const totalAttack = PLAYER_BASE_ATTACK + store.bonusAttack
   const totalMaxHp = PLAYER_MAX_HP + store.bonusMaxHp
   const w = 280
-  const h = 170
+  const h = 190
   const x = (STAGE_WIDTH - w) / 2
   const y = (STAGE_HEIGHT - h) / 2
 
@@ -193,6 +195,7 @@ function drawStats(ctx) {
     `공격력: ${PLAYER_BASE_ATTACK} (+${store.bonusAttack} 보너스) = ${totalAttack}`,
     `최대 체력: ${PLAYER_MAX_HP} (+${store.bonusMaxHp} 보너스) = ${totalMaxHp}`,
     `코인: ${store.coins}`,
+    `동료: ${store.companionJoined ? '히로인과 함께 싸운다' : '없음'}`,
     `임무: ${store.quest || '아직 없음 (촌장에게 말을 걸어보세요)'}`,
   ]
   lines.forEach((line, i) => ctx.fillText(line, x + 16, y + 56 + i * 22))

@@ -9,7 +9,7 @@ const MAP = [
   '############',
   '#..........#',
   '#.W......H.#',
-  '#..........#',
+  '#.......R..#',
   '#....T.....#',
   '#..........#',
   '#.n......n.#',
@@ -42,6 +42,11 @@ const DIALOGUE = {
   villager1: { speaker: '마을 사람', text: '요즘 몬스터들이 자꾸 마을 근처를 어슬렁거려요...' },
   villager2: { speaker: '마을 사람', text: '조심하세요, 던전은 위험하다고 들었어요.' },
   elder: { speaker: '촌장', text: '던전의 몬스터를 모두 물리치고 평화를 되찾아주게. 이것이 자네의 임무일세.' },
+  heroine: {
+    speaker: '히로인',
+    join: '혼자 가기엔 위험해요. 제가 함께 싸워드릴게요!',
+    idle: '언제든 준비됐어요. 같이 가요!',
+  },
 }
 
 const SPAWN_TYPES = {
@@ -51,6 +56,7 @@ const SPAWN_TYPES = {
   n: null, // resolved to villager1/villager2 in order below
   e: 'elder',
   D: 'gate',
+  R: 'heroine',
 }
 
 function buildInteractables() {
@@ -82,6 +88,7 @@ export const useTownStore = defineStore('town', () => {
   const questRewarded = ref(false)
   const bonusAttack = ref(0)
   const bonusMaxHp = ref(0)
+  const companionJoined = ref(false)
 
   const dialogueSpeaker = ref('')
   const dialogueText = ref('')
@@ -116,6 +123,7 @@ export const useTownStore = defineStore('town', () => {
       quest: quest.value,
       questDone: questDone.value,
       questRewarded: questRewarded.value,
+      companionJoined: companionJoined.value,
       visitedTypes,
     })
     dialogueSpeaker.value = '시스템'
@@ -137,6 +145,7 @@ export const useTownStore = defineStore('town', () => {
     quest.value = data.quest ?? ''
     questDone.value = !!data.questDone
     questRewarded.value = !!data.questRewarded
+    companionJoined.value = !!data.companionJoined
     for (const it of interactables) {
       it.visited = (data.visitedTypes || []).includes(it.type)
     }
@@ -193,6 +202,18 @@ export const useTownStore = defineStore('town', () => {
         dialogueTimer.value = DIALOGUE_DURATION
         return null
       }
+    }
+
+    if (item.type === 'heroine') {
+      dialogueSpeaker.value = DIALOGUE.heroine.speaker
+      if (!companionJoined.value) {
+        companionJoined.value = true
+        dialogueText.value = DIALOGUE.heroine.join
+      } else {
+        dialogueText.value = DIALOGUE.heroine.idle
+      }
+      dialogueTimer.value = DIALOGUE_DURATION
+      return null
     }
 
     if (item.type === 'weapon' || item.type === 'herb') {
@@ -265,6 +286,7 @@ export const useTownStore = defineStore('town', () => {
     questDone,
     bonusAttack,
     bonusMaxHp,
+    companionJoined,
     dialogueSpeaker,
     dialogueText,
     dialogueTimer,

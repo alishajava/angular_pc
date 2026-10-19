@@ -54,6 +54,26 @@ export function drawHero(ctx, x, y, facing = 'down') {
   ctx.restore()
 }
 
+export function drawHeroine(ctx, x, y, facing = 'down') {
+  ctx.save()
+  ctx.translate(x, y)
+  if (facing === 'left') ctx.scale(-1, 1)
+  humanoid(ctx, 0, 0, { skin: '#f2c79b', hair: '#7a2340', outfit: '#e0557a', boots: '#3b2440' })
+  // twin tails
+  ctx.fillStyle = '#7a2340'
+  block(ctx, -11, -14, 4, 12, 2)
+  block(ctx, 7, -14, 4, 12, 2)
+  // hair ribbon
+  ctx.fillStyle = '#ffe066'
+  ctx.fillRect(-3, -19, 6, 2)
+  // small dagger at the hip
+  ctx.fillStyle = '#c9ccd6'
+  ctx.fillRect(-11, -2, 2, 9)
+  ctx.fillStyle = '#8a6a2e'
+  ctx.fillRect(-13, 5, 6, 2)
+  ctx.restore()
+}
+
 export function drawVillager(ctx, x, y, outfit, hair = '#5a3e1b') {
   humanoid(ctx, x, y, { skin: '#f2c79b', hair, outfit, boots: '#3b2a1a' })
 }

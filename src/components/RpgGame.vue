@@ -4,7 +4,7 @@ import { useRpgStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT, WORLD_HEIGHT 
 import { useTownStore } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
 import { unlockAudio, playAttackSwing, playFireball, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
-import { drawHero, drawMonster, drawBoss, drawSlash, drawFireball, FACE_ANGLE } from '../sprites'
+import { drawHero, drawHeroine, drawMonster, drawBoss, drawSlash, drawFireball, FACE_ANGLE } from '../sprites'
 
 const store = useRpgStore()
 const town = useTownStore()
@@ -157,6 +157,9 @@ function drawMonsters(ctx) {
 
 function drawPlayer(ctx) {
   const p = store.player
+  if (store.companion.active) {
+    drawHeroine(ctx, p.x - 20, p.y + 16, p.facing)
+  }
   drawHero(ctx, p.x, p.y, p.facing)
 }
 
@@ -262,6 +265,14 @@ function drawBattle(ctx) {
   ctx.font = 'bold 11px sans-serif'
   ctx.fillText(`용사 HP ${p.hp}/${p.maxHp}`, 24, cmdY + 11)
 
+  if (store.companion.active) {
+    drawHeroine(ctx, STAGE_WIDTH - 36, cmdY + 7, 'left')
+    ctx.textAlign = 'right'
+    ctx.font = '11px sans-serif'
+    ctx.fillStyle = '#e0557a'
+    ctx.fillText('히로인 동행 중', STAGE_WIDTH - 56, cmdY + 11)
+  }
+
   ctx.textAlign = 'center'
   ctx.font = 'bold 14px sans-serif'
   if (b.turn === 'player') {
@@ -283,7 +294,7 @@ function drawBattle(ctx) {
 function drawStats(ctx) {
   const p = store.player
   const w = 280
-  const h = 170
+  const h = 190
   const x = (STAGE_WIDTH - w) / 2
   const y = (STAGE_HEIGHT - h) / 2
 
@@ -307,6 +318,7 @@ function drawStats(ctx) {
     `공격력: ${p.attack} (마을 보너스 +${town.bonusAttack})`,
     `처치 수: ${store.kills}`,
     `코인: ${town.coins}`,
+    `동료: ${store.companion.active ? '히로인과 함께 싸운다' : '없음'}`,
     `임무: ${town.quest || '없음'}`,
   ]
   lines.forEach((line, i) => ctx.fillText(line, x + 16, y + 52 + i * 22))
