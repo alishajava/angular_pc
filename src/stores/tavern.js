@@ -25,7 +25,7 @@ const KEEPER_LINES = [
 ]
 
 export const useTavernStore = defineStore('tavern', () => {
-  const player = reactive({ x: 0, y: 0, facing: 'up' })
+  const player = reactive({ x: 0, y: 0, facing: 'up', moving: false })
   const npc = reactive({ ...tileCenter(...NPC_POS, TILE), touching: false })
   const door = tileCenter(...DOOR_POS, TILE)
 
@@ -61,7 +61,8 @@ export const useTavernStore = defineStore('tavern', () => {
       dx *= Math.SQRT1_2
       dy *= Math.SQRT1_2
     }
-    if (dx !== 0 || dy !== 0) {
+    player.moving = dx !== 0 || dy !== 0
+    if (player.moving) {
       player.facing = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up'
     }
     const tryX = player.x + dx * PLAYER_SPEED * dt

@@ -49,11 +49,21 @@ function buildInput() {
 let rafId = null
 let lastTime = 0
 let prevDialogueTimer = 0
+let animTime = 0
+
+function idleSwing(seed = 0) {
+  return Math.sin(animTime * 2 + seed) * 1.8
+}
+
+function walkSwing(moving) {
+  return moving ? Math.sin(animTime * 10) * 3 : idleSwing()
+}
 
 function loop(time) {
   if (!lastTime) lastTime = time
   const dt = Math.min(0.05, (time - lastTime) / 1000)
   lastTime = time
+  animTime += dt
 
   if (store.dialogueTimer > prevDialogueTimer) playPickup()
   prevDialogueTimer = store.dialogueTimer
@@ -87,23 +97,24 @@ function drawMap(ctx) {
 }
 
 function drawInteractables(ctx) {
-  for (const item of store.interactables) {
+  store.interactables.forEach((item, idx) => {
     const info = TYPE_INFO[item.type]
+    const swing = idleSwing(idx * 1.3)
     if (item.type === 'gate') drawGate(ctx, item.x, item.y)
-    else if (item.type === 'elder') drawElder(ctx, item.x, item.y)
-    else if (item.type === 'heroine') drawHeroine(ctx, item.x, item.y)
-    else drawVillager(ctx, item.x, item.y, info.outfit, info.hair)
+    else if (item.type === 'elder') drawElder(ctx, item.x, item.y, swing)
+    else if (item.type === 'heroine') drawHeroine(ctx, item.x, item.y, 'down', swing)
+    else drawVillager(ctx, item.x, item.y, info.outfit, info.hair, swing)
 
     ctx.fillStyle = '#fff'
     ctx.font = 'bold 11px sans-serif'
     ctx.textAlign = 'center'
     ctx.fillText(info.label, item.x, item.y + 26)
-  }
+  })
 }
 
 function drawPlayer(ctx) {
   const p = store.player
-  drawHero(ctx, p.x, p.y, p.facing)
+  drawHero(ctx, p.x, p.y, p.facing, walkSwing(p.moving))
 }
 
 function drawHud(ctx) {

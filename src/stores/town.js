@@ -79,7 +79,7 @@ function buildInteractables() {
 
 export const useTownStore = defineStore('town', () => {
   const phase = ref('intro') // intro | town
-  const player = reactive({ x: 0, y: 0, facing: 'down' })
+  const player = reactive({ x: 0, y: 0, facing: 'down', moving: false })
   const interactables = reactive(buildInteractables())
 
   const coins = ref(STARTING_COINS)
@@ -255,7 +255,8 @@ export const useTownStore = defineStore('town', () => {
       dx *= Math.SQRT1_2
       dy *= Math.SQRT1_2
     }
-    if (dx !== 0 || dy !== 0) {
+    player.moving = dx !== 0 || dy !== 0
+    if (player.moving) {
       player.facing = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up'
     }
     const tryX = player.x + dx * PLAYER_SPEED * dt

@@ -102,6 +102,7 @@ export const useRpgStore = defineStore('rpg', () => {
     hp: PLAYER_MAX_HP,
     maxHp: PLAYER_MAX_HP,
     attack: PLAYER_BASE_ATTACK,
+    moving: false,
   })
   const monsters = reactive([])
   const potions = reactive([])
@@ -347,7 +348,8 @@ export const useRpgStore = defineStore('rpg', () => {
       dx *= Math.SQRT1_2
       dy *= Math.SQRT1_2
     }
-    if (dx !== 0 || dy !== 0) {
+    player.moving = dx !== 0 || dy !== 0
+    if (player.moving) {
       player.facing = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up'
     }
     const tryX = player.x + dx * PLAYER_SPEED * dt

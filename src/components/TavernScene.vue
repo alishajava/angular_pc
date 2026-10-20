@@ -41,11 +41,21 @@ function buildInput() {
 let rafId = null
 let lastTime = 0
 let wasTalking = false
+let animTime = 0
+
+function idleSwing(seed = 0) {
+  return Math.sin(animTime * 2 + seed) * 1.8
+}
+
+function walkSwing(moving) {
+  return moving ? Math.sin(animTime * 10) * 3 : idleSwing()
+}
 
 function loop(time) {
   if (!lastTime) lastTime = time
   const dt = Math.min(0.05, (time - lastTime) / 1000)
   lastTime = time
+  animTime += dt
 
   const result = store.update(dt, buildInput())
   if (store.conversation && !wasTalking) playPickup()
@@ -73,7 +83,7 @@ function drawMap(ctx) {
 }
 
 function drawPlayer(ctx) {
-  drawHero(ctx, store.player.x, store.player.y, store.player.facing)
+  drawHero(ctx, store.player.x, store.player.y, store.player.facing, walkSwing(store.player.moving))
 }
 
 function drawConversation(ctx) {
@@ -119,7 +129,7 @@ function render() {
   ctx.clearRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT)
 
   drawMap(ctx)
-  drawVillager(ctx, store.npc.x, store.npc.y, '#9b59b6')
+  drawVillager(ctx, store.npc.x, store.npc.y, '#9b59b6', undefined, idleSwing())
   drawPlayer(ctx)
   drawConversation(ctx)
 }

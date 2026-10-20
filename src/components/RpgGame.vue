@@ -101,11 +101,17 @@ watch(
 
 let rafId = null
 let lastTime = 0
+let animTime = 0
+
+function walkSwing(moving) {
+  return moving ? Math.sin(animTime * 10) * 3 : Math.sin(animTime * 2) * 1.8
+}
 
 function loop(time) {
   if (!lastTime) lastTime = time
   const dt = Math.min(0.05, (time - lastTime) / 1000)
   lastTime = time
+  animTime += dt
 
   store.update(dt, buildInput())
   render()
@@ -157,10 +163,11 @@ function drawMonsters(ctx) {
 
 function drawPlayer(ctx) {
   const p = store.player
+  const swing = walkSwing(p.moving)
   if (store.companion.active) {
-    drawHeroine(ctx, p.x - 20, p.y + 16, p.facing)
+    drawHeroine(ctx, p.x - 20, p.y + 16, p.facing, swing)
   }
-  drawHero(ctx, p.x, p.y, p.facing)
+  drawHero(ctx, p.x, p.y, p.facing, swing)
 }
 
 function drawHud(ctx) {
@@ -266,7 +273,7 @@ function drawBattle(ctx) {
   ctx.fillText(`용사 HP ${p.hp}/${p.maxHp}`, 24, cmdY + 11)
 
   if (store.companion.active) {
-    drawHeroine(ctx, STAGE_WIDTH - 36, cmdY + 7, 'left')
+    drawHeroine(ctx, STAGE_WIDTH - 36, cmdY + 7, 'left', Math.sin(animTime * 2) * 1.8)
     ctx.textAlign = 'right'
     ctx.font = '11px sans-serif'
     ctx.fillStyle = '#e0557a'

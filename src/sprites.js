@@ -7,20 +7,22 @@ function block(ctx, x, y, w, h, r) {
   ctx.fill()
 }
 
-function humanoid(ctx, x, y, { skin, hair, outfit, boots }) {
+// `swing` is a small px offset (typically from a caller-computed sine wave)
+// that alternates the legs and arms to fake a walk/idle-sway cycle.
+function humanoid(ctx, x, y, { skin, hair, outfit, boots, swing = 0 }) {
   ctx.save()
   ctx.translate(x, y)
 
   ctx.fillStyle = boots
-  block(ctx, -7, 6, 5, 8, 2)
-  block(ctx, 2, 6, 5, 8, 2)
+  block(ctx, -7, 6 + swing, 5, 8, 2)
+  block(ctx, 2, 6 - swing, 5, 8, 2)
 
   ctx.fillStyle = outfit
   block(ctx, -9, -5, 18, 13, 4)
 
   ctx.fillStyle = skin
-  block(ctx, -12, -3, 4, 9, 2)
-  block(ctx, 8, -3, 4, 9, 2)
+  block(ctx, -12, -3 - swing, 4, 9, 2)
+  block(ctx, 8, -3 + swing, 4, 9, 2)
 
   ctx.beginPath()
   ctx.arc(0, -12, 8, 0, Math.PI * 2)
@@ -38,11 +40,11 @@ function humanoid(ctx, x, y, { skin, hair, outfit, boots }) {
   ctx.restore()
 }
 
-export function drawHero(ctx, x, y, facing = 'down') {
+export function drawHero(ctx, x, y, facing = 'down', swing = 0) {
   ctx.save()
   ctx.translate(x, y)
   if (facing === 'left') ctx.scale(-1, 1)
-  humanoid(ctx, 0, 0, { skin: '#f2c79b', hair: '#5a3e1b', outfit: '#3f7fd1', boots: '#2b2440' })
+  humanoid(ctx, 0, 0, { skin: '#f2c79b', hair: '#5a3e1b', outfit: '#3f7fd1', boots: '#2b2440', swing })
   // belt
   ctx.fillStyle = '#5a3e1b'
   ctx.fillRect(-9, 4, 18, 3)
@@ -54,11 +56,11 @@ export function drawHero(ctx, x, y, facing = 'down') {
   ctx.restore()
 }
 
-export function drawHeroine(ctx, x, y, facing = 'down') {
+export function drawHeroine(ctx, x, y, facing = 'down', swing = 0) {
   ctx.save()
   ctx.translate(x, y)
   if (facing === 'left') ctx.scale(-1, 1)
-  humanoid(ctx, 0, 0, { skin: '#f2c79b', hair: '#7a2340', outfit: '#e0557a', boots: '#3b2440' })
+  humanoid(ctx, 0, 0, { skin: '#f2c79b', hair: '#7a2340', outfit: '#e0557a', boots: '#3b2440', swing })
   // twin tails
   ctx.fillStyle = '#7a2340'
   block(ctx, -11, -14, 4, 12, 2)
@@ -74,12 +76,12 @@ export function drawHeroine(ctx, x, y, facing = 'down') {
   ctx.restore()
 }
 
-export function drawVillager(ctx, x, y, outfit, hair = '#5a3e1b') {
-  humanoid(ctx, x, y, { skin: '#f2c79b', hair, outfit, boots: '#3b2a1a' })
+export function drawVillager(ctx, x, y, outfit, hair = '#5a3e1b', swing = 0) {
+  humanoid(ctx, x, y, { skin: '#f2c79b', hair, outfit, boots: '#3b2a1a', swing })
 }
 
-export function drawElder(ctx, x, y) {
-  humanoid(ctx, x, y, { skin: '#e8c6a0', hair: '#e8e8e8', outfit: '#6b4fa0', boots: '#3b2a1a' })
+export function drawElder(ctx, x, y, swing = 0) {
+  humanoid(ctx, x, y, { skin: '#e8c6a0', hair: '#e8e8e8', outfit: '#6b4fa0', boots: '#3b2a1a', swing })
   ctx.save()
   ctx.translate(x, y)
   // beard
