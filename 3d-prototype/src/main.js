@@ -78,9 +78,10 @@ nose.rotation.x = Math.PI / 2
 nose.position.set(0, 1.55, 0.3)
 player.add(nose)
 
-// Builds one limb: a pivot Group at the joint, with the limb mesh hanging
-// below it offset by half its length, so `pivot.rotation.x` swings it
-// forward/back around the joint rather than around its own center.
+// Builds one single-segment limb (arms): a pivot Group at the joint, with
+// the limb mesh hanging below it offset by half its length, so
+// `pivot.rotation.x` swings it forward/back around the joint rather than
+// around its own center.
 function makeLimb(color, radius, length, jointX, jointY) {
   const pivot = new THREE.Group()
   pivot.position.set(jointX, jointY, 0)
@@ -94,23 +95,52 @@ function makeLimb(color, radius, length, jointX, jointY) {
   return pivot
 }
 
+// Builds a two-segment leg: a hip pivot (walk swing happens here) whose
+// upper-leg mesh hangs down to a knee pivot, which in turn hangs the
+// lower-leg mesh. Bending the knee is what lets the jump crouch actually
+// look like a crouch instead of the whole leg tipping forward rigidly.
+function makeLeg(color, radius, upperLen, lowerLen, jointX, jointY) {
+  const hip = new THREE.Group()
+  hip.position.set(jointX, jointY, 0)
+  const upperMesh = new THREE.Mesh(
+    new THREE.CapsuleGeometry(radius, Math.max(0.05, upperLen - radius * 2), 4, 8),
+    new THREE.MeshStandardMaterial({ color }),
+  )
+  upperMesh.position.y = -upperLen / 2
+  hip.add(upperMesh)
+
+  const knee = new THREE.Group()
+  knee.position.y = -upperLen
+  hip.add(knee)
+  const lowerMesh = new THREE.Mesh(
+    new THREE.CapsuleGeometry(radius * 0.85, Math.max(0.05, lowerLen - radius * 1.7), 4, 8),
+    new THREE.MeshStandardMaterial({ color }),
+  )
+  lowerMesh.position.y = -lowerLen / 2
+  knee.add(lowerMesh)
+
+  player.add(hip)
+  return { hip, knee }
+}
+
 const armL = makeLimb(SKIN, 0.07, 0.5, -0.36, 1.3)
 const armR = makeLimb(SKIN, 0.07, 0.5, 0.36, 1.3)
-const legL = makeLimb(BOOTS, 0.1, 0.75, -0.14, 0.75)
-const legR = makeLimb(BOOTS, 0.1, 0.75, 0.14, 0.75)
+const legL = makeLeg(BOOTS, 0.1, 0.38, 0.37, -0.14, 0.75)
+const legR = makeLeg(BOOTS, 0.1, 0.38, 0.37, 0.14, 0.75)
 
 scene.add(player)
 
-// Keyboard input. Jump is triggered here (edge-style, gated on `grounded`)
-// rather than read as a held key, so holding Space doesn't bunny-hop.
+// Keyboard input. Jump is triggered here (edge-style, gated on `grounded`
+// and not already mid-jump-animation) rather than read as a held key, so
+// holding Space doesn't bunny-hop or restart the windup mid-crouch.
 const heldKeys = new Set()
 const JUMP_KEYS = [' ', 'spacebar']
 window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase()
   heldKeys.add(key)
-  if (JUMP_KEYS.includes(key) && grounded) {
-    velocityY = JUMP_SPEED
-    grounded = false
+  if (JUMP_KEYS.includes(key) && grounded && jumpState === 'none') {
+    jumpState = 'windup'
+    jumpStateT = 0
   }
 })
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
@@ -232,13 +262,56 @@ function updateLimbs(dt, moving) {
     const swing = Math.sin(walkPhase)
     armL.rotation.x = swing * ARM_SWING
     armR.rotation.x = -swing * ARM_SWING
-    legL.rotation.x = -swing * LEG_SWING
-    legR.rotation.x = swing * LEG_SWING
+    legL.hip.rotation.x = -swing * LEG_SWING
+    legR.hip.rotation.x = swing * LEG_SWING
   } else {
     armL.rotation.x *= 0.85
     armR.rotation.x *= 0.85
-    legL.rotation.x *= 0.85
-    legR.rotation.x *= 0.85
+    legL.hip.rotation.x *= 0.85
+    legR.hip.rotation.x *= 0.85
+  }
+}
+
+// Jump squat-and-stretch: a brief windup (knees bend, player squashes down)
+// before the actual upward velocity is applied, then an extend phase
+// (knees and squash spring back to neutral) that plays out while rising.
+// `updateJumpAnim` overrides the legs' hip/knee rotation and the player's
+// scale whenever it's active, taking priority over the walk cycle.
+const JUMP_WINDUP = 0.1
+const JUMP_EXTEND = 0.18
+const KNEE_BEND_MAX = 0.9
+const SQUASH_MIN = 0.85
+let jumpState = 'none' // 'none' | 'windup' | 'extend'
+let jumpStateT = 0
+
+function applyLegPose(kneeBend, hipTilt, squash) {
+  legL.knee.rotation.x = kneeBend
+  legR.knee.rotation.x = kneeBend
+  legL.hip.rotation.x = -hipTilt
+  legR.hip.rotation.x = -hipTilt
+  player.scale.y = squash
+}
+
+function updateJumpAnim(dt) {
+  if (jumpState === 'windup') {
+    jumpStateT += dt
+    const t = Math.min(1, jumpStateT / JUMP_WINDUP)
+    applyLegPose(t * KNEE_BEND_MAX, t * 0.25, 1 - t * (1 - SQUASH_MIN))
+    if (t >= 1) {
+      velocityY = JUMP_SPEED
+      grounded = false
+      jumpState = 'extend'
+      jumpStateT = 0
+    }
+  } else if (jumpState === 'extend') {
+    jumpStateT += dt
+    const t = Math.min(1, jumpStateT / JUMP_EXTEND)
+    const ease = 1 - (1 - t) ** 3 // ease-out cubic: a snappy stretch, not a linear one
+    applyLegPose(KNEE_BEND_MAX * (1 - ease), 0.25 * (1 - ease), SQUASH_MIN + (1 - SQUASH_MIN) * ease)
+    if (t >= 1) {
+      jumpState = 'none'
+      applyLegPose(0, 0, 1)
+    }
   }
 }
 
@@ -293,6 +366,7 @@ function loop(time) {
   lastTime = time
 
   updatePlayer(dt)
+  updateJumpAnim(dt)
   resolveBoxCollisions()
   updateVertical(dt)
   updateCamera()
