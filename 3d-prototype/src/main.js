@@ -1,8 +1,10 @@
 import * as THREE from 'three'
 
+const SKY_COLOR = 0x9fd4f0
+
 const scene = new THREE.Scene()
-scene.background = new THREE.Color(0x202634)
-scene.fog = new THREE.Fog(0x202634, 20, 70)
+scene.background = new THREE.Color(SKY_COLOR)
+scene.fog = new THREE.Fog(SKY_COLOR, 30, 85)
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500)
 
@@ -11,20 +13,21 @@ renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 document.body.appendChild(renderer.domElement)
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 0.9))
-const sun = new THREE.DirectionalLight(0xffffff, 1.0)
+scene.add(new THREE.HemisphereLight(0xffffff, 0x6b8caf, 1.4))
+const sun = new THREE.DirectionalLight(0xffffff, 1.8)
 sun.position.set(10, 20, 10)
 scene.add(sun)
+scene.add(new THREE.AmbientLight(0xffffff, 0.4))
 
 // Ground: a big flat plane plus a grid overlay so movement has a visual reference.
 const GROUND_SIZE = 100
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE),
-  new THREE.MeshStandardMaterial({ color: 0x3a5a40 }),
+  new THREE.MeshStandardMaterial({ color: 0x5fa85f }),
 )
 ground.rotation.x = -Math.PI / 2
 scene.add(ground)
-scene.add(new THREE.GridHelper(GROUND_SIZE, 40, 0x2a3a2a, 0x2a3a2a))
+scene.add(new THREE.GridHelper(GROUND_SIZE, 40, 0x3f7a3f, 0x3f7a3f))
 
 // A few scattered landmark boxes so walking around actually feels like going somewhere.
 // Each one is also solid: `landmarkBoxes` holds the collision data `boxBlocks()` checks
@@ -141,6 +144,20 @@ function boxBlocks(x, z, y) {
   return false
 }
 
+// The highest surface the player should rest on at this (x, z): a box's
+// top if standing over its footprint, the ground (0) otherwise. Jumping
+// onto a box high enough to clear it (see boxBlocks) lets the player land
+// on top instead of falling straight through.
+function groundHeightAt(x, z) {
+  let height = 0
+  for (const box of landmarkBoxes) {
+    if (Math.abs(x - box.x) < BOX_HALF_SIZE && Math.abs(z - box.z) < BOX_HALF_SIZE) {
+      height = Math.max(height, box.height)
+    }
+  }
+  return height
+}
+
 const GRAVITY = 20
 const JUMP_SPEED = 10 // peak height v²/2g ≈ 2.5, enough to clear the 2-unit-tall boxes
 let velocityY = 0
@@ -148,11 +165,15 @@ let grounded = true
 
 function updateVertical(dt) {
   velocityY -= GRAVITY * dt
-  player.position.y += velocityY * dt
-  if (player.position.y <= 0) {
-    player.position.y = 0
+  const nextY = player.position.y + velocityY * dt
+  const floor = groundHeightAt(player.position.x, player.position.z)
+  if (nextY <= floor) {
+    player.position.y = floor
     velocityY = 0
     grounded = true
+  } else {
+    player.position.y = nextY
+    grounded = false
   }
 }
 
