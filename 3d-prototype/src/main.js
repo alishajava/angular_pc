@@ -134,12 +134,17 @@ let facingAngle = 0
 
 // A box only blocks movement up to its own height, so jumping high enough
 // clears short ones instead of bumping into them like an invisible wall.
-function boxBlocks(x, z, y) {
+// It also only blocks *entering* its footprint from outside: if the player
+// is already inside it (e.g. standing on top and stepping off the edge),
+// that box stays out of the way instead of trapping them mid-fall right
+// next to the side they just came from.
+function boxBlocks(fromX, fromZ, toX, toZ, y) {
   for (const box of landmarkBoxes) {
     const half = BOX_HALF_SIZE + PLAYER_RADIUS
-    if (Math.abs(x - box.x) < half && Math.abs(z - box.z) < half && y < box.height - 0.05) {
-      return true
-    }
+    const alreadyInside = Math.abs(fromX - box.x) < half && Math.abs(fromZ - box.z) < half
+    if (alreadyInside) continue
+    const wouldEnter = Math.abs(toX - box.x) < half && Math.abs(toZ - box.z) < half
+    if (wouldEnter && y < box.height - 0.05) return true
   }
   return false
 }
@@ -199,11 +204,11 @@ function updatePlayer(dt) {
   // Resolve each axis separately so the player slides along a box's edge
   // instead of stopping dead when moving diagonally into it.
   const nextX = player.position.x + worldX * PLAYER_SPEED * dt
-  if (!boxBlocks(nextX, player.position.z, player.position.y)) {
+  if (!boxBlocks(player.position.x, player.position.z, nextX, player.position.z, player.position.y)) {
     player.position.x = Math.max(-GROUND_HALF, Math.min(GROUND_HALF, nextX))
   }
   const nextZ = player.position.z + worldZ * PLAYER_SPEED * dt
-  if (!boxBlocks(player.position.x, nextZ, player.position.y)) {
+  if (!boxBlocks(player.position.x, player.position.z, player.position.x, nextZ, player.position.y)) {
     player.position.z = Math.max(-GROUND_HALF, Math.min(GROUND_HALF, nextZ))
   }
 
