@@ -26,6 +26,11 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run build -- --base=/angular_pc/
+      - run: npm ci
+        working-directory: 3d-prototype
+      - run: npm run build -- --base=/angular_pc/3d/
+        working-directory: 3d-prototype
+      - run: mkdir -p dist/3d && cp -r 3d-prototype/dist/. dist/3d/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
