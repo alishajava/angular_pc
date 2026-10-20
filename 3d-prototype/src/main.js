@@ -132,35 +132,42 @@ const PLAYER_RADIUS = 0.5
 const GROUND_HALF = GROUND_SIZE / 2 - 1
 let facingAngle = 0
 
-// A box only blocks movement up to its own height, so jumping high enough
-// clears short ones instead of bumping into them like an invisible wall.
-// It also only blocks *entering* its footprint from outside: if the player
-// is already inside it (e.g. standing on top and stepping off the edge),
-// that box stays out of the way instead of trapping them mid-fall right
-// next to the side they just came from.
-function boxBlocks(fromX, fromZ, toX, toZ, y) {
-  for (const box of landmarkBoxes) {
-    const half = BOX_HALF_SIZE + PLAYER_RADIUS
-    const alreadyInside = Math.abs(fromX - box.x) < half && Math.abs(fromZ - box.z) < half
-    if (alreadyInside) continue
-    const wouldEnter = Math.abs(toX - box.x) < half && Math.abs(toZ - box.z) < half
-    if (wouldEnter && y < box.height - 0.05) return true
-  }
-  return false
-}
-
-// The highest surface the player should rest on at this (x, z): a box's
-// top if standing over its footprint, the ground (0) otherwise. Jumping
-// onto a box high enough to clear it (see boxBlocks) lets the player land
-// on top instead of falling straight through.
-function groundHeightAt(x, z) {
-  let height = 0
+// The box (if any) whose top footprint (x, z) is over, tallest first -
+// i.e. what the player should land on if falling straight down here.
+function supportingBox(x, z) {
+  let best = null
   for (const box of landmarkBoxes) {
     if (Math.abs(x - box.x) < BOX_HALF_SIZE && Math.abs(z - box.z) < BOX_HALF_SIZE) {
-      height = Math.max(height, box.height)
+      if (!best || box.height > best.height) best = box
     }
   }
-  return height
+  return best
+}
+
+// Pushes the player back out of any box it's overlapping from the side,
+// below that box's height (a box never blocks the side once the player
+// is standing at or above its top). Run every frame, after free movement,
+// instead of gating proposed moves ahead of time - that approach could
+// either trap the player mid-fall right next to the box they just stepped
+// off, or (if exempted too loosely) let them walk back through its side
+// and get snapped back up onto it. Continuous correction has neither
+// failure mode: it can't trap you, and it can't be tunnelled through.
+function resolveBoxCollisions() {
+  const half = BOX_HALF_SIZE + PLAYER_RADIUS
+  for (const box of landmarkBoxes) {
+    if (player.position.y >= box.height - 0.05) continue
+    const dx = player.position.x - box.x
+    const dz = player.position.z - box.z
+    if (Math.abs(dx) >= half || Math.abs(dz) >= half) continue
+
+    const penX = half - Math.abs(dx)
+    const penZ = half - Math.abs(dz)
+    if (penX < penZ) {
+      player.position.x = box.x + Math.sign(dx || 1) * half
+    } else {
+      player.position.z = box.z + Math.sign(dz || 1) * half
+    }
+  }
 }
 
 const GRAVITY = 20
@@ -171,7 +178,8 @@ let grounded = true
 function updateVertical(dt) {
   velocityY -= GRAVITY * dt
   const nextY = player.position.y + velocityY * dt
-  const floor = groundHeightAt(player.position.x, player.position.z)
+  const support = supportingBox(player.position.x, player.position.z)
+  const floor = support ? support.height : 0
   if (nextY <= floor) {
     player.position.y = floor
     velocityY = 0
@@ -201,16 +209,10 @@ function updatePlayer(dt) {
   const worldX = moveX * cos - moveZ * sin
   const worldZ = moveX * sin + moveZ * cos
 
-  // Resolve each axis separately so the player slides along a box's edge
-  // instead of stopping dead when moving diagonally into it.
   const nextX = player.position.x + worldX * PLAYER_SPEED * dt
-  if (!boxBlocks(player.position.x, player.position.z, nextX, player.position.z, player.position.y)) {
-    player.position.x = Math.max(-GROUND_HALF, Math.min(GROUND_HALF, nextX))
-  }
+  player.position.x = Math.max(-GROUND_HALF, Math.min(GROUND_HALF, nextX))
   const nextZ = player.position.z + worldZ * PLAYER_SPEED * dt
-  if (!boxBlocks(player.position.x, player.position.z, player.position.x, nextZ, player.position.y)) {
-    player.position.z = Math.max(-GROUND_HALF, Math.min(GROUND_HALF, nextZ))
-  }
+  player.position.z = Math.max(-GROUND_HALF, Math.min(GROUND_HALF, nextZ))
 
   const targetAngle = Math.atan2(worldX, worldZ)
   facingAngle += angleDelta(facingAngle, targetAngle) * Math.min(1, dt * 10)
@@ -237,6 +239,7 @@ function loop(time) {
   lastTime = time
 
   updatePlayer(dt)
+  resolveBoxCollisions()
   updateVertical(dt)
   updateCamera()
   renderer.render(scene, camera)
