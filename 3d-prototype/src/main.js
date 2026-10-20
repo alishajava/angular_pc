@@ -50,20 +50,26 @@ for (const [x, halfHeight, z] of LANDMARKS) {
   landmarkBoxes.push({ x, z, height: halfHeight * 2 })
 }
 
-// Player: capsule body + sphere head + a small nose cone marking facing direction.
+// Player: torso + head, plus four limbs that each hang from a pivot Group
+// positioned at the joint (shoulder/hip) so rotating the pivot swings the
+// limb like a real joint instead of just translating a shape.
+const SKIN = 0xf2c79b
+const OUTFIT = 0x3f7fd1
+const BOOTS = 0x2b2440
+
 const player = new THREE.Group()
-const body = new THREE.Mesh(
-  new THREE.CapsuleGeometry(0.4, 0.8, 4, 8),
-  new THREE.MeshStandardMaterial({ color: 0x3f7fd1 }),
+
+const torso = new THREE.Mesh(
+  new THREE.CapsuleGeometry(0.3, 0.3, 4, 8),
+  new THREE.MeshStandardMaterial({ color: OUTFIT }),
 )
-body.position.y = 0.8
-player.add(body)
-const head = new THREE.Mesh(
-  new THREE.SphereGeometry(0.3, 16, 16),
-  new THREE.MeshStandardMaterial({ color: 0xf2c79b }),
-)
+torso.position.y = 1.05
+player.add(torso)
+
+const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), new THREE.MeshStandardMaterial({ color: SKIN }))
 head.position.y = 1.55
 player.add(head)
+
 const nose = new THREE.Mesh(
   new THREE.ConeGeometry(0.08, 0.2, 8),
   new THREE.MeshStandardMaterial({ color: 0xffe066 }),
@@ -71,6 +77,28 @@ const nose = new THREE.Mesh(
 nose.rotation.x = Math.PI / 2
 nose.position.set(0, 1.55, 0.3)
 player.add(nose)
+
+// Builds one limb: a pivot Group at the joint, with the limb mesh hanging
+// below it offset by half its length, so `pivot.rotation.x` swings it
+// forward/back around the joint rather than around its own center.
+function makeLimb(color, radius, length, jointX, jointY) {
+  const pivot = new THREE.Group()
+  pivot.position.set(jointX, jointY, 0)
+  const mesh = new THREE.Mesh(
+    new THREE.CapsuleGeometry(radius, Math.max(0.05, length - radius * 2), 4, 8),
+    new THREE.MeshStandardMaterial({ color }),
+  )
+  mesh.position.y = -length / 2
+  pivot.add(mesh)
+  player.add(pivot)
+  return pivot
+}
+
+const armL = makeLimb(SKIN, 0.07, 0.5, -0.36, 1.3)
+const armR = makeLimb(SKIN, 0.07, 0.5, 0.36, 1.3)
+const legL = makeLimb(BOOTS, 0.1, 0.75, -0.14, 0.75)
+const legR = makeLimb(BOOTS, 0.1, 0.75, 0.14, 0.75)
+
 scene.add(player)
 
 // Keyboard input. Jump is triggered here (edge-style, gated on `grounded`)
@@ -190,6 +218,30 @@ function updateVertical(dt) {
   }
 }
 
+// Swings the arms and legs opposite each other (left arm with right leg,
+// like a real gait) while moving, and eases them back to a neutral stance
+// as soon as movement stops instead of snapping straight back to rest.
+let walkPhase = 0
+const WALK_RATE = 8
+const ARM_SWING = 0.6
+const LEG_SWING = 0.5
+
+function updateLimbs(dt, moving) {
+  if (moving) {
+    walkPhase += dt * WALK_RATE
+    const swing = Math.sin(walkPhase)
+    armL.rotation.x = swing * ARM_SWING
+    armR.rotation.x = -swing * ARM_SWING
+    legL.rotation.x = -swing * LEG_SWING
+    legR.rotation.x = swing * LEG_SWING
+  } else {
+    armL.rotation.x *= 0.85
+    armR.rotation.x *= 0.85
+    legL.rotation.x *= 0.85
+    legR.rotation.x *= 0.85
+  }
+}
+
 function updatePlayer(dt) {
   let moveX = 0
   let moveZ = 0
@@ -197,7 +249,9 @@ function updatePlayer(dt) {
   if (held(MOVE_KEYS.back)) moveZ += 1
   if (held(MOVE_KEYS.left)) moveX -= 1
   if (held(MOVE_KEYS.right)) moveX += 1
-  if (moveX === 0 && moveZ === 0) return
+  const moving = moveX !== 0 || moveZ !== 0
+  updateLimbs(dt, moving)
+  if (!moving) return
 
   const len = Math.hypot(moveX, moveZ)
   moveX /= len
