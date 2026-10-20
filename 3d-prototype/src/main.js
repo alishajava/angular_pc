@@ -50,39 +50,16 @@ for (const [x, halfHeight, z] of LANDMARKS) {
   landmarkBoxes.push({ x, z, height: halfHeight * 2 })
 }
 
-// Player: torso + head, plus four limbs that each hang from a pivot Group
-// positioned at the joint (shoulder/hip) so rotating the pivot swings the
-// limb like a real joint instead of just translating a shape.
+// A character is a torso + head, plus four limbs that each hang from a
+// pivot Group positioned at the joint (shoulder/hip) so rotating the
+// pivot swings the limb like a real joint instead of just translating a
+// shape. Legs are two segments (hip -> knee) so a knee bend actually
+// looks like one. Used for both the player and the NPCs below, with a
+// different outfit color per character.
 const SKIN = 0xf2c79b
-const OUTFIT = 0x3f7fd1
 const BOOTS = 0x2b2440
 
-const player = new THREE.Group()
-
-const torso = new THREE.Mesh(
-  new THREE.CapsuleGeometry(0.3, 0.3, 4, 8),
-  new THREE.MeshStandardMaterial({ color: OUTFIT }),
-)
-torso.position.y = 1.05
-player.add(torso)
-
-const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), new THREE.MeshStandardMaterial({ color: SKIN }))
-head.position.y = 1.55
-player.add(head)
-
-const nose = new THREE.Mesh(
-  new THREE.ConeGeometry(0.08, 0.2, 8),
-  new THREE.MeshStandardMaterial({ color: 0xffe066 }),
-)
-nose.rotation.x = Math.PI / 2
-nose.position.set(0, 1.55, 0.3)
-player.add(nose)
-
-// Builds one single-segment limb (arms): a pivot Group at the joint, with
-// the limb mesh hanging below it offset by half its length, so
-// `pivot.rotation.x` swings it forward/back around the joint rather than
-// around its own center.
-function makeLimb(color, radius, length, jointX, jointY) {
+function makeLimb(group, color, radius, length, jointX, jointY) {
   const pivot = new THREE.Group()
   pivot.position.set(jointX, jointY, 0)
   const mesh = new THREE.Mesh(
@@ -91,15 +68,11 @@ function makeLimb(color, radius, length, jointX, jointY) {
   )
   mesh.position.y = -length / 2
   pivot.add(mesh)
-  player.add(pivot)
+  group.add(pivot)
   return pivot
 }
 
-// Builds a two-segment leg: a hip pivot (walk swing happens here) whose
-// upper-leg mesh hangs down to a knee pivot, which in turn hangs the
-// lower-leg mesh. Bending the knee is what lets the jump crouch actually
-// look like a crouch instead of the whole leg tipping forward rigidly.
-function makeLeg(color, radius, upperLen, lowerLen, jointX, jointY) {
+function makeLeg(group, color, radius, upperLen, lowerLen, jointX, jointY) {
   const hip = new THREE.Group()
   hip.position.set(jointX, jointY, 0)
   const upperMesh = new THREE.Mesh(
@@ -119,16 +92,55 @@ function makeLeg(color, radius, upperLen, lowerLen, jointX, jointY) {
   lowerMesh.position.y = -lowerLen / 2
   knee.add(lowerMesh)
 
-  player.add(hip)
+  group.add(hip)
   return { hip, knee }
 }
 
-const armL = makeLimb(SKIN, 0.07, 0.5, -0.36, 1.3)
-const armR = makeLimb(SKIN, 0.07, 0.5, 0.36, 1.3)
-const legL = makeLeg(BOOTS, 0.1, 0.38, 0.37, -0.14, 0.75)
-const legR = makeLeg(BOOTS, 0.1, 0.38, 0.37, 0.14, 0.75)
+function createCharacter(outfitColor) {
+  const group = new THREE.Group()
 
-scene.add(player)
+  const torso = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.3, 0.3, 4, 8),
+    new THREE.MeshStandardMaterial({ color: outfitColor }),
+  )
+  torso.position.y = 1.05
+  group.add(torso)
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), new THREE.MeshStandardMaterial({ color: SKIN }))
+  head.position.y = 1.55
+  group.add(head)
+
+  const nose = new THREE.Mesh(
+    new THREE.ConeGeometry(0.08, 0.2, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffe066 }),
+  )
+  nose.rotation.x = Math.PI / 2
+  nose.position.set(0, 1.55, 0.3)
+  group.add(nose)
+
+  const armL = makeLimb(group, SKIN, 0.07, 0.5, -0.36, 1.3)
+  const armR = makeLimb(group, SKIN, 0.07, 0.5, 0.36, 1.3)
+  const legL = makeLeg(group, BOOTS, 0.1, 0.38, 0.37, -0.14, 0.75)
+  const legR = makeLeg(group, BOOTS, 0.1, 0.38, 0.37, 0.14, 0.75)
+
+  scene.add(group)
+  return { group, armL, armR, legL, legR }
+}
+
+// The player's own limb refs stay top-level (armL, armR, legL, legR) since
+// the rest of this file already addresses them that way.
+const { group: player, armL, armR, legL, legR } = createCharacter(0x3f7fd1)
+
+// Two NPCs standing around, with a gentle idle sway (see updateNpcs) so
+// the world doesn't feel frozen when the player isn't near them.
+const npcs = [
+  { ...createCharacter(0xd1553f), phase: 0 },
+  { ...createCharacter(0x55b86a), phase: 2.1 },
+]
+npcs[0].group.position.set(4, 0, -3)
+npcs[0].group.rotation.y = Math.PI * 0.6
+npcs[1].group.position.set(-4, 0, 9)
+npcs[1].group.rotation.y = -Math.PI * 0.3
 
 // Keyboard input. Jump is triggered here (edge-style, gated on `grounded`
 // and not already mid-jump-animation) rather than read as a held key, so
@@ -245,6 +257,22 @@ function updateVertical(dt) {
   } else {
     player.position.y = nextY
     grounded = false
+  }
+}
+
+// NPCs just stand around, with a slow arm sway so they read as alive
+// rather than frozen. Each has its own phase offset so they don't sway
+// in lockstep.
+let npcTime = 0
+const IDLE_SWAY_RATE = 1.6
+const IDLE_SWAY_AMOUNT = 0.3
+
+function updateNpcs(dt) {
+  npcTime += dt
+  for (const npc of npcs) {
+    const sway = Math.sin(npcTime * IDLE_SWAY_RATE + npc.phase) * IDLE_SWAY_AMOUNT
+    npc.armL.rotation.x = sway
+    npc.armR.rotation.x = -sway
   }
 }
 
@@ -367,6 +395,7 @@ function loop(time) {
 
   updatePlayer(dt)
   updateJumpAnim(dt)
+  updateNpcs(dt)
   resolveBoxCollisions()
   updateVertical(dt)
   updateCamera()
