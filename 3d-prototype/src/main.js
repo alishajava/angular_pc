@@ -27,6 +27,8 @@ scene.add(ground)
 scene.add(new THREE.GridHelper(GROUND_SIZE, 40, 0x2a3a2a, 0x2a3a2a))
 
 // A few scattered landmark boxes so walking around actually feels like going somewhere.
+// Each one is also solid: `landmarkBoxes` holds the collision data `boxBlocks()` checks
+// against, including its height so a high enough jump can clear a short box.
 const landmarkMat = new THREE.MeshStandardMaterial({ color: 0xcc6633 })
 const LANDMARKS = [
   [8, 1, 4],
@@ -36,10 +38,13 @@ const LANDMARKS = [
   [0, 2, -20],
   [20, 1, 6],
 ]
+const BOX_HALF_SIZE = 1 // landmark boxes are 2x2 in footprint
+const landmarkBoxes = []
 for (const [x, halfHeight, z] of LANDMARKS) {
   const box = new THREE.Mesh(new THREE.BoxGeometry(2, halfHeight * 2, 2), landmarkMat)
   box.position.set(x, halfHeight, z)
   scene.add(box)
+  landmarkBoxes.push({ x, z, height: halfHeight * 2 })
 }
 
 // Player: capsule body + sphere head + a small nose cone marking facing direction.
@@ -65,9 +70,18 @@ nose.position.set(0, 1.55, 0.3)
 player.add(nose)
 scene.add(player)
 
-// Keyboard input.
+// Keyboard input. Jump is triggered here (edge-style, gated on `grounded`)
+// rather than read as a held key, so holding Space doesn't bunny-hop.
 const heldKeys = new Set()
-window.addEventListener('keydown', (e) => heldKeys.add(e.key.toLowerCase()))
+const JUMP_KEYS = [' ', 'spacebar']
+window.addEventListener('keydown', (e) => {
+  const key = e.key.toLowerCase()
+  heldKeys.add(key)
+  if (JUMP_KEYS.includes(key) && grounded) {
+    velocityY = JUMP_SPEED
+    grounded = false
+  }
+})
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
 
 const MOVE_KEYS = {
@@ -111,8 +125,36 @@ function angleDelta(from, to) {
 }
 
 const PLAYER_SPEED = 6
+const PLAYER_RADIUS = 0.5
 const GROUND_HALF = GROUND_SIZE / 2 - 1
 let facingAngle = 0
+
+// A box only blocks movement up to its own height, so jumping high enough
+// clears short ones instead of bumping into them like an invisible wall.
+function boxBlocks(x, z, y) {
+  for (const box of landmarkBoxes) {
+    const half = BOX_HALF_SIZE + PLAYER_RADIUS
+    if (Math.abs(x - box.x) < half && Math.abs(z - box.z) < half && y < box.height - 0.05) {
+      return true
+    }
+  }
+  return false
+}
+
+const GRAVITY = 20
+const JUMP_SPEED = 10 // peak height v²/2g ≈ 2.5, enough to clear the 2-unit-tall boxes
+let velocityY = 0
+let grounded = true
+
+function updateVertical(dt) {
+  velocityY -= GRAVITY * dt
+  player.position.y += velocityY * dt
+  if (player.position.y <= 0) {
+    player.position.y = 0
+    velocityY = 0
+    grounded = true
+  }
+}
 
 function updatePlayer(dt) {
   let moveX = 0
@@ -133,8 +175,16 @@ function updatePlayer(dt) {
   const worldX = moveX * cos - moveZ * sin
   const worldZ = moveX * sin + moveZ * cos
 
-  player.position.x = Math.max(-GROUND_HALF, Math.min(GROUND_HALF, player.position.x + worldX * PLAYER_SPEED * dt))
-  player.position.z = Math.max(-GROUND_HALF, Math.min(GROUND_HALF, player.position.z + worldZ * PLAYER_SPEED * dt))
+  // Resolve each axis separately so the player slides along a box's edge
+  // instead of stopping dead when moving diagonally into it.
+  const nextX = player.position.x + worldX * PLAYER_SPEED * dt
+  if (!boxBlocks(nextX, player.position.z, player.position.y)) {
+    player.position.x = Math.max(-GROUND_HALF, Math.min(GROUND_HALF, nextX))
+  }
+  const nextZ = player.position.z + worldZ * PLAYER_SPEED * dt
+  if (!boxBlocks(player.position.x, nextZ, player.position.y)) {
+    player.position.z = Math.max(-GROUND_HALF, Math.min(GROUND_HALF, nextZ))
+  }
 
   const targetAngle = Math.atan2(worldX, worldZ)
   facingAngle += angleDelta(facingAngle, targetAngle) * Math.min(1, dt * 10)
@@ -161,6 +211,7 @@ function loop(time) {
   lastTime = time
 
   updatePlayer(dt)
+  updateVertical(dt)
   updateCamera()
   renderer.render(scene, camera)
   requestAnimationFrame(loop)
