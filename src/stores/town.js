@@ -3,20 +3,36 @@ import { reactive, ref } from 'vue'
 import { parseGrid, canMoveTo, tileCenter } from '../mapUtils'
 import { writeSave, readSave } from '../save'
 
-// Fixed small town layout. '#' = wall, everything else is walkable floor.
+// Fixed town layout. '#' = wall, everything else is walkable floor.
 // Letters mark where an interactable stands (the tile itself is still floor).
+// Built from a helper instead of hand-counted strings so a wider/taller
+// town is easy to get right.
+const TOWN_COLS = 16
+const TOWN_ROWS = 12
+
+function floorRow(markers = {}) {
+  const chars = Array(TOWN_COLS).fill('.')
+  chars[0] = '#'
+  chars[TOWN_COLS - 1] = '#'
+  for (const [col, ch] of Object.entries(markers)) chars[Number(col)] = ch
+  return chars.join('')
+}
+
 const MAP = [
-  '############',
-  '#..........#',
-  '#.W......H.#',
-  '#.......R..#',
-  '#....T.....#',
-  '#..........#',
-  '#.n......n.#',
-  '#....D.....#',
-  '#.....e....#',
-  '############',
+  '#'.repeat(TOWN_COLS),
+  floorRow(),
+  floorRow({ 3: 'W', 12: 'H' }),
+  floorRow(),
+  floorRow({ 7: 'T' }),
+  floorRow(),
+  floorRow({ 3: 'R', 12: 'n' }),
+  floorRow(),
+  floorRow(),
+  floorRow({ 1: 'n', 12: 'e' }),
+  floorRow({ 7: 'D' }),
+  '#'.repeat(TOWN_COLS),
 ]
+if (MAP.length !== TOWN_ROWS) throw new Error('town MAP row count mismatch')
 
 export const TILE = 52
 export const COLS = MAP[0].length
@@ -59,9 +75,17 @@ const SPAWN_TYPES = {
   R: 'heroine',
 }
 
+// Landmarks the player navigates to (the dungeon gate, the tavern's
+// building/entrance) stay put; everyone else wanders a little around
+// their home spot so the town doesn't feel frozen.
+const STATIC_TYPES = new Set(['gate', 'tavern'])
+const WANDER_RADIUS = 22
+const WANDER_SPEED = 0.5
+
 function buildInteractables() {
   const list = []
   let villagerIndex = 0
+  let seed = 0
   for (let row = 0; row < MAP.length; row++) {
     for (let col = 0; col < MAP[row].length; col++) {
       const ch = MAP[row][col]
@@ -71,7 +95,20 @@ function buildInteractables() {
         villagerIndex++
         type = `villager${villagerIndex}`
       }
-      list.push({ type, ...tileCenter(col, row, TILE), touching: false, visited: false })
+      const home = tileCenter(col, row, TILE)
+      list.push({
+        type,
+        x: home.x,
+        y: home.y,
+        homeX: home.x,
+        homeY: home.y,
+        wanderAngle: STATIC_TYPES.has(type) ? 0 : seed * 2.4,
+        wanderPhase: seed * 1.7,
+        facing: 'right',
+        touching: false,
+        visited: false,
+      })
+      seed++
     }
   }
   return list
@@ -94,6 +131,8 @@ export const useTownStore = defineStore('town', () => {
   const dialogueText = ref('')
   const dialogueTimer = ref(0)
   const pendingPurchase = ref(null) // 'weapon' | 'herb' | null
+
+  let wanderTime = 0
 
   function enterTown() {
     const start = tileCenter(...PLAYER_START, TILE)
@@ -264,7 +303,18 @@ export const useTownStore = defineStore('town', () => {
     const tryY = player.y + dy * PLAYER_SPEED * dt
     if (canMoveTo(grid, COLS, ROWS, TILE, player.x, tryY, PLAYER_HALF)) player.y = tryY
 
+    wanderTime += dt
     for (const item of interactables) {
+      if (!STATIC_TYPES.has(item.type)) {
+        const t = wanderTime * WANDER_SPEED + item.wanderPhase
+        const nextX = item.homeX + Math.cos(item.wanderAngle) * WANDER_RADIUS * Math.sin(t)
+        const nextY = item.homeY + Math.sin(item.wanderAngle) * WANDER_RADIUS * Math.sin(t)
+        if (nextX > item.x + 0.05) item.facing = 'right'
+        else if (nextX < item.x - 0.05) item.facing = 'left'
+        item.x = nextX
+        item.y = nextY
+      }
+
       const overlapping = Math.abs(player.x - item.x) < PLAYER_HALF + 14 && Math.abs(player.y - item.y) < PLAYER_HALF + 14
       if (overlapping && !item.touching) {
         item.touching = true

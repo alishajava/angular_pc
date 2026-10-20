@@ -82,14 +82,19 @@ export function drawHeroine(ctx, x, y, facing = 'down', swing = 0) {
   ctx.restore()
 }
 
-export function drawVillager(ctx, x, y, outfit, hair = '#5a3e1b', swing = 0) {
-  humanoid(ctx, x, y, { skin: '#f2c79b', hair, outfit, boots: '#3b2a1a', swing })
-}
-
-export function drawElder(ctx, x, y, swing = 0) {
-  humanoid(ctx, x, y, { skin: '#e8c6a0', hair: '#e8e8e8', outfit: '#6b4fa0', boots: '#3b2a1a', swing })
+export function drawVillager(ctx, x, y, outfit, hair = '#5a3e1b', swing = 0, facing = 'right') {
   ctx.save()
   ctx.translate(x, y)
+  if (facing === 'left') ctx.scale(-1, 1)
+  humanoid(ctx, 0, 0, { skin: '#f2c79b', hair, outfit, boots: '#3b2a1a', swing })
+  ctx.restore()
+}
+
+export function drawElder(ctx, x, y, swing = 0, facing = 'right') {
+  ctx.save()
+  ctx.translate(x, y)
+  if (facing === 'left') ctx.scale(-1, 1)
+  humanoid(ctx, 0, 0, { skin: '#e8c6a0', hair: '#e8e8e8', outfit: '#6b4fa0', boots: '#3b2a1a', swing })
   // beard
   ctx.fillStyle = '#e8e8e8'
   block(ctx, -4, -9, 8, 5, 2)

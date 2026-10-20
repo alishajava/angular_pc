@@ -55,6 +55,10 @@ function idleSwing(seed = 0) {
   return Math.sin(animTime * 2.4 + seed) * 3
 }
 
+function wanderSwing(seed = 0) {
+  return Math.sin(animTime * 6 + seed) * 3
+}
+
 function walkSwing(moving) {
   return moving ? Math.sin(animTime * 10) * 3 : idleSwing()
 }
@@ -96,14 +100,17 @@ function drawMap(ctx) {
   }
 }
 
+const STATIC_TYPES = new Set(['gate', 'tavern'])
+
 function drawInteractables(ctx) {
   store.interactables.forEach((item, idx) => {
     const info = TYPE_INFO[item.type]
-    const swing = idleSwing(idx * 1.3)
+    const swing = STATIC_TYPES.has(item.type) ? idleSwing(idx * 1.3) : wanderSwing(idx * 1.3)
+    const facing = item.facing === 'left' ? 'left' : 'right'
     if (item.type === 'gate') drawGate(ctx, item.x, item.y)
-    else if (item.type === 'elder') drawElder(ctx, item.x, item.y, swing)
-    else if (item.type === 'heroine') drawHeroine(ctx, item.x, item.y, 'down', swing)
-    else drawVillager(ctx, item.x, item.y, info.outfit, info.hair, swing)
+    else if (item.type === 'elder') drawElder(ctx, item.x, item.y, swing, facing)
+    else if (item.type === 'heroine') drawHeroine(ctx, item.x, item.y, facing === 'left' ? 'left' : 'down', swing)
+    else drawVillager(ctx, item.x, item.y, info.outfit, info.hair, swing, facing)
 
     ctx.fillStyle = '#fff'
     ctx.font = 'bold 11px sans-serif'
