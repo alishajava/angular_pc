@@ -8,7 +8,9 @@ function block(ctx, x, y, w, h, r) {
 }
 
 // `swing` is a small px offset (typically from a caller-computed sine wave)
-// that alternates the legs and arms to fake a walk/idle-sway cycle.
+// that alternates the legs and arms to fake a walk/idle-sway cycle. The
+// upper body also bobs with |swing| so the motion reads clearly even at
+// small amplitudes, instead of being limited to a couple of tiny blocks.
 function humanoid(ctx, x, y, { skin, hair, outfit, boots, swing = 0 }) {
   ctx.save()
   ctx.translate(x, y)
@@ -16,6 +18,9 @@ function humanoid(ctx, x, y, { skin, hair, outfit, boots, swing = 0 }) {
   ctx.fillStyle = boots
   block(ctx, -7, 6 + swing, 5, 8, 2)
   block(ctx, 2, 6 - swing, 5, 8, 2)
+
+  ctx.save()
+  ctx.translate(0, -Math.abs(swing) * 0.5)
 
   ctx.fillStyle = outfit
   block(ctx, -9, -5, 18, 13, 4)
@@ -37,6 +42,7 @@ function humanoid(ctx, x, y, { skin, hair, outfit, boots, swing = 0 }) {
   ctx.fillRect(-4, -13, 2, 2)
   ctx.fillRect(2, -13, 2, 2)
 
+  ctx.restore()
   ctx.restore()
 }
 

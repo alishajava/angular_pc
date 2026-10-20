@@ -44,7 +44,7 @@ let wasTalking = false
 let animTime = 0
 
 function idleSwing(seed = 0) {
-  return Math.sin(animTime * 2 + seed) * 1.8
+  return Math.sin(animTime * 2.4 + seed) * 3
 }
 
 function walkSwing(moving) {

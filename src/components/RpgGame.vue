@@ -104,7 +104,7 @@ let lastTime = 0
 let animTime = 0
 
 function walkSwing(moving) {
-  return moving ? Math.sin(animTime * 10) * 3 : Math.sin(animTime * 2) * 1.8
+  return moving ? Math.sin(animTime * 10) * 3 : Math.sin(animTime * 2.4) * 3
 }
 
 function loop(time) {
@@ -273,7 +273,7 @@ function drawBattle(ctx) {
   ctx.fillText(`용사 HP ${p.hp}/${p.maxHp}`, 24, cmdY + 11)
 
   if (store.companion.active) {
-    drawHeroine(ctx, STAGE_WIDTH - 36, cmdY + 7, 'left', Math.sin(animTime * 2) * 1.8)
+    drawHeroine(ctx, STAGE_WIDTH - 36, cmdY + 7, 'left', Math.sin(animTime * 2.4) * 3)
     ctx.textAlign = 'right'
     ctx.font = '11px sans-serif'
     ctx.fillStyle = '#e0557a'
