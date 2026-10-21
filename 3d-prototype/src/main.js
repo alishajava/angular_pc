@@ -240,6 +240,27 @@ function resolveBoxCollisions() {
   }
 }
 
+// Same idea as resolveBoxCollisions, but circular (NPCs are standing
+// characters, not axis-aligned blocks) and with no "stand on top" case -
+// an NPC is just solid from the ground up to about head height.
+const NPC_RADIUS = 0.45
+const NPC_HEIGHT = 1.8
+
+function resolveNpcCollisions() {
+  const minDist = NPC_RADIUS + PLAYER_RADIUS
+  for (const npc of npcs) {
+    if (player.position.y >= NPC_HEIGHT - 0.05) continue
+    const dx = player.position.x - npc.group.position.x
+    const dz = player.position.z - npc.group.position.z
+    const dist = Math.hypot(dx, dz)
+    if (dist >= minDist) continue
+    const push = minDist - dist
+    const [nx, nz] = dist > 0.0001 ? [dx / dist, dz / dist] : [1, 0]
+    player.position.x += nx * push
+    player.position.z += nz * push
+  }
+}
+
 const GRAVITY = 20
 const JUMP_SPEED = 10 // peak height v²/2g ≈ 2.5, enough to clear the 2-unit-tall boxes
 let velocityY = 0
@@ -397,6 +418,7 @@ function loop(time) {
   updateJumpAnim(dt)
   updateNpcs(dt)
   resolveBoxCollisions()
+  resolveNpcCollisions()
   updateVertical(dt)
   updateCamera()
   renderer.render(scene, camera)
