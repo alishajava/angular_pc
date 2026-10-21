@@ -1,11 +1,11 @@
-// Small top-down action-adventure demo (Zelda-style): one room, real-time
-// sword combat, wandering enemies, heart-based HP. No images/audio files -
-// everything is drawn with Canvas 2D shapes, same approach as the other
-// projects in this repo.
+// Top-down exploration/puzzle adventure, Sierra-style (King's Quest /
+// Leisure Suit Larry era): walk between a few connected rooms, talk to
+// people, pick up an item, use it to get past a locked gate. No combat,
+// no images/audio files - everything is drawn with Canvas 2D shapes.
 
 const TILE = 32
-const COLS = 20
-const ROWS = 15
+const COLS = 25
+const ROWS = 18
 
 function floorRow(markers = {}) {
   const chars = Array(COLS).fill('.')
@@ -15,29 +15,131 @@ function floorRow(markers = {}) {
   return chars.join('')
 }
 
-// '#' = outer wall, 'b' = bush (also solid), '.' = floor.
-const MAP = [
+const DOOR_ROW = 9 // the row an edge exit opens a gap on
+
+// Letters: '#' wall, 'b' bush (solid), '.' floor, 'L'/'R' exits to the
+// room on that side, 'V'/'W' villagers, 'C' a readable sign/chest,
+// 'K' the key pickup, 'T' the treasure (win condition).
+const ROOM_A = [
   '#'.repeat(COLS),
   floorRow(),
-  floorRow({ 5: 'b', 14: 'b' }),
+  floorRow({ 6: 'b' }),
   floorRow(),
-  floorRow({ 9: 'b' }),
+  floorRow({ 18: 'b' }),
   floorRow(),
-  floorRow({ 3: 'b', 16: 'b' }),
+  floorRow({ 10: 'V' }),
   floorRow(),
-  floorRow({ 7: 'b', 12: 'b' }),
+  floorRow({ 4: 'C' }),
+  floorRow({ [COLS - 1]: 'R' }),
   floorRow(),
-  floorRow({ 10: 'b' }),
+  floorRow({ 14: 'K' }),
   floorRow(),
-  floorRow({ 4: 'b', 15: 'b' }),
+  floorRow({ 8: 'b', 20: 'b' }),
+  floorRow(),
+  floorRow(),
   floorRow(),
   '#'.repeat(COLS),
 ]
-if (MAP.length !== ROWS) throw new Error('map row count mismatch')
 
-const grid = MAP.map((row) => [...row].map((ch) => (ch === '#' || ch === 'b' ? 1 : 0)))
+const ROOM_B = [
+  '#'.repeat(COLS),
+  floorRow(),
+  floorRow({ 5: 'b', 19: 'b' }),
+  floorRow(),
+  floorRow({ 12: 'b' }),
+  floorRow(),
+  floorRow({ 3: 'b', 21: 'b' }),
+  floorRow(),
+  floorRow({ 16: 'W' }),
+  floorRow({ 0: 'L', [COLS - 1]: 'R' }),
+  floorRow(),
+  floorRow({ 9: 'b' }),
+  floorRow(),
+  floorRow({ 6: 'b', 17: 'b' }),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  '#'.repeat(COLS),
+]
+
+const ROOM_C = [
+  '#'.repeat(COLS),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  floorRow({ 0: 'L', 12: 'T' }),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  '#'.repeat(COLS),
+]
+
+for (const m of [ROOM_A, ROOM_B, ROOM_C]) {
+  if (m.length !== ROWS) throw new Error('room row count mismatch')
+}
+
+const SOLID = new Set(['#', 'b'])
+
+const DIALOGUE = {
+  V: { speaker: '마을 사람', text: '숲속에 보물이 있다는 소문이 있어. 하지만 문이 잠겨있을 거야.' },
+  W: { speaker: '숲지기', text: '동쪽 문은 오래전에 잠겼지. 열쇠를 가진 자만 지나갈 수 있어.' },
+  C: { speaker: '팻말', text: '"조심하시오. 숲의 문은 열쇠 없이 열리지 않는다."' },
+}
+
+function buildInteractables(mapRows) {
+  const list = []
+  for (let row = 0; row < mapRows.length; row++) {
+    for (let col = 0; col < mapRows[row].length; col++) {
+      const ch = mapRows[row][col]
+      if (!'VWCKTLR'.includes(ch)) continue
+      list.push({
+        type: ch,
+        x: col * TILE + TILE / 2,
+        y: row * TILE + TILE / 2,
+        col,
+        row,
+        collected: false,
+        touching: false,
+      })
+    }
+  }
+  return list
+}
+
+function makeRoom(mapRows, name) {
+  const grid = mapRows.map((row) => [...row].map((ch) => (SOLID.has(ch) ? 1 : 0)))
+  return { name, mapRows, grid, interactables: buildInteractables(mapRows) }
+}
+
+const ROOMS = {
+  village: makeRoom(ROOM_A, 'village'),
+  forest: makeRoom(ROOM_B, 'forest'),
+  grove: makeRoom(ROOM_C, 'grove'),
+}
+// which room an exit leads to, and which column to enter at
+const EXITS = {
+  village: { R: { room: 'forest', side: 'L' } },
+  forest: { L: { room: 'village', side: 'R' }, R: { room: 'grove', side: 'L' } },
+  grove: { L: { room: 'forest', side: 'R' } },
+}
+const ENTRY_COL = { L: 1, R: COLS - 2 }
+
+let currentRoomKey = 'village'
+function room() {
+  return ROOMS[currentRoomKey]
+}
 
 function canMoveTo(x, y, half) {
+  const grid = room().grid
   const corners = [
     [x - half, y - half],
     [x + half, y - half],
@@ -59,59 +161,62 @@ canvas.height = ROWS * TILE
 const ctx = canvas.getContext('2d')
 
 const DIR_VEC = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }
-const FACE_ANGLE = { right: 0, down: Math.PI / 2, left: Math.PI, up: -Math.PI / 2 }
 
-const PLAYER_SPEED = 110
+const PLAYER_SPEED = 120
 const PLAYER_HALF = 10
-const ATTACK_COOLDOWN = 0.35
-const ATTACK_DURATION = 0.22
-const ATTACK_RANGE = 22
-const ATTACK_WIDTH = 24
-const INVULN_DURATION = 0.7
+const DIALOGUE_DURATION = 3.2
 
-const ENEMY_SPAWNS = [
-  [6, 6],
-  [14, 4],
-  [10, 10],
-]
-const ENEMY_HALF = 9
-const ENEMY_MAX_HP = 2
-const ENEMY_SPEED = 45
-const ENEMY_DAMAGE = 1
+const player = {
+  x: TILE * 2,
+  y: DOOR_ROW * TILE + TILE / 2,
+  facing: 'down',
+  walking: false,
+  walkPhase: 0,
+}
+const inventory = []
+let dialogueSpeaker = ''
+let dialogueText = ''
+let dialogueTimer = 0
 
-let player
-let enemies
-let phase = 'playing' // 'playing' | 'gameOver'
-let message = ''
-
-function resetGame() {
-  player = {
-    x: TILE * 2,
-    y: TILE * 2,
-    facing: 'down',
-    walking: false,
-    walkPhase: 0,
-    hp: 3,
-    maxHp: 3,
-    attackCooldown: 0,
-    attackTimer: 0,
-    invulnTimer: 0,
-  }
-  enemies = ENEMY_SPAWNS.map(([col, row]) => ({
-    x: col * TILE + TILE / 2,
-    y: row * TILE + TILE / 2,
-    hp: ENEMY_MAX_HP,
-    maxHp: ENEMY_MAX_HP,
-    dir: randomDir(),
-    wanderTimer: 1 + Math.random(),
-  }))
-  phase = 'playing'
-  message = ''
+function enterRoom(key, side) {
+  currentRoomKey = key
+  player.x = ENTRY_COL[side] * TILE + TILE / 2
+  player.y = DOOR_ROW * TILE + TILE / 2
+  for (const it of room().interactables) it.touching = false
 }
 
-function randomDir() {
-  const dirs = ['up', 'down', 'left', 'right']
-  return dirs[Math.floor(Math.random() * dirs.length)]
+function say(speaker, text) {
+  dialogueSpeaker = speaker
+  dialogueText = text
+  dialogueTimer = DIALOGUE_DURATION
+}
+
+function triggerInteraction(item) {
+  if (item.type === 'V' || item.type === 'W' || item.type === 'C') {
+    const line = DIALOGUE[item.type]
+    say(line.speaker, line.text)
+    return
+  }
+  if (item.type === 'K') {
+    if (item.collected) return
+    item.collected = true
+    inventory.push('key')
+    say('시스템', '열쇠를 주웠다!')
+    return
+  }
+  if (item.type === 'T') {
+    say('???', '보물 상자다! 반짝이는 보석이 가득하다. 모험 완료!')
+    return
+  }
+  if (item.type === 'L' || item.type === 'R') {
+    const exit = EXITS[currentRoomKey][item.type]
+    if (!exit) return
+    if (currentRoomKey === 'forest' && item.type === 'R' && !inventory.includes('key')) {
+      say('???', '문이 굳게 잠겨 있다. 열쇠가 필요할 것 같다.')
+      return
+    }
+    enterRoom(exit.room, exit.side)
+  }
 }
 
 // Input
@@ -122,49 +227,14 @@ const MOVE_KEYS = {
   left: ['a', 'arrowleft'],
   right: ['d', 'arrowright'],
 }
-const ATTACK_KEYS = [' ', 'spacebar', 'j']
 function held(names) {
   return names.some((k) => heldKeys.has(k))
 }
-
-window.addEventListener('keydown', (e) => {
-  const key = e.key.toLowerCase()
-  heldKeys.add(key)
-  if (phase === 'gameOver') {
-    resetGame()
-    return
-  }
-  if (ATTACK_KEYS.includes(key) && player.attackCooldown <= 0) {
-    player.attackCooldown = ATTACK_COOLDOWN
-    player.attackTimer = ATTACK_DURATION
-    const hitbox = attackHitbox()
-    for (const e of enemies) {
-      if (overlapsHitbox(hitbox, e.x, e.y, ENEMY_HALF)) {
-        e.hp -= 1
-      }
-    }
-  }
-})
+window.addEventListener('keydown', (e) => heldKeys.add(e.key.toLowerCase()))
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
 
-function attackHitbox() {
-  const w = ATTACK_WIDTH
-  const len = ATTACK_RANGE
-  const { x, y, facing } = player
-  if (facing === 'up') return { x: x - w / 2, y: y - len - PLAYER_HALF, w, h: len }
-  if (facing === 'down') return { x: x - w / 2, y: y + PLAYER_HALF, w, h: len }
-  if (facing === 'left') return { x: x - len - PLAYER_HALF, y: y - w / 2, w: len, h: w }
-  return { x: x + PLAYER_HALF, y: y - w / 2, w: len, h: w }
-}
-
-function overlapsHitbox(rect, mx, my, half) {
-  return mx + half > rect.x && mx - half < rect.x + rect.w && my + half > rect.y && my - half < rect.y + rect.h
-}
-
 function updatePlayer(dt) {
-  if (player.attackCooldown > 0) player.attackCooldown -= dt
-  if (player.attackTimer > 0) player.attackTimer -= dt
-  if (player.invulnTimer > 0) player.invulnTimer -= dt
+  if (dialogueTimer > 0) dialogueTimer -= dt
 
   let dx = 0
   let dy = 0
@@ -185,55 +255,26 @@ function updatePlayer(dt) {
     const tryY = player.y + dy * PLAYER_SPEED * dt
     if (canMoveTo(player.x, tryY, PLAYER_HALF)) player.y = tryY
   }
-}
 
-function updateEnemies(dt) {
-  for (let i = enemies.length - 1; i >= 0; i--) {
-    const e = enemies[i]
-    if (e.hp <= 0) {
-      enemies.splice(i, 1)
-      continue
+  for (const item of room().interactables) {
+    if (item.type === 'K' && item.collected) continue
+    const overlapping = Math.abs(player.x - item.x) < PLAYER_HALF + 14 && Math.abs(player.y - item.y) < PLAYER_HALF + 14
+    if (overlapping && !item.touching) {
+      item.touching = true
+      triggerInteraction(item)
+    } else if (!overlapping) {
+      item.touching = false
     }
-    e.wanderTimer -= dt
-    if (e.wanderTimer <= 0) {
-      e.dir = Math.random() < 0.3 ? null : randomDir() // sometimes pause
-      e.wanderTimer = 0.8 + Math.random() * 1.2
-    }
-    if (e.dir) {
-      const [vx, vy] = DIR_VEC[e.dir]
-      const tryX = e.x + vx * ENEMY_SPEED * dt
-      const tryY = e.y + vy * ENEMY_SPEED * dt
-      if (canMoveTo(tryX, e.y, ENEMY_HALF)) e.x = tryX
-      else e.dir = randomDir()
-      if (canMoveTo(e.x, tryY, ENEMY_HALF)) e.y = tryY
-      else e.dir = randomDir()
-    }
-
-    if (
-      player.invulnTimer <= 0 &&
-      Math.abs(player.x - e.x) < PLAYER_HALF + ENEMY_HALF &&
-      Math.abs(player.y - e.y) < PLAYER_HALF + ENEMY_HALF
-    ) {
-      player.hp -= ENEMY_DAMAGE
-      player.invulnTimer = INVULN_DURATION
-      if (player.hp <= 0) {
-        phase = 'gameOver'
-        message = '쓰러졌다... 아무 키나 눌러 다시 시작'
-      }
-    }
-  }
-
-  if (enemies.length === 0 && phase === 'playing') {
-    phase = 'gameOver'
-    message = '모든 적을 물리쳤다! 아무 키나 눌러 다시 시작'
   }
 }
 
 function drawMap() {
+  const mapRows = room().mapRows
   for (let row = 0; row < ROWS; row++) {
     for (let col = 0; col < COLS; col++) {
-      const ch = MAP[row][col]
-      ctx.fillStyle = ch === '#' ? '#3a2f20' : ch === 'b' ? '#2f5233' : '#7fb06a'
+      const ch = mapRows[row][col]
+      const isDoor = ch === 'L' || ch === 'R'
+      ctx.fillStyle = ch === '#' ? '#3a2f20' : ch === 'b' ? '#2f5233' : isDoor ? '#6b4a2f' : '#7fb06a'
       ctx.fillRect(col * TILE, row * TILE, TILE, TILE)
       if (ch === 'b') {
         ctx.fillStyle = '#3f6b45'
@@ -245,28 +286,88 @@ function drawMap() {
   }
 }
 
-function drawSlash() {
-  if (player.attackTimer <= 0) return
-  const progress = 1 - player.attackTimer / ATTACK_DURATION
-  const center = FACE_ANGLE[player.facing]
-  const sweep = Math.PI * 0.6
-  const start = center - sweep / 2
-  const reveal = start + sweep * Math.min(1, progress * 1.6)
+function drawVillager(x, y, outfit) {
   ctx.save()
-  ctx.translate(player.x, player.y)
-  ctx.globalAlpha = Math.max(0, 1 - progress)
-  ctx.strokeStyle = '#f5f8ff'
-  ctx.lineWidth = 3
+  ctx.translate(x, y)
+  ctx.fillStyle = '#2b2440'
+  ctx.fillRect(-7, 6, 4, 6)
+  ctx.fillRect(3, 6, 4, 6)
+  ctx.fillStyle = outfit
   ctx.beginPath()
-  ctx.arc(0, 0, 20, start, reveal)
+  ctx.roundRect(-9, -9, 18, 18, 4)
+  ctx.fill()
+  ctx.fillStyle = '#f2c79b'
+  ctx.beginPath()
+  ctx.arc(0, 0, 6, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+function drawSign(x, y) {
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.fillStyle = '#8a6a2e'
+  ctx.fillRect(-2, 0, 4, 12)
+  ctx.fillStyle = '#c9a86a'
+  ctx.beginPath()
+  ctx.roundRect(-12, -14, 24, 16, 2)
+  ctx.fill()
+  ctx.strokeStyle = '#5c431c'
+  ctx.lineWidth = 1.5
   ctx.stroke()
   ctx.restore()
+}
+
+function drawKey(x, y) {
+  ctx.save()
+  ctx.translate(x, y + Math.sin(performance.now() / 300) * 2)
+  ctx.strokeStyle = '#ffd700'
+  ctx.lineWidth = 3
+  ctx.beginPath()
+  ctx.arc(-4, 0, 4, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(0, 0)
+  ctx.lineTo(9, 0)
+  ctx.moveTo(6, 0)
+  ctx.lineTo(6, 4)
+  ctx.moveTo(9, 0)
+  ctx.lineTo(9, 4)
+  ctx.stroke()
+  ctx.restore()
+}
+
+function drawTreasure(x, y) {
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.fillStyle = '#8a5a2e'
+  ctx.beginPath()
+  ctx.roundRect(-14, -4, 28, 14, 3)
+  ctx.fill()
+  ctx.fillStyle = '#c9a86a'
+  ctx.beginPath()
+  ctx.ellipse(0, -4, 14, 6, 0, Math.PI, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = '#ffd700'
+  ctx.beginPath()
+  ctx.arc(0, -2, 4, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+function drawInteractables() {
+  for (const item of room().interactables) {
+    if (item.type === 'V') drawVillager(item.x, item.y, '#8c9bab')
+    else if (item.type === 'W') drawVillager(item.x, item.y, '#5a8f5a')
+    else if (item.type === 'C') drawSign(item.x, item.y)
+    else if (item.type === 'K' && !item.collected) drawKey(item.x, item.y)
+    else if (item.type === 'T') drawTreasure(item.x, item.y)
+  }
 }
 
 function drawPlayer() {
   const bob = player.walking ? Math.sin(player.walkPhase) * 1.5 : 0
   ctx.save()
-  ctx.globalAlpha = player.invulnTimer > 0 && Math.floor(player.invulnTimer * 12) % 2 === 0 ? 0.4 : 1
   ctx.translate(player.x, player.y + bob)
 
   const footOffset = player.walking ? Math.sin(player.walkPhase) * 3 : 0
@@ -290,89 +391,44 @@ function drawPlayer() {
   ctx.arc(fx * 4, fy * 4, 1.6, 0, Math.PI * 2)
   ctx.fill()
 
-  // sword, held out along the facing direction while attacking
-  if (player.attackTimer > 0) {
-    ctx.strokeStyle = '#c9ccd6'
-    ctx.lineWidth = 2.5
-    ctx.beginPath()
-    ctx.moveTo(0, 0)
-    ctx.lineTo(fx * 16, fy * 16)
-    ctx.stroke()
-  }
-
   ctx.restore()
-  drawSlash()
 }
 
-function drawEnemy(e) {
-  ctx.save()
-  ctx.translate(e.x, e.y)
-  ctx.fillStyle = '#c0392b'
-  ctx.beginPath()
-  ctx.ellipse(0, 0, 10, 9, 0, 0, Math.PI * 2)
-  ctx.fill()
+function drawInventory() {
+  ctx.textAlign = 'left'
   ctx.fillStyle = '#fff'
-  ctx.beginPath()
-  ctx.arc(-3, -2, 2.2, 0, Math.PI * 2)
-  ctx.arc(3, -2, 2.2, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = '#000'
-  ctx.beginPath()
-  ctx.arc(-3, -2, 1, 0, Math.PI * 2)
-  ctx.arc(3, -2, 1, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.restore()
-
-  if (e.hp < e.maxHp) {
-    ctx.fillStyle = '#000'
-    ctx.fillRect(e.x - 10, e.y - 16, 20, 3)
-    ctx.fillStyle = '#4caf50'
-    ctx.fillRect(e.x - 10, e.y - 16, 20 * (e.hp / e.maxHp), 3)
+  ctx.font = 'bold 13px sans-serif'
+  ctx.fillText('소지품:', 10, 20)
+  if (inventory.includes('key')) {
+    ctx.save()
+    ctx.translate(70, 14)
+    drawKey(0, 0)
+    ctx.restore()
   }
 }
 
-function drawHeart(cx, cy, size, filled) {
-  ctx.save()
-  ctx.translate(cx, cy)
-  ctx.scale(size / 16, size / 16)
-  ctx.beginPath()
-  ctx.moveTo(0, 4)
-  ctx.bezierCurveTo(0, 2, -2, 0, -4, 0)
-  ctx.bezierCurveTo(-7, 0, -7, 4, -7, 4)
-  ctx.bezierCurveTo(-7, 7, -4, 9.5, 0, 12)
-  ctx.bezierCurveTo(4, 9.5, 7, 7, 7, 4)
-  ctx.bezierCurveTo(7, 4, 7, 0, 4, 0)
-  ctx.bezierCurveTo(2, 0, 0, 2, 0, 4)
-  ctx.closePath()
-  ctx.fillStyle = filled ? '#e0304f' : 'rgba(255,255,255,0.2)'
-  ctx.fill()
-  ctx.strokeStyle = '#5c1020'
-  ctx.lineWidth = 1
-  ctx.stroke()
-  ctx.restore()
-}
-
-function drawHud() {
-  for (let i = 0; i < player.maxHp; i++) {
-    drawHeart(20 + i * 22, 18, 16, i < player.hp)
-  }
+function drawDialogue() {
+  if (dialogueTimer <= 0) return
+  const h = 54
+  const y = canvas.height - h
+  ctx.fillStyle = 'rgba(0,0,0,0.75)'
+  ctx.fillRect(0, y, canvas.width, h)
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#ffe066'
+  ctx.font = 'bold 13px sans-serif'
+  ctx.fillText(dialogueSpeaker, 14, y + 20)
+  ctx.fillStyle = '#fff'
+  ctx.font = '13px sans-serif'
+  ctx.fillText(dialogueText, 14, y + 40)
 }
 
 function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height)
   drawMap()
-  for (const e of enemies) drawEnemy(e)
+  drawInteractables()
   drawPlayer()
-  drawHud()
-
-  if (phase === 'gameOver') {
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'
-    ctx.fillRect(0, canvas.height / 2 - 30, canvas.width, 60)
-    ctx.fillStyle = '#fff'
-    ctx.font = 'bold 16px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.fillText(message, canvas.width / 2, canvas.height / 2 + 6)
-  }
+  drawInventory()
+  drawDialogue()
 }
 
 let lastTime = performance.now()
@@ -380,13 +436,9 @@ function loop(time) {
   const dt = Math.min(0.05, (time - lastTime) / 1000)
   lastTime = time
 
-  if (phase === 'playing') {
-    updatePlayer(dt)
-    updateEnemies(dt)
-  }
+  updatePlayer(dt)
   render()
   requestAnimationFrame(loop)
 }
 
-resetGame()
 requestAnimationFrame(loop)
