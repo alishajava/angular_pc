@@ -90,9 +90,18 @@ for (const m of [ROOM_A, ROOM_B, ROOM_C]) {
 const SOLID = new Set(['#', 'b'])
 
 const DIALOGUE = {
-  V: { speaker: '마을 사람', text: '숲속에 보물이 있다는 소문이 있어. 하지만 문이 잠겨있을 거야.' },
-  W: { speaker: '숲지기', text: '동쪽 문은 오래전에 잠겼지. 열쇠를 가진 자만 지나갈 수 있어.' },
-  C: { speaker: '팻말', text: '"조심하시오. 숲의 문은 열쇠 없이 열리지 않는다."' },
+  V: {
+    speaker: '정신없는 마을 사람',
+    text: '어? 또 오셨어요? ...아, 처음이시구나. 모험가들이 다 비슷하게 생겨서. 아무튼 숲에 전설의 보물이 있다던데요.',
+  },
+  W: {
+    speaker: '심심한 숲지기',
+    text: '열쇠 찾으러 오셨죠? 사실 이 문 비밀번호만 알면 그냥 열려요. 근데 다들 열쇠 열쇠 노래를 부르길래 그냥 놔뒀어요. 재밌잖아요.',
+  },
+  C: {
+    speaker: '낡은 팻말',
+    text: '누가 세웠는지도 모르는 팻말. "열쇠 없이는 절대 못 지나감... 진짜임... 농담 아님."',
+  },
 }
 
 function buildInteractables(mapRows) {
@@ -201,19 +210,25 @@ function triggerInteraction(item) {
     if (item.collected) return
     item.collected = true
     inventory.push('key')
-    say('시스템', '열쇠를 주웠다!')
+    say('시스템', '낡은 열쇠를 주웠다. 손잡이에 "창고용"이라고 새겨져 있다.')
     return
   }
   if (item.type === 'T') {
-    say('???', '보물 상자다! 반짝이는 보석이 가득하다. 모험 완료!')
+    say(
+      '???',
+      '보물 상자를 발견했다! 두근거리는 마음으로 열어보니... 낡은 양말 한 짝과 메모: "먼저 다녀감. 진짜 보물은 내가 가져감. 수고~" 모험 끝. (뻔하지 않죠?)',
+    )
     return
   }
   if (item.type === 'L' || item.type === 'R') {
     const exit = EXITS[currentRoomKey][item.type]
     if (!exit) return
     if (currentRoomKey === 'forest' && item.type === 'R' && !inventory.includes('key')) {
-      say('???', '문이 굳게 잠겨 있다. 열쇠가 필요할 것 같다.')
+      say('심심한 숲지기', '아무튼 열쇠부터 가져와 보세요. 구경 좀 하게.')
       return
+    }
+    if (currentRoomKey === 'forest' && item.type === 'R') {
+      say('심심한 숲지기', '오, 진짜 가져왔네? 대단하시네. 들어가세요, 재밌으셨길.')
     }
     enterRoom(exit.room, exit.side)
   }
