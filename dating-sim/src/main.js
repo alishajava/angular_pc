@@ -1,213 +1,34 @@
 const MAX_DAYS = 6
 const GOOD_ENDING_THRESHOLD = 7
-const SKIN = '#f4c9a0'
 
 // --- Portrait art -----------------------------------------------------
-// Hand-built SVG "bust" illustrations (no external art assets): a shared
-// face/eyes/neck/shoulders base, with hair, outfit and accessories drawn
-// per character around it. `viewBox` lets the same path data double as a
-// small cropped headshot thumbnail (day-select cards) just by zooming
-// into the face region instead of the full bust.
+// 다은 uses a real licensed illustration (see CREDIT below); 서준 and 리아
+// don't have matching art yet, so they get a plain colored placeholder
+// card instead of another attempt at a hand-drawn face.
+const PORTRAIT_IMAGES = {
+  daeun: { soft: 'portraits/daeun_soft.webp', happy: 'portraits/daeun_happy.webp' },
+}
+const CREDIT = '다은 일러스트: aucrowne (itch.io/aucrowne) · CC BY-NC 4.0'
 
-// A smooth oval reads as an egg no matter how it's tapered - what a face
-// needs is a visible jaw *angle*: width held through the cheekbone, then
-// a distinct inward corner at the jaw before converging to the chin,
-// rather than one continuous curve from temple to chin.
-const FACE_PATH =
-  'M150 92 Q188 92 214 135 Q219 158 210 180 Q204 202 196 225 Q186 248 172 262 Q160 271 150 273 Q140 271 128 262 Q114 248 104 225 Q96 202 90 180 Q81 158 86 135 Q112 92 150 92 Z'
-
-function mouthPath(mood) {
-  switch (mood) {
-    case 'calm':
-      return `<path d="M141 234 Q150 237 159 234" fill="none" stroke="#a8604f" stroke-width="2.4" stroke-linecap="round"/>`
-    case 'smirk':
-      return `<path d="M137 231 Q150 236 165 226 Q154 240 138 233 Z" fill="#a8604f"/>`
-    case 'happy':
-      return `<path d="M135 228 Q150 249 165 228 Q150 239 135 228 Z" fill="#a8604f"/>`
-    default: // 'soft'
-      return `<path d="M138 231 Q150 240 162 231" fill="none" stroke="#a8604f" stroke-width="2.4" stroke-linecap="round"/>`
+function renderPortrait(ch, mood) {
+  const images = PORTRAIT_IMAGES[ch.id]
+  if (images) {
+    const src = images[mood] || images.soft
+    return `<img src="${src}" alt="${ch.name}" />`
   }
-}
-
-// Outer corners flick up and away from the nose - eyeL for the smaller-x
-// (screen-left) eye, eyeR for the larger-x one - the classic anime eye
-// silhouette, instead of the previous plain symmetric lens shape.
-// A small 4-point twinkle, layered on top of the round highlights - the
-// extra sparkle (plus the iris ring band below) is what pushes this from
-// "modern mobile game" toward the big-dazzling-eyed 80s shoujo look.
-function sparkle(sx, sy, size) {
-  return `<path d="M${sx} ${sy - size} L${sx + size * 0.3} ${sy - size * 0.3} L${sx + size} ${sy} L${sx + size * 0.3} ${sy + size * 0.3} L${sx} ${sy + size} L${sx - size * 0.3} ${sy + size * 0.3} L${sx - size} ${sy} L${sx - size * 0.3} ${sy - size * 0.3} Z" fill="#fff"/>`
-}
-
-function eyeL(cx, cy, id) {
   return `
-    <path d="M${cx + 23} ${cy + 5}
-             C ${cx + 21} ${cy - 15} ${cx + 5} ${cy - 25} ${cx - 11} ${cy - 22}
-             C ${cx - 23} ${cy - 21} ${cx - 26} ${cy - 7} ${cx - 22} ${cy + 4}
-             C ${cx - 19} ${cy + 19} ${cx - 1} ${cy + 24} ${cx + 15} ${cy + 20}
-             C ${cx + 21} ${cy + 18} ${cx + 23} ${cy + 10} ${cx + 23} ${cy + 5} Z"
-          fill="#fff" stroke="#2a2018" stroke-width="2.4" stroke-linejoin="round"/>
-    <circle cx="${cx - 1}" cy="${cy + 4}" r="14.5" fill="url(#iris-${id})"/>
-    <circle cx="${cx - 1}" cy="${cy + 4}" r="9.5" fill="none" stroke="#000" stroke-width="1" opacity="0.3"/>
-    <circle cx="${cx - 1}" cy="${cy + 4}" r="6" fill="#201610"/>
-    <circle cx="${cx - 6}" cy="${cy - 3}" r="4.4" fill="#fff"/>
-    ${sparkle(cx + 4, cy + 10, 2.4)}
-    <circle cx="${cx + 6}" cy="${cy + 2}" r="1.6" fill="#fff" opacity="0.75"/>
-    <path d="M${cx + 22} ${cy + 1} C ${cx + 19} ${cy - 13} ${cx + 5} ${cy - 22} ${cx - 11} ${cy - 20}" fill="none" stroke="#2a2018" stroke-width="3" stroke-linecap="round"/>
-    <path d="M${cx - 23} ${cy + 3} L${cx - 29} ${cy + 1}" fill="none" stroke="#2a2018" stroke-width="1.8" stroke-linecap="round"/>
-  `
-}
-function eyeR(cx, cy, id) {
-  return `
-    <path d="M${cx - 23} ${cy + 5}
-             C ${cx - 21} ${cy - 15} ${cx - 5} ${cy - 25} ${cx + 11} ${cy - 22}
-             C ${cx + 23} ${cy - 21} ${cx + 26} ${cy - 7} ${cx + 22} ${cy + 4}
-             C ${cx + 19} ${cy + 19} ${cx + 1} ${cy + 24} ${cx - 15} ${cy + 20}
-             C ${cx - 21} ${cy + 18} ${cx - 23} ${cy + 10} ${cx - 23} ${cy + 5} Z"
-          fill="#fff" stroke="#2a2018" stroke-width="2.4" stroke-linejoin="round"/>
-    <circle cx="${cx + 1}" cy="${cy + 4}" r="14.5" fill="url(#iris-${id})"/>
-    <circle cx="${cx + 1}" cy="${cy + 4}" r="9.5" fill="none" stroke="#000" stroke-width="1" opacity="0.3"/>
-    <circle cx="${cx + 1}" cy="${cy + 4}" r="6" fill="#201610"/>
-    <circle cx="${cx - 4}" cy="${cy - 3}" r="4.4" fill="#fff"/>
-    ${sparkle(cx - 6, cy + 10, 2.4)}
-    <circle cx="${cx + 8}" cy="${cy + 2}" r="1.6" fill="#fff" opacity="0.75"/>
-    <path d="M${cx - 22} ${cy + 1} C ${cx - 19} ${cy - 13} ${cx - 5} ${cy - 22} ${cx + 11} ${cy - 20}" fill="none" stroke="#2a2018" stroke-width="3" stroke-linecap="round"/>
-    <path d="M${cx + 23} ${cy + 3} L${cx + 29} ${cy + 1}" fill="none" stroke="#2a2018" stroke-width="1.8" stroke-linecap="round"/>
+    <div class="portrait-placeholder">
+      <div class="circle" style="background:${ch.color}">${ch.name}</div>
+    </div>
   `
 }
 
-function faceGroup({ id, irisLight, irisDark, brow, mood, blush }) {
-  return `
-    <defs>
-      <radialGradient id="iris-${id}" cx="35%" cy="30%" r="75%">
-        <stop offset="0%" stop-color="${irisLight}"/>
-        <stop offset="100%" stop-color="${irisDark}"/>
-      </radialGradient>
-      <radialGradient id="blush-${id}" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="#ff8fab" stop-opacity="${blush}"/>
-        <stop offset="100%" stop-color="#ff8fab" stop-opacity="0"/>
-      </radialGradient>
-    </defs>
-    <path d="${FACE_PATH}" fill="${SKIN}" stroke="#d9a876" stroke-width="2"/>
-    <ellipse cx="107" cy="213" rx="18" ry="12" fill="url(#blush-${id})"/>
-    <ellipse cx="193" cy="213" rx="18" ry="12" fill="url(#blush-${id})"/>
-    ${eyeL(115, 192, id)}
-    ${eyeR(185, 192, id)}
-    <path d="M100 162 Q116 152 133 159" fill="none" stroke="${brow}" stroke-width="3.2" stroke-linecap="round"/>
-    <path d="M167 159 Q184 152 200 162" fill="none" stroke="${brow}" stroke-width="3.2" stroke-linecap="round"/>
-    <path d="M149 214 Q153 220 148 224" fill="none" stroke="#dba677" stroke-width="1.6" stroke-linecap="round"/>
-    ${mouthPath(mood)}
-  `
+function renderThumb(ch) {
+  const images = PORTRAIT_IMAGES[ch.id]
+  if (images) return `<img src="${images.soft}" alt="${ch.name}" />`
+  return `<div class="thumb-placeholder" style="background:${ch.color}">${ch.name[0]}</div>`
 }
 
-function neckAndShoulders(outfitColor, outfitOutline) {
-  return `
-    <rect x="122" y="240" width="56" height="60" rx="14" fill="${SKIN}"/>
-    <path d="M55 420 L55 322 Q55 272 112 258 L188 258 Q245 272 245 322 L245 420 Z" fill="${outfitColor}" stroke="${outfitOutline}" stroke-width="2.5" stroke-linejoin="round"/>
-  `
-}
-
-function svgWrap(inner, viewBox) {
-  return `<svg viewBox="${viewBox}" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`
-}
-
-function portraitDaeun(mood, viewBox = '0 0 300 420') {
-  const hairBack = `
-    <g fill="#8a5a3c" stroke="#5c3a24" stroke-width="2.5" stroke-linejoin="round">
-      <path d="M70 150 Q60 80 150 68 Q240 80 230 150 Q246 262 224 392 Q204 412 184 400 L184 300 Q150 322 116 300 L116 400 Q96 412 76 392 Q54 262 70 150 Z"/>
-    </g>
-  `
-  const bangs = `
-    <g fill="#8a5a3c" stroke="#5c3a24" stroke-width="2.2" stroke-linejoin="round">
-      <path d="M84 146 Q150 92 216 146 Q210 118 150 106 Q90 118 84 146 Z"/>
-      <path d="M94 150 Q88 182 100 212 Q108 186 110 150 Z"/>
-      <path d="M206 150 Q212 182 200 212 Q192 186 190 150 Z"/>
-      <circle cx="222" cy="148" r="15"/>
-      <path d="M224 138 Q252 150 240 188 Q228 176 220 158 Z"/>
-    </g>
-    <path d="M100 118 Q150 102 200 118 Q150 110 100 118 Z" fill="#a8714e" opacity="0.5"/>
-  `
-  const camera = `
-    <line x1="92" y1="268" x2="188" y2="398" stroke="#3a3a3a" stroke-width="13"/>
-    <rect x="108" y="384" width="48" height="34" rx="5" fill="#2a2a2a" stroke="#141414" stroke-width="1.5"/>
-    <circle cx="132" cy="401" r="11" fill="#5a5a5a"/>
-    <circle cx="132" cy="401" r="5.5" fill="#2a2a2a"/>
-  `
-  const face = faceGroup({
-    id: 'daeun',
-    irisLight: '#a9754a',
-    irisDark: '#5c3a1e',
-    brow: '#6b4226',
-    mood: mood === 'happy' ? 'happy' : 'soft',
-    blush: 0.4,
-  })
-  return svgWrap(`${hairBack}${neckAndShoulders('#ffd1e0', '#d98ba8')}${camera}${face}${bangs}`, viewBox)
-}
-
-function portraitSeojun(mood, viewBox = '0 0 300 420') {
-  const hairBack = `
-    <g fill="#2b2a35" stroke="#131219" stroke-width="2.5" stroke-linejoin="round">
-      <path d="M150 70 C205 70 232 112 230 165 C229 195 222 215 210 230 C206 216 204 196 202 178 C196 140 178 115 150 112 C122 115 104 140 98 178 C96 196 94 216 90 230 C78 215 71 195 70 165 C68 112 95 70 150 70 Z"/>
-    </g>
-  `
-  const bangs = `
-    <g fill="#2b2a35" stroke="#131219" stroke-width="2.2" stroke-linejoin="round">
-      <path d="M85 150 Q150 90 220 155 Q210 115 150 100 Q95 112 85 150 Z"/>
-    </g>
-    <path d="M100 140 Q130 100 170 108 Q140 118 118 150 Z" fill="#3a3948"/>
-  `
-  const glasses = `
-    <rect x="96" y="172" width="44" height="30" rx="6" fill="none" stroke="#3a3a3a" stroke-width="4"/>
-    <rect x="160" y="172" width="44" height="30" rx="6" fill="none" stroke="#3a3a3a" stroke-width="4"/>
-    <line x1="140" y1="186" x2="160" y2="186" stroke="#3a3a3a" stroke-width="4"/>
-  `
-  const collar = `<path d="M140 258 L150 284 L160 258 Z" fill="#eef2f5" stroke="#b9c2c8" stroke-width="1.5" stroke-linejoin="round"/>`
-  const face = faceGroup({
-    id: 'seojun',
-    irisLight: '#6a85a0',
-    irisDark: '#293845',
-    brow: '#2b2a35',
-    mood: mood === 'happy' ? 'happy' : 'calm',
-    blush: 0.12,
-  })
-  return svgWrap(`${hairBack}${neckAndShoulders('#5a7fa6', '#3a5a7a')}${collar}${face}${glasses}${bangs}`, viewBox)
-}
-
-function portraitRia(mood, viewBox = '0 0 300 420') {
-  const hairBack = `
-    <g fill="#d9622f" stroke="#9c431a" stroke-width="2.5" stroke-linejoin="round">
-      <path d="M75 155 Q65 90 150 80 Q235 90 225 155 Q232 220 215 300 L200 270 L190 300 L170 265 L150 300 L130 265 L110 300 L100 270 L85 300 Q68 220 75 155 Z"/>
-    </g>
-  `
-  const bangs = `
-    <g fill="#d9622f" stroke="#9c431a" stroke-width="2.2" stroke-linejoin="round">
-      <path d="M90 150 Q110 100 150 105 Q125 115 112 150 Z"/>
-      <path d="M150 105 Q190 100 210 150 Q185 118 160 112 Z"/>
-      <path d="M115 100 L128 68 L136 102 Z"/>
-      <path d="M165 100 L178 70 L186 100 Z"/>
-    </g>
-    <path d="M95 155 Q85 200 95 240 Q105 210 108 155 Z" fill="#e0457a" stroke="#a82f56" stroke-width="1.5"/>
-  `
-  const headphones = `
-    <path d="M115 260 Q150 290 185 260" fill="none" stroke="#2a2a2a" stroke-width="10" stroke-linecap="round"/>
-    <circle cx="112" cy="258" r="14" fill="#2a2a2a"/><circle cx="112" cy="258" r="7" fill="#ffd76a"/>
-    <circle cx="188" cy="258" r="14" fill="#2a2a2a"/><circle cx="188" cy="258" r="7" fill="#ffd76a"/>
-  `
-  const trim = `<path d="M100 270 Q150 295 200 270" fill="none" stroke="#ffd76a" stroke-width="3"/>`
-  const face = faceGroup({
-    id: 'ria',
-    irisLight: '#e6b35a',
-    irisDark: '#8a4f0f',
-    brow: '#8a3f1a',
-    mood: mood === 'happy' ? 'happy' : 'smirk',
-    blush: 0.22,
-  })
-  return svgWrap(`${hairBack}${neckAndShoulders('#2a2a32', '#45454f')}${trim}${face}${headphones}${bangs}`, viewBox)
-}
-
-const PORTRAITS = { daeun: portraitDaeun, seojun: portraitSeojun, ria: portraitRia }
-const DEFAULT_MOOD = { daeun: 'soft', seojun: 'calm', ria: 'smirk' }
-const THUMB_VIEWBOX = '55 55 200 200'
 
 // --- Scene backgrounds --------------------------------------------------
 // Each is a CSS gradient plus a small bit of inline-SVG decoration, so
@@ -514,7 +335,7 @@ function render() {
       .map(
         (c) => `
         <button class="char-card" data-id="${c.id}">
-          <div class="thumb">${PORTRAITS[c.id](DEFAULT_MOOD[c.id], THUMB_VIEWBOX)}</div>
+          <div class="thumb">${renderThumb(c)}</div>
           <div class="char-info">
             <div class="char-name">${c.name}</div>
             <div class="char-desc">${c.desc}</div>
@@ -529,6 +350,7 @@ function render() {
         <div id="day-counter">Day ${state.day} / ${MAX_DAYS}</div>
         ${cards}
         <div class="hint">오늘 함께 시간을 보낼 사람을 선택하세요.</div>
+        <div class="credit">${CREDIT}</div>
       </div>
     `
     applyBackground(document.getElementById('bg'), 'clubroom')
@@ -545,14 +367,13 @@ function render() {
   if (state.screen === 'scene') {
     const ch = state.chars.find((c) => c.id === state.activeCharId)
     const scene = ch.stage < ch.stages.length ? ch.stages[ch.stage] : fillerScene()
-    const portraitFn = PORTRAITS[ch.id]
-    const defaultMood = DEFAULT_MOOD[ch.id] || 'soft'
+    const defaultMood = 'soft'
 
     if (state.pendingResponse) {
       const mood = state.lastChoiceGood ? 'happy' : defaultMood
       app.innerHTML = `
         <div class="vn-bg" id="bg"></div>
-        <div class="vn-portrait">${portraitFn ? portraitFn(mood) : ''}</div>
+        <div class="vn-portrait">${renderPortrait(ch, mood)}</div>
         <div class="vn-panel">
           <div class="speaker-tag">${ch.name}</div>
           <div class="dialogue-panel">${state.pendingResponse}</div>
@@ -575,7 +396,7 @@ function render() {
       .join('')
     app.innerHTML = `
       <div class="vn-bg" id="bg"></div>
-      <div class="vn-portrait">${portraitFn ? portraitFn(defaultMood) : ''}</div>
+      <div class="vn-portrait">${renderPortrait(ch, defaultMood)}</div>
       <div class="vn-panel">
         <div class="speaker-tag">${ch.name}</div>
         <div class="dialogue-panel">${scene.text}\n\n"${scene.line}"</div>
@@ -601,10 +422,9 @@ function render() {
     const isGood = best.affection >= GOOD_ENDING_THRESHOLD
     const ending = isGood ? best.goodEnding : FRIEND_ENDING
     const bg = isGood ? best.endingBg : 'clubroom'
-    const portraitFn = isGood ? PORTRAITS[best.id] : null
     app.innerHTML = `
       <div class="vn-bg" id="bg"></div>
-      ${portraitFn ? `<div class="vn-portrait">${portraitFn('happy')}</div>` : ''}
+      ${isGood ? `<div class="vn-portrait">${renderPortrait(best, 'happy')}</div>` : ''}
       <div class="vn-panel">
         <div class="dialogue-panel">${ending}</div>
         <button class="restart-btn" id="restart-btn">다시 시작하기</button>
