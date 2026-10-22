@@ -9,8 +9,12 @@ const SKIN = '#f4c9a0'
 // small cropped headshot thumbnail (day-select cards) just by zooming
 // into the face region instead of the full bust.
 
+// A smooth oval reads as an egg no matter how it's tapered - what a face
+// needs is a visible jaw *angle*: width held through the cheekbone, then
+// a distinct inward corner at the jaw before converging to the chin,
+// rather than one continuous curve from temple to chin.
 const FACE_PATH =
-  'M150 95 C199 95 224 134 222 182 C221 221 203 255 177 274 C166 282 158 286 150 286 C142 286 134 282 123 274 C97 255 79 221 78 182 C76 134 101 95 150 95 Z'
+  'M150 92 Q188 92 214 135 Q219 158 210 180 Q204 202 196 225 Q186 248 172 262 Q160 271 150 273 Q140 271 128 262 Q114 248 104 225 Q96 202 90 180 Q81 158 86 135 Q112 92 150 92 Z'
 
 function mouthPath(mood) {
   switch (mood) {
@@ -28,34 +32,47 @@ function mouthPath(mood) {
 // Outer corners flick up and away from the nose - eyeL for the smaller-x
 // (screen-left) eye, eyeR for the larger-x one - the classic anime eye
 // silhouette, instead of the previous plain symmetric lens shape.
+// A small 4-point twinkle, layered on top of the round highlights - the
+// extra sparkle (plus the iris ring band below) is what pushes this from
+// "modern mobile game" toward the big-dazzling-eyed 80s shoujo look.
+function sparkle(sx, sy, size) {
+  return `<path d="M${sx} ${sy - size} L${sx + size * 0.3} ${sy - size * 0.3} L${sx + size} ${sy} L${sx + size * 0.3} ${sy + size * 0.3} L${sx} ${sy + size} L${sx - size * 0.3} ${sy + size * 0.3} L${sx - size} ${sy} L${sx - size * 0.3} ${sy - size * 0.3} Z" fill="#fff"/>`
+}
+
 function eyeL(cx, cy, id) {
   return `
-    <path d="M${cx + 19} ${cy + 4}
-             C ${cx + 17} ${cy - 12} ${cx + 4} ${cy - 20} ${cx - 9} ${cy - 18}
-             C ${cx - 19} ${cy - 17} ${cx - 21} ${cy - 6} ${cx - 18} ${cy + 3}
-             C ${cx - 15} ${cy + 15} ${cx - 1} ${cy + 19} ${cx + 12} ${cy + 16}
-             C ${cx + 17} ${cy + 14} ${cx + 19} ${cy + 8} ${cx + 19} ${cy + 4} Z"
-          fill="#fff" stroke="#2a2018" stroke-width="2.2" stroke-linejoin="round"/>
-    <circle cx="${cx - 1}" cy="${cy + 3}" r="11.5" fill="url(#iris-${id})"/>
-    <circle cx="${cx - 1}" cy="${cy + 3}" r="5" fill="#231a12"/>
-    <circle cx="${cx - 5}" cy="${cy - 2}" r="3.4" fill="#fff"/>
-    <circle cx="${cx + 3}" cy="${cy + 7}" r="1.6" fill="#fff" opacity="0.8"/>
-    <path d="M${cx + 18} ${cy + 1} C ${cx + 15} ${cy - 11} ${cx + 3} ${cy - 18} ${cx - 9} ${cy - 17}" fill="none" stroke="#2a2018" stroke-width="2.8" stroke-linecap="round"/>
+    <path d="M${cx + 23} ${cy + 5}
+             C ${cx + 21} ${cy - 15} ${cx + 5} ${cy - 25} ${cx - 11} ${cy - 22}
+             C ${cx - 23} ${cy - 21} ${cx - 26} ${cy - 7} ${cx - 22} ${cy + 4}
+             C ${cx - 19} ${cy + 19} ${cx - 1} ${cy + 24} ${cx + 15} ${cy + 20}
+             C ${cx + 21} ${cy + 18} ${cx + 23} ${cy + 10} ${cx + 23} ${cy + 5} Z"
+          fill="#fff" stroke="#2a2018" stroke-width="2.4" stroke-linejoin="round"/>
+    <circle cx="${cx - 1}" cy="${cy + 4}" r="14.5" fill="url(#iris-${id})"/>
+    <circle cx="${cx - 1}" cy="${cy + 4}" r="9.5" fill="none" stroke="#000" stroke-width="1" opacity="0.3"/>
+    <circle cx="${cx - 1}" cy="${cy + 4}" r="6" fill="#201610"/>
+    <circle cx="${cx - 6}" cy="${cy - 3}" r="4.4" fill="#fff"/>
+    ${sparkle(cx + 4, cy + 10, 2.4)}
+    <circle cx="${cx + 6}" cy="${cy + 2}" r="1.6" fill="#fff" opacity="0.75"/>
+    <path d="M${cx + 22} ${cy + 1} C ${cx + 19} ${cy - 13} ${cx + 5} ${cy - 22} ${cx - 11} ${cy - 20}" fill="none" stroke="#2a2018" stroke-width="3" stroke-linecap="round"/>
+    <path d="M${cx - 23} ${cy + 3} L${cx - 29} ${cy + 1}" fill="none" stroke="#2a2018" stroke-width="1.8" stroke-linecap="round"/>
   `
 }
 function eyeR(cx, cy, id) {
   return `
-    <path d="M${cx - 19} ${cy + 4}
-             C ${cx - 17} ${cy - 12} ${cx - 4} ${cy - 20} ${cx + 9} ${cy - 18}
-             C ${cx + 19} ${cy - 17} ${cx + 21} ${cy - 6} ${cx + 18} ${cy + 3}
-             C ${cx + 15} ${cy + 15} ${cx + 1} ${cy + 19} ${cx - 12} ${cy + 16}
-             C ${cx - 17} ${cy + 14} ${cx - 19} ${cy + 8} ${cx - 19} ${cy + 4} Z"
-          fill="#fff" stroke="#2a2018" stroke-width="2.2" stroke-linejoin="round"/>
-    <circle cx="${cx + 1}" cy="${cy + 3}" r="11.5" fill="url(#iris-${id})"/>
-    <circle cx="${cx + 1}" cy="${cy + 3}" r="5" fill="#231a12"/>
-    <circle cx="${cx - 3}" cy="${cy - 2}" r="3.4" fill="#fff"/>
-    <circle cx="${cx + 5}" cy="${cy + 7}" r="1.6" fill="#fff" opacity="0.8"/>
-    <path d="M${cx - 18} ${cy + 1} C ${cx - 15} ${cy - 11} ${cx - 3} ${cy - 18} ${cx + 9} ${cy - 17}" fill="none" stroke="#2a2018" stroke-width="2.8" stroke-linecap="round"/>
+    <path d="M${cx - 23} ${cy + 5}
+             C ${cx - 21} ${cy - 15} ${cx - 5} ${cy - 25} ${cx + 11} ${cy - 22}
+             C ${cx + 23} ${cy - 21} ${cx + 26} ${cy - 7} ${cx + 22} ${cy + 4}
+             C ${cx + 19} ${cy + 19} ${cx + 1} ${cy + 24} ${cx - 15} ${cy + 20}
+             C ${cx - 21} ${cy + 18} ${cx - 23} ${cy + 10} ${cx - 23} ${cy + 5} Z"
+          fill="#fff" stroke="#2a2018" stroke-width="2.4" stroke-linejoin="round"/>
+    <circle cx="${cx + 1}" cy="${cy + 4}" r="14.5" fill="url(#iris-${id})"/>
+    <circle cx="${cx + 1}" cy="${cy + 4}" r="9.5" fill="none" stroke="#000" stroke-width="1" opacity="0.3"/>
+    <circle cx="${cx + 1}" cy="${cy + 4}" r="6" fill="#201610"/>
+    <circle cx="${cx - 4}" cy="${cy - 3}" r="4.4" fill="#fff"/>
+    ${sparkle(cx - 6, cy + 10, 2.4)}
+    <circle cx="${cx + 8}" cy="${cy + 2}" r="1.6" fill="#fff" opacity="0.75"/>
+    <path d="M${cx - 22} ${cy + 1} C ${cx - 19} ${cy - 13} ${cx - 5} ${cy - 22} ${cx + 11} ${cy - 20}" fill="none" stroke="#2a2018" stroke-width="3" stroke-linecap="round"/>
+    <path d="M${cx + 23} ${cy + 3} L${cx + 29} ${cy + 1}" fill="none" stroke="#2a2018" stroke-width="1.8" stroke-linecap="round"/>
   `
 }
 
