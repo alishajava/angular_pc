@@ -266,10 +266,19 @@ function nearCar() {
   return Math.hypot(dx, dz) < CAR_ENTER_RADIUS
 }
 
+// The player model is hidden whenever the camera is riding "inside" it -
+// driving (chase cam still shows the car, but the player themselves is
+// inside it) or first-person (would otherwise see giant body parts
+// filling the screen).
+let cameraMode = 'orbit' // 'orbit' | 'first'
+function updatePlayerVisibility() {
+  player.visible = !driving && cameraMode !== 'first'
+}
+
 function enterCar() {
   driving = true
   carSpeed = 0
-  player.visible = false
+  updatePlayerVisibility()
 }
 
 function exitCar() {
@@ -279,7 +288,7 @@ function exitCar() {
   player.position.x = car.group.position.x + Math.cos(heading) * 2.2
   player.position.z = car.group.position.z - Math.sin(heading) * 2.2
   player.position.y = 0
-  player.visible = true
+  updatePlayerVisibility()
   velocityY = 0
   grounded = true
 }
@@ -288,7 +297,7 @@ const hintEl = document.getElementById('hint')
 const DEFAULT_HINT = hintEl ? hintEl.textContent : ''
 function updateHint() {
   if (!hintEl) return
-  if (driving) hintEl.textContent = 'W/S 가속·후진 · A/D 조향 · E 키로 하차'
+  if (driving) hintEl.textContent = 'W/S 가속·후진 · A/D 조향 · E 키로 하차 · V 키로 시점 전환'
   else if (nearCar()) hintEl.textContent = 'E 키를 눌러 차에 탑승'
   else hintEl.textContent = DEFAULT_HINT
 }
@@ -309,6 +318,10 @@ window.addEventListener('keydown', (e) => {
   if (ENTER_KEYS.includes(key)) {
     if (driving) exitCar()
     else if (nearCar()) enterCar()
+  }
+  if (key === 'v') {
+    cameraMode = cameraMode === 'orbit' ? 'first' : 'orbit'
+    updatePlayerVisibility()
   }
 })
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
@@ -343,7 +356,8 @@ window.addEventListener('pointermove', (e) => {
   const dy = e.clientY - lastPointer.y
   lastPointer = { x: e.clientX, y: e.clientY }
   yaw -= dx * 0.005
-  pitch = Math.min(1.3, Math.max(0.1, pitch - dy * 0.005))
+  const pitchMin = cameraMode === 'first' ? -1.2 : 0.1
+  pitch = Math.min(1.3, Math.max(pitchMin, pitch - dy * 0.005))
 })
 
 function angleDelta(from, to) {
@@ -630,6 +644,12 @@ function updateCamera() {
   const dirX = Math.sin(yaw) * Math.cos(pitch)
   const dirY = Math.sin(pitch)
   const dirZ = Math.cos(yaw) * Math.cos(pitch)
+
+  if (cameraMode === 'first') {
+    camera.position.set(target.x, eyeY, target.z)
+    camera.lookAt(target.x + dirX, eyeY + dirY, target.z + dirZ)
+    return
+  }
 
   let dist = ORBIT_DISTANCE
   cameraRay.set(new THREE.Vector3(target.x, eyeY, target.z), new THREE.Vector3(dirX, dirY, dirZ))
