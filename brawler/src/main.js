@@ -407,9 +407,17 @@ function drawHumanoid(x, y, opts) {
 
   const bodyColor = opts.flash ? '#ffffff' : opts.color
   const legSwing = opts.moving ? Math.sin(opts.walkPhase) * 10 : 0
+  const kicking = opts.attacking && opts.attackType === 'kick'
+  const punching = opts.attacking && !kicking
+
   ctx.fillStyle = '#2a2a2a'
-  ctx.fillRect(-10, -26 + legSwing * 0.2, 7, 26)
-  ctx.fillRect(3, -26 - legSwing * 0.2, 7, 26)
+  if (kicking) {
+    ctx.fillRect(-10, -26, 7, 26) // back leg planted
+    ctx.fillRect(8, -22, 24, 9) // front leg extended into the kick
+  } else {
+    ctx.fillRect(-10, -26 + legSwing * 0.2, 7, 26)
+    ctx.fillRect(3, -26 - legSwing * 0.2, 7, 26)
+  }
 
   ctx.fillStyle = bodyColor
   ctx.fillRect(-12, -56, 24, 32)
@@ -420,9 +428,12 @@ function drawHumanoid(x, y, opts) {
   ctx.fill()
 
   ctx.fillStyle = bodyColor
-  if (opts.attacking) {
+  if (punching) {
     ctx.fillRect(10, -52, 22, 8)
     ctx.fillRect(-14, -50, 10, 20)
+  } else if (kicking) {
+    ctx.fillRect(8, -50, 8, 16) // arms pulled into a guard while the leg does the work
+    ctx.fillRect(-16, -50, 8, 16)
   } else {
     const armSwing = opts.moving ? Math.sin(opts.walkPhase + Math.PI) * 6 : 0
     ctx.fillRect(10, -50 + armSwing * 0.3, 8, 18)
@@ -440,6 +451,7 @@ function drawPlayerSprite() {
     walkPhase: p.walkPhase,
     moving: p.moving,
     attacking: !!p.attack && p.attack.phase !== 'recovery',
+    attackType: p.attack && p.attack.type,
     flash: p.hitstunTimer > 0 && Math.floor(p.hitstunTimer * 20) % 2 === 0,
   })
 }
