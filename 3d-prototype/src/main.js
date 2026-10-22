@@ -322,6 +322,8 @@ window.addEventListener('keydown', (e) => {
   if (key === 'v') {
     cameraMode = cameraMode === 'orbit' ? 'first' : 'orbit'
     updatePlayerVisibility()
+    if (cameraMode === 'first') renderer.domElement.requestPointerLock()
+    else if (document.pointerLockElement === renderer.domElement) document.exitPointerLock()
   }
 })
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
@@ -336,7 +338,10 @@ function held(names) {
   return names.some((k) => heldKeys.has(k))
 }
 
-// Mouse-drag orbit camera: yaw/pitch around the player, no pointer lock needed.
+// Third-person orbit uses click-and-drag (dragging flag below). First-
+// person instead locks the pointer (see the 'v' handler above) for real
+// FPS-style mouselook: no button held, raw movementX/Y deltas, cursor
+// hidden and recentered by the browser rather than hitting the screen edge.
 let yaw = Math.PI
 let pitch = 0.5
 const ORBIT_DISTANCE = 7
@@ -344,20 +349,37 @@ let dragging = false
 let lastPointer = { x: 0, y: 0 }
 
 renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (cameraMode === 'first') return // pointer-locked - no drag gesture needed
   dragging = true
   lastPointer = { x: e.clientX, y: e.clientY }
 })
 window.addEventListener('pointerup', () => {
   dragging = false
 })
+function applyLook(dx, dy) {
+  yaw -= dx * 0.005
+  const pitchMin = cameraMode === 'first' ? -1.2 : 0.1
+  pitch = Math.min(1.3, Math.max(pitchMin, pitch - dy * 0.005))
+}
 window.addEventListener('pointermove', (e) => {
+  if (document.pointerLockElement === renderer.domElement) {
+    applyLook(e.movementX, e.movementY)
+    return
+  }
   if (!dragging) return
   const dx = e.clientX - lastPointer.x
   const dy = e.clientY - lastPointer.y
   lastPointer = { x: e.clientX, y: e.clientY }
-  yaw -= dx * 0.005
-  const pitchMin = cameraMode === 'first' ? -1.2 : 0.1
-  pitch = Math.min(1.3, Math.max(pitchMin, pitch - dy * 0.005))
+  applyLook(dx, dy)
+})
+// The browser can drop pointer lock on its own (Escape, alt-tab) - fall
+// back to orbit mode cleanly rather than being stuck first-person with no
+// way to look around.
+document.addEventListener('pointerlockchange', () => {
+  if (document.pointerLockElement !== renderer.domElement && cameraMode === 'first') {
+    cameraMode = 'orbit'
+    updatePlayerVisibility()
+  }
 })
 
 function angleDelta(from, to) {
