@@ -45,6 +45,17 @@ const ISLANDS = [
   { x: -150, y: -80, r: 50 },
 ]
 
+// Ports sit just outside the islands' coastline (plus one in open water near
+// the start) so a pier can be drawn jutting out from solid ground without
+// overlapping the island collision circle.
+const PORTS = [
+  { id: 'home', x: 60, y: 300, name: '기항지' },
+  { id: 'north', x: 380, y: 200, name: '북쪽 항구' },
+  { id: 'west', x: -150, y: -5, name: '서쪽 항구' },
+]
+const DOCK_RADIUS = 42
+const CARGO_GOODS = ['목재', '향신료', '곡물', '도자기', '모피']
+
 const START = { x: 0, y: 300 }
 // A loop course: checkpoint 2 sits almost directly upwind of checkpoint 1
 // (wind blows from the north), forcing the player to tack rather than
@@ -94,6 +105,10 @@ function makeInitialState() {
     windTime: 0,
     finishTime: null,
     isNewBest: false,
+    gold: 0,
+    cargo: null, // { good, fromId, toId, reward }
+    dockedPortId: null,
+    toast: null, // { text, until }
   }
 }
 let state = makeInitialState()
@@ -174,6 +189,43 @@ function updateRacing(dt) {
   }
 }
 
+function showToast(text) {
+  state.toast = { text, until: state.elapsed + 2.5 }
+}
+
+// Pickup/delivery triggers on the frame the boat *enters* a port's dock
+// radius, not every frame it sits inside - dockedPortId tracks "which port
+// (if any) am I currently docked at" so re-entering the same port without
+// leaving doesn't re-fire the same event.
+function updateCargo() {
+  let here = null
+  for (const port of PORTS) {
+    if (Math.hypot(state.boat.x - port.x, state.boat.y - port.y) < DOCK_RADIUS) {
+      here = port
+      break
+    }
+  }
+  const hereId = here ? here.id : null
+  if (hereId === state.dockedPortId) return
+  state.dockedPortId = hereId
+  if (!here) return
+
+  if (state.cargo && state.cargo.toId === here.id) {
+    state.gold += state.cargo.reward
+    showToast(`배달 완료! ${state.cargo.good} 운송 +${state.cargo.reward} 골드`)
+    state.cargo = null
+    return
+  }
+  if (!state.cargo) {
+    const destinations = PORTS.filter((p) => p.id !== here.id)
+    const dest = destinations[Math.floor(Math.random() * destinations.length)]
+    const good = CARGO_GOODS[Math.floor(Math.random() * CARGO_GOODS.length)]
+    const reward = 40 + Math.floor(Math.random() * 40)
+    state.cargo = { good, fromId: here.id, toId: dest.id, reward }
+    showToast(`${good} 선적 완료 → ${dest.name}로 배달하세요`)
+  }
+}
+
 function worldToScreen(x, y) {
   return { x: canvas.width / 2 + (x - state.boat.x), y: canvas.height / 2 + (y - state.boat.y) }
 }
@@ -216,6 +268,48 @@ function drawIslands() {
     ctx.lineTo(p.x + 10, p.y - isl.r * 0.15)
     ctx.closePath()
     ctx.fill()
+  }
+}
+
+function drawPorts() {
+  for (const port of PORTS) {
+    const p = worldToScreen(port.x, port.y)
+    if (p.x < -60 || p.x > canvas.width + 60 || p.y < -60 || p.y > canvas.height + 60) continue
+    const isDocked = state.dockedPortId === port.id
+    const isCargoDest = state.cargo && state.cargo.toId === port.id
+
+    // Pier: a short wooden deck jutting from the dock point toward the boat.
+    ctx.strokeStyle = '#a9733f'
+    ctx.lineWidth = 10
+    ctx.beginPath()
+    ctx.moveTo(p.x, p.y)
+    ctx.lineTo(p.x, p.y + 26)
+    ctx.stroke()
+    ctx.strokeStyle = '#7a4e26'
+    ctx.lineWidth = 2
+    for (let i = -4; i <= 4; i += 4) {
+      ctx.beginPath()
+      ctx.moveTo(p.x + i, p.y)
+      ctx.lineTo(p.x + i, p.y + 26)
+      ctx.stroke()
+    }
+
+    ctx.fillStyle = isDocked ? '#ffd23f' : isCargoDest ? '#5cc9ff' : '#e8c27a'
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, 11, 0, TAU)
+    ctx.fill()
+    ctx.strokeStyle = '#5a3a18'
+    ctx.lineWidth = 2
+    ctx.stroke()
+    ctx.fillStyle = '#3a2410'
+    ctx.font = '13px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('⚓', p.x, p.y + 4)
+
+    ctx.fillStyle = '#fff'
+    ctx.font = 'bold 12px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(port.name, p.x, p.y - 18)
   }
 }
 
@@ -333,7 +427,31 @@ function drawHud() {
   ctx.fillStyle = info.color
   ctx.fillText(`풍각: ${info.label} (${Math.round(info.sailAngleDeg)}°) 속도 ${(info.mult * 100).toFixed(0)}%`, 16, 90)
 
+  ctx.fillStyle = '#ffd23f'
+  ctx.fillText(`골드: ${state.gold}`, 16, 112)
+  ctx.fillStyle = state.cargo ? '#5cc9ff' : 'rgba(255,255,255,0.6)'
+  const destName = state.cargo ? PORTS.find((p) => p.id === state.cargo.toId).name : null
+  ctx.fillText(
+    state.cargo ? `화물: ${state.cargo.good} → ${destName} (+${state.cargo.reward})` : '화물: 없음 (항구에 정박해서 수령)',
+    16,
+    134,
+  )
+
   drawWindCompass(info)
+
+  if (state.toast && state.elapsed < state.toast.until) {
+    const alpha = Math.min(1, (state.toast.until - state.elapsed) / 0.5)
+    ctx.globalAlpha = alpha
+    ctx.fillStyle = 'rgba(10,20,30,0.78)'
+    ctx.font = 'bold 15px sans-serif'
+    const w = ctx.measureText(state.toast.text).width + 32
+    ctx.textAlign = 'center'
+    ctx.fillRect(canvas.width / 2 - w / 2, 16, w, 32)
+    ctx.fillStyle = '#ffd23f'
+    ctx.fillText(state.toast.text, canvas.width / 2, 32)
+    ctx.textAlign = 'left'
+    ctx.globalAlpha = 1
+  }
 }
 
 function drawFinishOverlay() {
@@ -360,9 +478,11 @@ function loop(time) {
   lastTime = time
 
   if (state.phase === 'racing') updateRacing(dt)
+  updateCargo()
 
   drawSea()
   drawIslands()
+  drawPorts()
   drawCheckpoints()
   drawWake()
   drawBoat()
