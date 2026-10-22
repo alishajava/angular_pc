@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>퉁구스카의 비밀</title>
+    <style>
+      :root {
+        --panel: #1c2430;
+        --panel-light: #2a3545;
+        --accent: #5fb8d9;
+      }
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        background: linear-gradient(160deg, #0d1218, #141c26);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+        color: #e8eef2;
+        padding: 1rem;
+        box-sizing: border-box;
+        gap: 0.6rem;
+      }
+      #app {
+        width: 100%;
+        max-width: 960px;
+      }
+      #scene-title {
+        font-size: 1rem;
+        font-weight: bold;
+        opacity: 0.85;
+        margin-bottom: 0.4rem;
+        letter-spacing: 0.02em;
+      }
+      canvas {
+        width: 100%;
+        display: block;
+        border-radius: 10px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        cursor: pointer;
+        background: #000;
+      }
+      #message {
+        background: var(--panel);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        margin-top: 0.6rem;
+        min-height: 2.4rem;
+        font-size: 0.92rem;
+        line-height: 1.5;
+      }
+      #inventory-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-top: 0.6rem;
+      }
+      #inventory-label {
+        font-size: 0.8rem;
+        opacity: 0.6;
+        flex-shrink: 0;
+      }
+      #inventory {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        flex: 1;
+      }
+      .item-btn {
+        font-family: inherit;
+        background: var(--panel-light);
+        color: #fff;
+        border: 2px solid #555;
+        border-radius: 6px;
+        padding: 0.4rem 0.7rem;
+        font-size: 0.82rem;
+        cursor: pointer;
+      }
+      .item-btn.active {
+        background: var(--accent);
+        color: #10151b;
+        border-color: var(--accent);
+      }
+      #restart-btn {
+        font-family: inherit;
+        background: var(--panel-light);
+        color: #ccc;
+        border: 1px solid #555;
+        border-radius: 6px;
+        padding: 0.4rem 0.7rem;
+        font-size: 0.78rem;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      #modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(5, 8, 12, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+      }
+      #modal.hidden { display: none; }
+      .modal-box {
+        background: var(--panel);
+        border-radius: 12px;
+        padding: 1.5rem;
+        text-align: center;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+      }
+      #code-display {
+        font-size: 1.8rem;
+        letter-spacing: 0.3em;
+        font-weight: bold;
+        margin-bottom: 1rem;
+        color: var(--accent);
+      }
+      #keypad {
+        display: grid;
+        grid-template-columns: repeat(3, 56px);
+        gap: 0.4rem;
+        margin-bottom: 0.8rem;
+      }
+      #keypad button {
+        font-family: inherit;
+        font-size: 1.1rem;
+        padding: 0.6rem 0;
+        background: var(--panel-light);
+        color: #fff;
+        border: 1px solid #555;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      #code-confirm {
+        grid-column: span 3;
+        background: var(--accent) !important;
+        color: #10151b !important;
+        font-weight: bold;
+      }
+      #code-cancel {
+        font-family: inherit;
+        background: transparent;
+        color: #aaa;
+        border: 1px solid #555;
+        border-radius: 6px;
+        padding: 0.4rem 1rem;
+        cursor: pointer;
+      }
+      #hint {
+        font-size: 0.78rem;
+        opacity: 0.55;
+        text-align: center;
+        margin-top: 0.3rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="scene-title"></div>
+      <canvas id="scene" width="960" height="560"></canvas>
+      <div id="message"></div>
+      <div id="inventory-row">
+        <span id="inventory-label">소지품:</span>
+        <div id="inventory"></div>
+        <button id="restart-btn">다시 시작</button>
+      </div>
+      <div id="hint">사물을 클릭해 조사하세요 · 아이템을 선택한 뒤 다른 사물을 클릭하면 사용합니다</div>
+    </div>
+    <div id="modal" class="hidden">
+      <div class="modal-box">
+        <div id="code-display">_ _ _ _</div>
+        <div id="keypad"></div>
+        <button id="code-cancel">취소</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
