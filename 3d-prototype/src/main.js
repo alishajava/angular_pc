@@ -450,6 +450,24 @@ function resolveNpcCollisions(pos, radius) {
   }
 }
 
+// The car has its own circular collider (CAR_RADIUS) that already blocks
+// it from driving through boxes/walls/NPCs, but nothing stopped the player
+// from walking *into* the parked car - add the matching push-out the other
+// way. Skipped while driving: then the player isn't a separate body, it's
+// riding inside the car's own position.
+function resolveCarCollision(pos, radius) {
+  if (driving) return
+  const dx = pos.x - car.group.position.x
+  const dz = pos.z - car.group.position.z
+  const dist = Math.hypot(dx, dz)
+  const minDist = CAR_RADIUS + radius
+  if (dist >= minDist) return
+  const push = minDist - dist
+  const [nx, nz] = dist > 0.0001 ? [dx / dist, dz / dist] : [1, 0]
+  pos.x += nx * push
+  pos.z += nz * push
+}
+
 const GRAVITY = 20
 const JUMP_SPEED = 10 // peak height v²/2g ≈ 2.5, enough to clear the 2-unit-tall boxes
 let velocityY = 0
@@ -688,6 +706,7 @@ function loop(time) {
     resolveBoxCollisions(player.position, PLAYER_RADIUS)
     resolveWallCollisions(player.position, PLAYER_RADIUS)
     resolveNpcCollisions(player.position, PLAYER_RADIUS)
+    resolveCarCollision(player.position, PLAYER_RADIUS)
     updateVertical(dt)
   }
   updateNpcs(dt)
