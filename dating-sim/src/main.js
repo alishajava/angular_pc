@@ -2,13 +2,61 @@ const MAX_DAYS = 6
 const GOOD_ENDING_THRESHOLD = 7
 
 // --- Portrait art -----------------------------------------------------
-// 다은 uses a real licensed illustration (see CREDIT below); 서준 and 리아
-// don't have matching art yet, so they get a plain colored placeholder
-// card instead of another attempt at a hand-drawn face.
+// 다은 uses a real licensed illustration (see CREDIT below). 서준 and 리아
+// don't have matching art yet, so instead of attempting another hand-drawn
+// face, they get a bust-silhouette avatar: simple geometric shapes (two
+// circles, a gradient, a small icon badge) rather than freeform facial
+// curves, which is the part that kept reading as "not a person" before.
 const PORTRAIT_IMAGES = {
   daeun: { soft: 'portraits/daeun_soft.webp', happy: 'portraits/daeun_happy.webp' },
 }
 const CREDIT = '다은 일러스트: aucrowne (itch.io/aucrowne) · CC BY-NC 4.0'
+
+function tint(hex, amount) {
+  const n = parseInt(hex.slice(1), 16)
+  const clamp = (c) => Math.max(0, Math.min(255, c))
+  const r = clamp((n >> 16) + amount)
+  const g = clamp(((n >> 8) & 0xff) + amount)
+  const b = clamp((n & 0xff) + amount)
+  return `rgb(${r},${g},${b})`
+}
+
+// Small icon badges hinting at each character's personality, drawn as
+// plain geometric paths (not faces) so they stay legible at avatar size.
+const AVATAR_ICONS = {
+  seojun: `
+    <g transform="translate(245,600) scale(9)">
+      <rect x="0" y="0" width="18" height="14" rx="1.4" fill="#1a1428" opacity="0.82" />
+      <rect x="8.3" y="0.5" width="1.4" height="13" fill="#ffffff" opacity="0.45" />
+    </g>
+  `,
+  ria: `
+    <g transform="translate(255,590) scale(9.5)">
+      <circle cx="3" cy="15" r="3" fill="#1a1428" opacity="0.82" />
+      <rect x="5.4" y="1" width="1.5" height="14" fill="#1a1428" opacity="0.82" />
+      <path d="M6.9 1 Q13 2 12.4 7.2" stroke="#1a1428" stroke-width="1.6" fill="none" opacity="0.82" stroke-linecap="round" />
+    </g>
+  `,
+}
+
+function avatarSVG(ch) {
+  const gid = `grad-${ch.id}`
+  const icon = AVATAR_ICONS[ch.id] || ''
+  return `
+    <svg viewBox="0 0 650 1000" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="${tint(ch.color, 25)}" />
+          <stop offset="1" stop-color="${tint(ch.color, -40)}" />
+        </linearGradient>
+      </defs>
+      <circle cx="325" cy="900" r="430" fill="url(#${gid})" />
+      <circle cx="325" cy="270" r="175" fill="url(#${gid})" />
+      <circle cx="255" cy="195" r="55" fill="#ffffff" opacity="0.12" />
+      ${icon}
+    </svg>
+  `
+}
 
 function renderPortrait(ch, mood) {
   const images = PORTRAIT_IMAGES[ch.id]
@@ -16,17 +64,13 @@ function renderPortrait(ch, mood) {
     const src = images[mood] || images.soft
     return `<img src="${src}" alt="${ch.name}" />`
   }
-  return `
-    <div class="portrait-placeholder">
-      <div class="circle" style="background:${ch.color}">${ch.name}</div>
-    </div>
-  `
+  return avatarSVG(ch)
 }
 
 function renderThumb(ch) {
   const images = PORTRAIT_IMAGES[ch.id]
   if (images) return `<img src="${images.soft}" alt="${ch.name}" />`
-  return `<div class="thumb-placeholder" style="background:${ch.color}">${ch.name[0]}</div>`
+  return avatarSVG(ch)
 }
 
 
