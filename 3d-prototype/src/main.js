@@ -43,11 +43,68 @@ const LANDMARKS = [
 ]
 const BOX_HALF_SIZE = 1 // landmark boxes are 2x2 in footprint
 const landmarkBoxes = []
+// Solid meshes the orbit camera should raycast against (see updateCamera)
+// so it never ends up outside a wall looking back through it.
+const cameraBlockers = []
 for (const [x, halfHeight, z] of LANDMARKS) {
   const box = new THREE.Mesh(new THREE.BoxGeometry(2, halfHeight * 2, 2), landmarkMat)
   box.position.set(x, halfHeight, z)
   scene.add(box)
   landmarkBoxes.push({ x, z, height: halfHeight * 2 })
+  cameraBlockers.push(box)
+}
+
+// A simple house: four walls (one split around a doorway) plus a floor
+// and a pyramid roof. Unlike the landmark boxes above (uniform 2x2
+// squares), walls need independent x/z half-extents, so they get their
+// own `walls` collision list and `resolveWallCollisions` below rather
+// than reusing `landmarkBoxes`.
+const WALL_THICK = 0.3
+const WALL_HEIGHT = 3.2
+const DOOR_WIDTH = 1.4
+const HOUSE_CENTER = { x: -16, z: 2 }
+const HOUSE_HALF = 3
+const wallMat = new THREE.MeshStandardMaterial({ color: 0xe8d9b5 })
+const roofMat = new THREE.MeshStandardMaterial({ color: 0x8b4a3a })
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x9c6b43 })
+const walls = []
+
+function addWall(cx, cz, halfX, halfZ) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(halfX * 2, WALL_HEIGHT, halfZ * 2), wallMat)
+  mesh.position.set(cx, WALL_HEIGHT / 2, cz)
+  scene.add(mesh)
+  walls.push({ x: cx, z: cz, halfX, halfZ })
+  cameraBlockers.push(mesh)
+}
+
+{
+  const { x: hx, z: hz } = HOUSE_CENTER
+  const S = HOUSE_HALF
+  const T = WALL_THICK
+  const doorHalf = DOOR_WIDTH / 2
+
+  addWall(hx, hz - S, S + T / 2, T / 2) // north wall
+  addWall(hx, hz + S, S + T / 2, T / 2) // south wall
+  addWall(hx - S, hz, T / 2, S + T / 2) // west wall
+
+  // East wall faces the rest of the map, split into two segments around the doorway.
+  const segLen = S - doorHalf
+  addWall(hx + S, hz - (doorHalf + segLen / 2), T / 2, segLen / 2 + T / 2)
+  addWall(hx + S, hz + (doorHalf + segLen / 2), T / 2, segLen / 2 + T / 2)
+
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(S * 2, S * 2), floorMat)
+  floor.rotation.x = -Math.PI / 2
+  floor.position.set(hx, 0.02, hz)
+  scene.add(floor)
+
+  const roofHeight = 1.8
+  // radialSegments=4 makes a square pyramid; rotate 45° so its flat faces
+  // line up with the walls instead of its edges.
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(S * Math.SQRT2 + 0.3, roofHeight, 4), roofMat)
+  roof.rotation.y = Math.PI / 4
+  roof.position.set(hx, WALL_HEIGHT + roofHeight / 2, hz)
+  scene.add(roof)
+  cameraBlockers.push(roof)
 }
 
 // A character is a torso + head, plus four limbs that each hang from a
@@ -240,6 +297,28 @@ function resolveBoxCollisions() {
   }
 }
 
+// Same idea as resolveBoxCollisions, but with independent x/z half-extents
+// per wall (so a wall segment can be long and thin) and no height
+// exemption - walls are always taller than the player can jump, so unlike
+// the landmark boxes there's no "stand on top" case to account for.
+function resolveWallCollisions() {
+  for (const wall of walls) {
+    const halfX = wall.halfX + PLAYER_RADIUS
+    const halfZ = wall.halfZ + PLAYER_RADIUS
+    const dx = player.position.x - wall.x
+    const dz = player.position.z - wall.z
+    if (Math.abs(dx) >= halfX || Math.abs(dz) >= halfZ) continue
+
+    const penX = halfX - Math.abs(dx)
+    const penZ = halfZ - Math.abs(dz)
+    if (penX < penZ) {
+      player.position.x = wall.x + Math.sign(dx || 1) * halfX
+    } else {
+      player.position.z = wall.z + Math.sign(dz || 1) * halfZ
+    }
+  }
+}
+
 // Same idea as resolveBoxCollisions, but circular (NPCs are standing
 // characters, not axis-aligned blocks) and with no "stand on top" case -
 // an NPC is just solid from the ground up to about head height.
@@ -395,12 +474,30 @@ function updatePlayer(dt) {
   player.rotation.y = facingAngle
 }
 
+// Plain orbit-at-fixed-distance breaks as soon as something solid (like
+// the house) is smaller than ORBIT_DISTANCE: the camera lands outside
+// the wall, looking back through it at the player. Raycasting from the
+// player's eye point out along the camera direction and pulling the
+// distance in to just short of whatever it hits keeps the camera on the
+// player's side of any wall or box.
+const cameraRay = new THREE.Raycaster()
+const CAMERA_MIN_DISTANCE = 1.2
+const CAMERA_HIT_MARGIN = 0.3
+
 function updateCamera() {
-  const x = player.position.x + Math.sin(yaw) * ORBIT_DISTANCE * Math.cos(pitch)
-  const z = player.position.z + Math.cos(yaw) * ORBIT_DISTANCE * Math.cos(pitch)
-  const y = Math.sin(pitch) * ORBIT_DISTANCE + 1.0
-  camera.position.set(x, y, z)
-  camera.lookAt(player.position.x, player.position.y + 1.2, player.position.z)
+  const eyeY = player.position.y + 1.2
+  const dirX = Math.sin(yaw) * Math.cos(pitch)
+  const dirY = Math.sin(pitch)
+  const dirZ = Math.cos(yaw) * Math.cos(pitch)
+
+  let dist = ORBIT_DISTANCE
+  cameraRay.set(new THREE.Vector3(player.position.x, eyeY, player.position.z), new THREE.Vector3(dirX, dirY, dirZ))
+  cameraRay.far = ORBIT_DISTANCE
+  const hit = cameraRay.intersectObjects(cameraBlockers, false)[0]
+  if (hit) dist = Math.max(CAMERA_MIN_DISTANCE, hit.distance - CAMERA_HIT_MARGIN)
+
+  camera.position.set(player.position.x + dirX * dist, eyeY + dirY * dist, player.position.z + dirZ * dist)
+  camera.lookAt(player.position.x, eyeY, player.position.z)
 }
 
 window.addEventListener('resize', () => {
@@ -418,6 +515,7 @@ function loop(time) {
   updateJumpAnim(dt)
   updateNpcs(dt)
   resolveBoxCollisions()
+  resolveWallCollisions()
   resolveNpcCollisions()
   updateVertical(dt)
   updateCamera()
