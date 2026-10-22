@@ -7,13 +7,13 @@
     <style>
       :root {
         --pink: #ff8fab;
-        --panel: #2a2340;
-        --panel-light: #3a3158;
+        --panel: #15101f;
       }
       html, body {
         margin: 0;
+        width: 100%;
         min-height: 100%;
-        background: linear-gradient(160deg, #1f1a33, #140f22);
+        background: #0a0712;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -25,110 +25,176 @@
       }
       #app {
         width: 100%;
-        max-width: 640px;
-      }
-      .screen { display: none; }
-      .screen.active { display: block; }
-
-      .card {
-        background: var(--panel);
+        max-width: 760px;
+        aspect-ratio: 4 / 3;
+        position: relative;
         border-radius: 16px;
-        padding: 1.5rem;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+        overflow: hidden;
+        box-shadow: 0 16px 44px rgba(0, 0, 0, 0.55);
+        background: #1a1430;
       }
 
-      h1 {
-        font-size: 1.4rem;
-        margin: 0 0 0.5rem;
-        text-align: center;
+      .vn-bg {
+        position: absolute;
+        inset: 0;
       }
-      .subtitle {
-        text-align: center;
-        opacity: 0.75;
-        font-size: 0.9rem;
-        margin-bottom: 1.5rem;
+      .vn-bg svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
       }
 
-      button {
+      .vn-portrait {
+        position: absolute;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        height: 97%;
+        width: auto;
+        filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.35));
+        pointer-events: none;
+      }
+      .vn-portrait svg {
+        height: 100%;
+        width: auto;
+        display: block;
+      }
+
+      .vn-panel {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(180deg, rgba(8, 6, 16, 0) 0%, rgba(8, 6, 16, 0.88) 22%, rgba(8, 6, 16, 0.94) 100%);
+        padding: clamp(0.8rem, 4vh, 1.5rem) clamp(0.8rem, 3vw, 1.4rem) clamp(0.5rem, 1.5vh, 0.8rem);
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .speaker-tag {
+        display: inline-block;
+        align-self: flex-start;
+        background: var(--pink);
+        color: #1a1428;
+        font-weight: bold;
+        padding: 0.25rem 0.9rem;
+        border-radius: 8px 8px 0 0;
+        font-size: clamp(0.78rem, 2vw, 0.95rem);
+        margin-left: 0.6rem;
+        margin-bottom: -1px;
+        position: relative;
+        z-index: 1;
+      }
+      .dialogue-panel {
+        background: rgba(18, 14, 28, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 10px;
+        padding: clamp(0.45rem, 1.5vh, 0.65rem) clamp(0.7rem, 2.5vw, 1.1rem);
+        min-height: 2.6rem;
+        font-size: clamp(0.74rem, 2vw, 0.88rem);
+        line-height: 1.42;
+        white-space: pre-wrap;
+      }
+      .choice-list {
+        margin-top: 0.35rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+      }
+      .choice-btn {
         font-family: inherit;
+        text-align: left;
+        padding: 0.4rem 0.8rem;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 8px;
+        color: inherit;
+        font-size: clamp(0.72rem, 1.8vw, 0.84rem);
         cursor: pointer;
+      }
+      .choice-btn:hover { background: rgba(255, 255, 255, 0.18); }
+
+      .continue-btn {
+        font-family: inherit;
+        margin-top: 0.5rem;
+        align-self: flex-end;
+        padding: 0.45rem 1.1rem;
+        border-radius: 8px;
+        border: none;
+        background: var(--pink);
+        color: #1a1428;
+        font-weight: bold;
+        font-size: 0.82rem;
+        cursor: pointer;
+      }
+
+      /* Title screen */
+      .title-wrap { align-items: center; text-align: center; justify-content: flex-end; height: 100%; }
+      .title-wrap h1 { font-size: clamp(1.1rem, 4vw, 1.7rem); margin: 0 0 0.3rem; }
+      .title-wrap .subtitle { opacity: 0.8; font-size: clamp(0.7rem, 1.8vw, 0.85rem); margin-bottom: 0.9rem; }
+      .primary-btn {
+        font-family: inherit;
+        padding: 0.7rem 2rem;
+        background: var(--pink);
+        color: #1a1428;
+        font-weight: bold;
         border: none;
         border-radius: 10px;
         font-size: 0.95rem;
+        cursor: pointer;
+        align-self: center;
       }
-      .primary-btn {
-        display: block;
-        width: 100%;
-        padding: 0.9rem;
-        background: var(--pink);
-        color: #231425;
-        font-weight: bold;
-        margin-top: 0.5rem;
-        transition: transform 0.1s;
-      }
-      .primary-btn:hover { transform: translateY(-1px); }
+      .hint { font-size: 0.7rem; opacity: 0.55; margin-top: 0.6rem; }
 
-      #day-counter {
-        text-align: center;
-        font-size: 0.95rem;
-        opacity: 0.85;
-        margin-bottom: 1rem;
-      }
-
+      /* Day-select screen */
+      #day-counter { font-size: 0.85rem; opacity: 0.85; margin-bottom: 0.5rem; }
       .char-card {
         display: flex;
         align-items: center;
-        gap: 0.9rem;
-        background: var(--panel-light);
-        border-radius: 12px;
-        padding: 0.8rem 1rem;
-        margin-bottom: 0.7rem;
-        width: 100%;
-        text-align: left;
-        color: inherit;
-      }
-      .avatar {
-        width: 48px;
-        height: 48px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-weight: bold;
-        font-size: 1.1rem;
-        flex-shrink: 0;
-        color: #1a1428;
-      }
-      .char-info { flex: 1; }
-      .char-name { font-weight: bold; }
-      .char-desc { font-size: 0.78rem; opacity: 0.75; margin-top: 0.1rem; }
-      .hearts { font-size: 0.85rem; letter-spacing: 1px; margin-top: 0.25rem; color: var(--pink); }
-
-      .dialogue-box { margin-top: 0.5rem; }
-      .speaker-row {
-        display: flex;
-        align-items: center;
         gap: 0.7rem;
-        margin-bottom: 0.8rem;
-      }
-      .speaker-name { font-weight: bold; font-size: 1.05rem; }
-      .dialogue-text {
-        line-height: 1.6;
-        font-size: 0.97rem;
-        min-height: 4.5rem;
-        white-space: pre-wrap;
-      }
-      .choice-btn {
-        display: block;
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        padding: 0.45rem 0.7rem;
+        margin-bottom: 0.4rem;
         width: 100%;
         text-align: left;
-        padding: 0.75rem 1rem;
-        margin-top: 0.6rem;
-        background: var(--panel-light);
         color: inherit;
+        cursor: pointer;
+        font-family: inherit;
       }
-      .choice-btn:hover { background: #4a3f70; }
-      .hint { font-size: 0.75rem; opacity: 0.55; text-align: center; margin-top: 1rem; }
+      .char-card:hover { background: rgba(255, 255, 255, 0.13); }
+      .thumb {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        overflow: hidden;
+        flex-shrink: 0;
+        background: #2a2340;
+        border: 2px solid rgba(255, 255, 255, 0.25);
+      }
+      .thumb svg { width: 100%; height: 100%; display: block; }
+      .char-info { flex: 1; }
+      .char-name { font-weight: bold; font-size: 0.88rem; }
+      .char-desc { font-size: 0.68rem; opacity: 0.7; }
+      .hearts { font-size: 0.78rem; letter-spacing: 1px; color: var(--pink); }
+
+      .restart-btn {
+        font-family: inherit;
+        padding: 0.5rem 1.3rem;
+        background: var(--pink);
+        color: #1a1428;
+        font-weight: bold;
+        border: none;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        cursor: pointer;
+        align-self: center;
+        margin-top: 0.6rem;
+      }
     </style>
   </head>
   <body>
