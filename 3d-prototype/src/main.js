@@ -199,17 +199,116 @@ npcs[0].group.rotation.y = Math.PI * 0.6
 npcs[1].group.position.set(-4, 0, 9)
 npcs[1].group.rotation.y = -Math.PI * 0.3
 
+// A drivable car: a body + cabin + 4 wheels. Each wheel is a tilted pivot
+// group (rotation.z = 90deg, so the cylinder's axis points sideways like
+// a real axle) with the wheel mesh spinning around its own untilted local
+// Y axis as a child - that composition keeps the spin visually correct
+// regardless of the pivot's tilt or the car's heading.
+function makeWheel(group, x, y, z) {
+  const pivot = new THREE.Group()
+  pivot.position.set(x, y, z)
+  pivot.rotation.z = Math.PI / 2
+  const mesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.35, 0.35, 0.28, 14),
+    new THREE.MeshStandardMaterial({ color: 0x1a1a1a }),
+  )
+  pivot.add(mesh)
+  group.add(pivot)
+  return mesh
+}
+
+function createCar() {
+  const group = new THREE.Group()
+
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 0.6, 3.2),
+    new THREE.MeshStandardMaterial({ color: 0xe0433f }),
+  )
+  body.position.y = 0.55
+  group.add(body)
+
+  const cabin = new THREE.Mesh(
+    new THREE.BoxGeometry(1.3, 0.5, 1.6),
+    new THREE.MeshStandardMaterial({ color: 0xbfe3f2 }),
+  )
+  cabin.position.set(0, 1.0, -0.2)
+  group.add(cabin)
+
+  const wheels = [
+    makeWheel(group, 0.85, 0.35, 1.0),
+    makeWheel(group, -0.85, 0.35, 1.0),
+    makeWheel(group, 0.85, 0.35, -1.0),
+    makeWheel(group, -0.85, 0.35, -1.0),
+  ]
+
+  const headlightMat = new THREE.MeshStandardMaterial({ color: 0xffffcc, emissive: 0x554400 })
+  const headlightL = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), headlightMat)
+  headlightL.position.set(0.55, 0.55, 1.62)
+  group.add(headlightL)
+  const headlightR = headlightL.clone()
+  headlightR.position.x = -0.55
+  group.add(headlightR)
+
+  scene.add(group)
+  return { group, wheels }
+}
+
+const CAR_RADIUS = 1.2
+const CAR_ENTER_RADIUS = 2.5
+const car = createCar()
+car.group.position.set(6, 0, -8)
+let carSpeed = 0
+let driving = false
+
+function nearCar() {
+  const dx = player.position.x - car.group.position.x
+  const dz = player.position.z - car.group.position.z
+  return Math.hypot(dx, dz) < CAR_ENTER_RADIUS
+}
+
+function enterCar() {
+  driving = true
+  carSpeed = 0
+  player.visible = false
+}
+
+function exitCar() {
+  driving = false
+  const heading = car.group.rotation.y
+  // Step out to the car's side rather than dropping the player back inside it.
+  player.position.x = car.group.position.x + Math.cos(heading) * 2.2
+  player.position.z = car.group.position.z - Math.sin(heading) * 2.2
+  player.position.y = 0
+  player.visible = true
+  velocityY = 0
+  grounded = true
+}
+
+const hintEl = document.getElementById('hint')
+const DEFAULT_HINT = hintEl ? hintEl.textContent : ''
+function updateHint() {
+  if (!hintEl) return
+  if (driving) hintEl.textContent = 'W/S 가속·후진 · A/D 조향 · E 키로 하차'
+  else if (nearCar()) hintEl.textContent = 'E 키를 눌러 차에 탑승'
+  else hintEl.textContent = DEFAULT_HINT
+}
+
 // Keyboard input. Jump is triggered here (edge-style, gated on `grounded`
 // and not already mid-jump-animation) rather than read as a held key, so
 // holding Space doesn't bunny-hop or restart the windup mid-crouch.
 const heldKeys = new Set()
 const JUMP_KEYS = [' ', 'spacebar']
+const ENTER_KEYS = ['e', 'f']
 window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase()
   heldKeys.add(key)
-  if (JUMP_KEYS.includes(key) && grounded && jumpState === 'none') {
+  if (JUMP_KEYS.includes(key) && !driving && grounded && jumpState === 'none') {
     jumpState = 'windup'
     jumpStateT = 0
+  }
+  if (ENTER_KEYS.includes(key)) {
+    if (driving) exitCar()
+    else if (nearCar()) enterCar()
   }
 })
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
@@ -279,20 +378,20 @@ function supportingBox(x, z) {
 // off, or (if exempted too loosely) let them walk back through its side
 // and get snapped back up onto it. Continuous correction has neither
 // failure mode: it can't trap you, and it can't be tunnelled through.
-function resolveBoxCollisions() {
-  const half = BOX_HALF_SIZE + PLAYER_RADIUS
+function resolveBoxCollisions(pos, radius) {
+  const half = BOX_HALF_SIZE + radius
   for (const box of landmarkBoxes) {
-    if (player.position.y >= box.height - 0.05) continue
-    const dx = player.position.x - box.x
-    const dz = player.position.z - box.z
+    if (pos.y >= box.height - 0.05) continue
+    const dx = pos.x - box.x
+    const dz = pos.z - box.z
     if (Math.abs(dx) >= half || Math.abs(dz) >= half) continue
 
     const penX = half - Math.abs(dx)
     const penZ = half - Math.abs(dz)
     if (penX < penZ) {
-      player.position.x = box.x + Math.sign(dx || 1) * half
+      pos.x = box.x + Math.sign(dx || 1) * half
     } else {
-      player.position.z = box.z + Math.sign(dz || 1) * half
+      pos.z = box.z + Math.sign(dz || 1) * half
     }
   }
 }
@@ -301,20 +400,20 @@ function resolveBoxCollisions() {
 // per wall (so a wall segment can be long and thin) and no height
 // exemption - walls are always taller than the player can jump, so unlike
 // the landmark boxes there's no "stand on top" case to account for.
-function resolveWallCollisions() {
+function resolveWallCollisions(pos, radius) {
   for (const wall of walls) {
-    const halfX = wall.halfX + PLAYER_RADIUS
-    const halfZ = wall.halfZ + PLAYER_RADIUS
-    const dx = player.position.x - wall.x
-    const dz = player.position.z - wall.z
+    const halfX = wall.halfX + radius
+    const halfZ = wall.halfZ + radius
+    const dx = pos.x - wall.x
+    const dz = pos.z - wall.z
     if (Math.abs(dx) >= halfX || Math.abs(dz) >= halfZ) continue
 
     const penX = halfX - Math.abs(dx)
     const penZ = halfZ - Math.abs(dz)
     if (penX < penZ) {
-      player.position.x = wall.x + Math.sign(dx || 1) * halfX
+      pos.x = wall.x + Math.sign(dx || 1) * halfX
     } else {
-      player.position.z = wall.z + Math.sign(dz || 1) * halfZ
+      pos.z = wall.z + Math.sign(dz || 1) * halfZ
     }
   }
 }
@@ -325,18 +424,18 @@ function resolveWallCollisions() {
 const NPC_RADIUS = 0.45
 const NPC_HEIGHT = 1.8
 
-function resolveNpcCollisions() {
-  const minDist = NPC_RADIUS + PLAYER_RADIUS
+function resolveNpcCollisions(pos, radius) {
+  const minDist = NPC_RADIUS + radius
   for (const npc of npcs) {
-    if (player.position.y >= NPC_HEIGHT - 0.05) continue
-    const dx = player.position.x - npc.group.position.x
-    const dz = player.position.z - npc.group.position.z
+    if (pos.y >= NPC_HEIGHT - 0.05) continue
+    const dx = pos.x - npc.group.position.x
+    const dz = pos.z - npc.group.position.z
     const dist = Math.hypot(dx, dz)
     if (dist >= minDist) continue
     const push = minDist - dist
     const [nx, nz] = dist > 0.0001 ? [dx / dist, dz / dist] : [1, 0]
-    player.position.x += nx * push
-    player.position.z += nz * push
+    pos.x += nx * push
+    pos.z += nz * push
   }
 }
 
@@ -474,6 +573,47 @@ function updatePlayer(dt) {
   player.rotation.y = facingAngle
 }
 
+// Arcade car model: acceleration/friction on a 1D speed value, and
+// steering that turns the heading rather than strafing - scaled by
+// Math.sign(carSpeed) so steering while reversing turns the car the way
+// a real rear-steered push would (and does nothing while stationary, so
+// the car can't pirouette in place).
+const CAR_MAX_SPEED = 14
+const CAR_MAX_REVERSE = -6
+const CAR_ACCEL = 10
+const CAR_FRICTION = 6
+const CAR_TURN_RATE = 2.2
+const WHEEL_SPIN_SCALE = 2.2
+
+function updateCar(dt) {
+  let accelInput = 0
+  if (held(MOVE_KEYS.forward)) accelInput += 1
+  if (held(MOVE_KEYS.back)) accelInput -= 1
+
+  if (accelInput !== 0) {
+    carSpeed += accelInput * CAR_ACCEL * dt
+  } else {
+    const drop = CAR_FRICTION * dt
+    carSpeed = Math.abs(carSpeed) <= drop ? 0 : carSpeed - Math.sign(carSpeed) * drop
+  }
+  carSpeed = Math.max(CAR_MAX_REVERSE, Math.min(CAR_MAX_SPEED, carSpeed))
+
+  let steerInput = 0
+  if (held(MOVE_KEYS.left)) steerInput -= 1
+  if (held(MOVE_KEYS.right)) steerInput += 1
+  if (Math.abs(carSpeed) > 0.1) {
+    car.group.rotation.y += steerInput * CAR_TURN_RATE * dt * Math.sign(carSpeed)
+  }
+
+  const heading = car.group.rotation.y
+  const nextX = car.group.position.x + Math.sin(heading) * carSpeed * dt
+  car.group.position.x = Math.max(-GROUND_HALF, Math.min(GROUND_HALF, nextX))
+  const nextZ = car.group.position.z + Math.cos(heading) * carSpeed * dt
+  car.group.position.z = Math.max(-GROUND_HALF, Math.min(GROUND_HALF, nextZ))
+
+  for (const wheel of car.wheels) wheel.rotation.y -= carSpeed * dt * WHEEL_SPIN_SCALE
+}
+
 // Plain orbit-at-fixed-distance breaks as soon as something solid (like
 // the house) is smaller than ORBIT_DISTANCE: the camera lands outside
 // the wall, looking back through it at the player. Raycasting from the
@@ -485,19 +625,20 @@ const CAMERA_MIN_DISTANCE = 1.2
 const CAMERA_HIT_MARGIN = 0.3
 
 function updateCamera() {
-  const eyeY = player.position.y + 1.2
+  const target = driving ? car.group.position : player.position
+  const eyeY = target.y + (driving ? 0.9 : 1.2)
   const dirX = Math.sin(yaw) * Math.cos(pitch)
   const dirY = Math.sin(pitch)
   const dirZ = Math.cos(yaw) * Math.cos(pitch)
 
   let dist = ORBIT_DISTANCE
-  cameraRay.set(new THREE.Vector3(player.position.x, eyeY, player.position.z), new THREE.Vector3(dirX, dirY, dirZ))
+  cameraRay.set(new THREE.Vector3(target.x, eyeY, target.z), new THREE.Vector3(dirX, dirY, dirZ))
   cameraRay.far = ORBIT_DISTANCE
   const hit = cameraRay.intersectObjects(cameraBlockers, false)[0]
   if (hit) dist = Math.max(CAMERA_MIN_DISTANCE, hit.distance - CAMERA_HIT_MARGIN)
 
-  camera.position.set(player.position.x + dirX * dist, eyeY + dirY * dist, player.position.z + dirZ * dist)
-  camera.lookAt(player.position.x, eyeY, player.position.z)
+  camera.position.set(target.x + dirX * dist, eyeY + dirY * dist, target.z + dirZ * dist)
+  camera.lookAt(target.x, eyeY, target.z)
 }
 
 window.addEventListener('resize', () => {
@@ -511,13 +652,21 @@ function loop(time) {
   const dt = Math.min(0.05, (time - lastTime) / 1000)
   lastTime = time
 
-  updatePlayer(dt)
-  updateJumpAnim(dt)
+  if (driving) {
+    updateCar(dt)
+    resolveBoxCollisions(car.group.position, CAR_RADIUS)
+    resolveWallCollisions(car.group.position, CAR_RADIUS)
+    resolveNpcCollisions(car.group.position, CAR_RADIUS)
+  } else {
+    updatePlayer(dt)
+    updateJumpAnim(dt)
+    resolveBoxCollisions(player.position, PLAYER_RADIUS)
+    resolveWallCollisions(player.position, PLAYER_RADIUS)
+    resolveNpcCollisions(player.position, PLAYER_RADIUS)
+    updateVertical(dt)
+  }
   updateNpcs(dt)
-  resolveBoxCollisions()
-  resolveWallCollisions()
-  resolveNpcCollisions()
-  updateVertical(dt)
+  updateHint()
   updateCamera()
   renderer.render(scene, camera)
   requestAnimationFrame(loop)
