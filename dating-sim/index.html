@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>동아리 연애 시뮬레이션</title>
+    <style>
+      :root {
+        --pink: #ff8fab;
+        --panel: #2a2340;
+        --panel-light: #3a3158;
+      }
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        background: linear-gradient(160deg, #1f1a33, #140f22);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+        color: #f2eefb;
+        padding: 1rem;
+        box-sizing: border-box;
+      }
+      #app {
+        width: 100%;
+        max-width: 640px;
+      }
+      .screen { display: none; }
+      .screen.active { display: block; }
+
+      .card {
+        background: var(--panel);
+        border-radius: 16px;
+        padding: 1.5rem;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      }
+
+      h1 {
+        font-size: 1.4rem;
+        margin: 0 0 0.5rem;
+        text-align: center;
+      }
+      .subtitle {
+        text-align: center;
+        opacity: 0.75;
+        font-size: 0.9rem;
+        margin-bottom: 1.5rem;
+      }
+
+      button {
+        font-family: inherit;
+        cursor: pointer;
+        border: none;
+        border-radius: 10px;
+        font-size: 0.95rem;
+      }
+      .primary-btn {
+        display: block;
+        width: 100%;
+        padding: 0.9rem;
+        background: var(--pink);
+        color: #231425;
+        font-weight: bold;
+        margin-top: 0.5rem;
+        transition: transform 0.1s;
+      }
+      .primary-btn:hover { transform: translateY(-1px); }
+
+      #day-counter {
+        text-align: center;
+        font-size: 0.95rem;
+        opacity: 0.85;
+        margin-bottom: 1rem;
+      }
+
+      .char-card {
+        display: flex;
+        align-items: center;
+        gap: 0.9rem;
+        background: var(--panel-light);
+        border-radius: 12px;
+        padding: 0.8rem 1rem;
+        margin-bottom: 0.7rem;
+        width: 100%;
+        text-align: left;
+        color: inherit;
+      }
+      .avatar {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 1.1rem;
+        flex-shrink: 0;
+        color: #1a1428;
+      }
+      .char-info { flex: 1; }
+      .char-name { font-weight: bold; }
+      .char-desc { font-size: 0.78rem; opacity: 0.75; margin-top: 0.1rem; }
+      .hearts { font-size: 0.85rem; letter-spacing: 1px; margin-top: 0.25rem; color: var(--pink); }
+
+      .dialogue-box { margin-top: 0.5rem; }
+      .speaker-row {
+        display: flex;
+        align-items: center;
+        gap: 0.7rem;
+        margin-bottom: 0.8rem;
+      }
+      .speaker-name { font-weight: bold; font-size: 1.05rem; }
+      .dialogue-text {
+        line-height: 1.6;
+        font-size: 0.97rem;
+        min-height: 4.5rem;
+        white-space: pre-wrap;
+      }
+      .choice-btn {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 0.75rem 1rem;
+        margin-top: 0.6rem;
+        background: var(--panel-light);
+        color: inherit;
+      }
+      .choice-btn:hover { background: #4a3f70; }
+      .hint { font-size: 0.75rem; opacity: 0.55; text-align: center; margin-top: 1rem; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
