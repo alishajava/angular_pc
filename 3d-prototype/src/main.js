@@ -340,8 +340,9 @@ function held(names) {
 // first click (browsers require a user gesture to grant it) and stays
 // locked across V toggles, so looking around never needs a button held -
 // just move the mouse. Pitch gets a wider range in first-person, where
-// looking far up/down makes sense; orbit keeps its original range so the
-// chase camera can't dip underground.
+// looking far up/down makes sense; orbit allows a low look-up angle too,
+// with updateCamera clamping the camera's height so it can't dip
+// underground (the ground plane isn't in cameraBlockers to raycast against).
 let yaw = Math.PI
 let pitch = 0.5
 const ORBIT_DISTANCE = 7
@@ -352,7 +353,7 @@ renderer.domElement.addEventListener('pointerdown', () => {
 window.addEventListener('pointermove', (e) => {
   if (document.pointerLockElement !== renderer.domElement) return
   yaw -= e.movementX * 0.005
-  const pitchMin = cameraMode === 'first' ? -1.2 : 0.1
+  const pitchMin = cameraMode === 'first' ? -1.2 : -0.6
   pitch = Math.min(1.3, Math.max(pitchMin, pitch - e.movementY * 0.005))
 })
 
@@ -633,6 +634,7 @@ function updateCar(dt) {
 const cameraRay = new THREE.Raycaster()
 const CAMERA_MIN_DISTANCE = 1.2
 const CAMERA_HIT_MARGIN = 0.3
+const CAMERA_FLOOR_Y = 0.3
 
 function updateCamera() {
   const target = driving ? car.group.position : player.position
@@ -648,8 +650,15 @@ function updateCamera() {
   }
 
   let dist = ORBIT_DISTANCE
+  // The ground plane isn't a camera blocker, so a low/negative pitch needs
+  // its own floor check: cap the distance so the camera never sinks below
+  // CAMERA_FLOOR_Y, which is what makes a genuine low look-up angle possible.
+  if (dirY < 0) {
+    const floorDist = (CAMERA_FLOOR_Y - eyeY) / dirY
+    if (floorDist > 0) dist = Math.min(dist, floorDist)
+  }
   cameraRay.set(new THREE.Vector3(target.x, eyeY, target.z), new THREE.Vector3(dirX, dirY, dirZ))
-  cameraRay.far = ORBIT_DISTANCE
+  cameraRay.far = dist
   const hit = cameraRay.intersectObjects(cameraBlockers, false)[0]
   if (hit) dist = Math.max(CAMERA_MIN_DISTANCE, hit.distance - CAMERA_HIT_MARGIN)
 
