@@ -9,48 +9,84 @@ const SKIN = '#f4c9a0'
 // small cropped headshot thumbnail (day-select cards) just by zooming
 // into the face region instead of the full bust.
 
+const FACE_PATH =
+  'M150 95 C199 95 224 134 222 182 C221 221 203 255 177 274 C166 282 158 286 150 286 C142 286 134 282 123 274 C97 255 79 221 78 182 C76 134 101 95 150 95 Z'
+
 function mouthPath(mood) {
   switch (mood) {
     case 'calm':
-      return `<path d="M140 233 L160 233" stroke="#a85a4a" stroke-width="3" stroke-linecap="round"/>`
+      return `<path d="M141 234 Q150 237 159 234" fill="none" stroke="#a8604f" stroke-width="2.4" stroke-linecap="round"/>`
     case 'smirk':
-      return `<path d="M135 231 Q150 235 168 227 Q154 241 135 231 Z" fill="#a85a4a"/>`
+      return `<path d="M137 231 Q150 236 165 226 Q154 240 138 233 Z" fill="#a8604f"/>`
     case 'happy':
-      return `<path d="M133 229 Q150 249 167 229 Q150 240 133 229 Z" fill="#a85a4a"/>`
+      return `<path d="M135 228 Q150 249 165 228 Q150 239 135 228 Z" fill="#a8604f"/>`
     default: // 'soft'
-      return `<path d="M138 231 Q150 239 162 231" fill="none" stroke="#a85a4a" stroke-width="3" stroke-linecap="round"/>`
+      return `<path d="M138 231 Q150 240 162 231" fill="none" stroke="#a8604f" stroke-width="2.4" stroke-linecap="round"/>`
   }
 }
 
-function eye(cx) {
+// Outer corners flick up and away from the nose - eyeL for the smaller-x
+// (screen-left) eye, eyeR for the larger-x one - the classic anime eye
+// silhouette, instead of the previous plain symmetric lens shape.
+function eyeL(cx, cy, id) {
   return `
-    <path d="M${cx - 20} 182 Q${cx - 10} 168 ${cx} 170 Q${cx + 10} 168 ${cx + 20} 182 Q${cx + 10} 192 ${cx} 193 Q${cx - 10} 192 ${cx - 20} 182 Z" fill="#fff"/>
-    <path d="M${cx - 20} 182 Q${cx - 10} 166 ${cx} 169 Q${cx + 10} 166 ${cx + 20} 182" fill="none" stroke="#2a2420" stroke-width="3" stroke-linecap="round"/>
-    <circle cx="${cx}" cy="183" r="9" fill="var(--iris)"/>
-    <circle cx="${cx}" cy="183" r="4" fill="#2a2420"/>
-    <circle cx="${cx - 3}" cy="180" r="2.2" fill="#fff"/>
+    <path d="M${cx + 19} ${cy + 4}
+             C ${cx + 17} ${cy - 12} ${cx + 4} ${cy - 20} ${cx - 9} ${cy - 18}
+             C ${cx - 19} ${cy - 17} ${cx - 21} ${cy - 6} ${cx - 18} ${cy + 3}
+             C ${cx - 15} ${cy + 15} ${cx - 1} ${cy + 19} ${cx + 12} ${cy + 16}
+             C ${cx + 17} ${cy + 14} ${cx + 19} ${cy + 8} ${cx + 19} ${cy + 4} Z"
+          fill="#fff" stroke="#2a2018" stroke-width="2.2" stroke-linejoin="round"/>
+    <circle cx="${cx - 1}" cy="${cy + 3}" r="11.5" fill="url(#iris-${id})"/>
+    <circle cx="${cx - 1}" cy="${cy + 3}" r="5" fill="#231a12"/>
+    <circle cx="${cx - 5}" cy="${cy - 2}" r="3.4" fill="#fff"/>
+    <circle cx="${cx + 3}" cy="${cy + 7}" r="1.6" fill="#fff" opacity="0.8"/>
+    <path d="M${cx + 18} ${cy + 1} C ${cx + 15} ${cy - 11} ${cx + 3} ${cy - 18} ${cx - 9} ${cy - 17}" fill="none" stroke="#2a2018" stroke-width="2.8" stroke-linecap="round"/>
+  `
+}
+function eyeR(cx, cy, id) {
+  return `
+    <path d="M${cx - 19} ${cy + 4}
+             C ${cx - 17} ${cy - 12} ${cx - 4} ${cy - 20} ${cx + 9} ${cy - 18}
+             C ${cx + 19} ${cy - 17} ${cx + 21} ${cy - 6} ${cx + 18} ${cy + 3}
+             C ${cx + 15} ${cy + 15} ${cx + 1} ${cy + 19} ${cx - 12} ${cy + 16}
+             C ${cx - 17} ${cy + 14} ${cx - 19} ${cy + 8} ${cx - 19} ${cy + 4} Z"
+          fill="#fff" stroke="#2a2018" stroke-width="2.2" stroke-linejoin="round"/>
+    <circle cx="${cx + 1}" cy="${cy + 3}" r="11.5" fill="url(#iris-${id})"/>
+    <circle cx="${cx + 1}" cy="${cy + 3}" r="5" fill="#231a12"/>
+    <circle cx="${cx - 3}" cy="${cy - 2}" r="3.4" fill="#fff"/>
+    <circle cx="${cx + 5}" cy="${cy + 7}" r="1.6" fill="#fff" opacity="0.8"/>
+    <path d="M${cx - 18} ${cy + 1} C ${cx - 15} ${cy - 11} ${cx - 3} ${cy - 18} ${cx + 9} ${cy - 17}" fill="none" stroke="#2a2018" stroke-width="2.8" stroke-linecap="round"/>
   `
 }
 
-function faceGroup({ iris, brow, mood, blush }) {
+function faceGroup({ id, irisLight, irisDark, brow, mood, blush }) {
   return `
-    <g style="--iris:${iris}">
-      <ellipse cx="150" cy="183" rx="76" ry="90" fill="${SKIN}"/>
-      ${eye(118)}
-      ${eye(182)}
-      <path d="M102 160 Q118 150 134 158" fill="none" stroke="${brow}" stroke-width="4" stroke-linecap="round"/>
-      <path d="M166 158 Q182 150 198 160" fill="none" stroke="${brow}" stroke-width="4" stroke-linecap="round"/>
-      ${mouthPath(mood)}
-      <ellipse cx="104" cy="206" rx="13" ry="7" fill="#ff8fab" opacity="${blush}"/>
-      <ellipse cx="196" cy="206" rx="13" ry="7" fill="#ff8fab" opacity="${blush}"/>
-    </g>
+    <defs>
+      <radialGradient id="iris-${id}" cx="35%" cy="30%" r="75%">
+        <stop offset="0%" stop-color="${irisLight}"/>
+        <stop offset="100%" stop-color="${irisDark}"/>
+      </radialGradient>
+      <radialGradient id="blush-${id}" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#ff8fab" stop-opacity="${blush}"/>
+        <stop offset="100%" stop-color="#ff8fab" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <path d="${FACE_PATH}" fill="${SKIN}" stroke="#d9a876" stroke-width="2"/>
+    <ellipse cx="107" cy="213" rx="18" ry="12" fill="url(#blush-${id})"/>
+    <ellipse cx="193" cy="213" rx="18" ry="12" fill="url(#blush-${id})"/>
+    ${eyeL(115, 192, id)}
+    ${eyeR(185, 192, id)}
+    <path d="M100 162 Q116 152 133 159" fill="none" stroke="${brow}" stroke-width="3.2" stroke-linecap="round"/>
+    <path d="M167 159 Q184 152 200 162" fill="none" stroke="${brow}" stroke-width="3.2" stroke-linecap="round"/>
+    <path d="M149 214 Q153 220 148 224" fill="none" stroke="#dba677" stroke-width="1.6" stroke-linecap="round"/>
+    ${mouthPath(mood)}
   `
 }
 
-function neckAndShoulders(outfitColor) {
+function neckAndShoulders(outfitColor, outfitOutline) {
   return `
     <rect x="122" y="240" width="56" height="60" rx="14" fill="${SKIN}"/>
-    <path d="M55 420 L55 322 Q55 272 112 258 L188 258 Q245 272 245 322 L245 420 Z" fill="${outfitColor}"/>
+    <path d="M55 420 L55 322 Q55 272 112 258 L188 258 Q245 272 245 322 L245 420 Z" fill="${outfitColor}" stroke="${outfitOutline}" stroke-width="2.5" stroke-linejoin="round"/>
   `
 }
 
@@ -59,29 +95,48 @@ function svgWrap(inner, viewBox) {
 }
 
 function portraitDaeun(mood, viewBox = '0 0 300 420') {
-  const hairBack = `<path d="M70 150 Q60 80 150 68 Q240 80 230 150 Q246 262 224 392 Q204 412 184 400 L184 300 Q150 322 116 300 L116 400 Q96 412 76 392 Q54 262 70 150 Z" fill="#8a5a3c"/>`
+  const hairBack = `
+    <g fill="#8a5a3c" stroke="#5c3a24" stroke-width="2.5" stroke-linejoin="round">
+      <path d="M70 150 Q60 80 150 68 Q240 80 230 150 Q246 262 224 392 Q204 412 184 400 L184 300 Q150 322 116 300 L116 400 Q96 412 76 392 Q54 262 70 150 Z"/>
+    </g>
+  `
   const bangs = `
-    <path d="M84 146 Q150 92 216 146 Q210 118 150 106 Q90 118 84 146 Z" fill="#8a5a3c"/>
-    <path d="M94 150 Q88 182 100 212 Q108 186 110 150 Z" fill="#8a5a3c"/>
-    <path d="M206 150 Q212 182 200 212 Q192 186 190 150 Z" fill="#8a5a3c"/>
-    <circle cx="222" cy="148" r="15" fill="#8a5a3c"/>
-    <path d="M224 138 Q252 150 240 188 Q228 176 220 158 Z" fill="#8a5a3c"/>
+    <g fill="#8a5a3c" stroke="#5c3a24" stroke-width="2.2" stroke-linejoin="round">
+      <path d="M84 146 Q150 92 216 146 Q210 118 150 106 Q90 118 84 146 Z"/>
+      <path d="M94 150 Q88 182 100 212 Q108 186 110 150 Z"/>
+      <path d="M206 150 Q212 182 200 212 Q192 186 190 150 Z"/>
+      <circle cx="222" cy="148" r="15"/>
+      <path d="M224 138 Q252 150 240 188 Q228 176 220 158 Z"/>
+    </g>
     <path d="M100 118 Q150 102 200 118 Q150 110 100 118 Z" fill="#a8714e" opacity="0.5"/>
   `
   const camera = `
     <line x1="92" y1="268" x2="188" y2="398" stroke="#3a3a3a" stroke-width="13"/>
-    <rect x="108" y="384" width="48" height="34" rx="5" fill="#2a2a2a"/>
+    <rect x="108" y="384" width="48" height="34" rx="5" fill="#2a2a2a" stroke="#141414" stroke-width="1.5"/>
     <circle cx="132" cy="401" r="11" fill="#5a5a5a"/>
     <circle cx="132" cy="401" r="5.5" fill="#2a2a2a"/>
   `
-  const face = faceGroup({ iris: '#6b4226', brow: '#6b4226', mood: mood === 'happy' ? 'happy' : 'soft', blush: 0.4 })
-  return svgWrap(`${hairBack}${neckAndShoulders('#ffd1e0')}${camera}${face}${bangs}`, viewBox)
+  const face = faceGroup({
+    id: 'daeun',
+    irisLight: '#a9754a',
+    irisDark: '#5c3a1e',
+    brow: '#6b4226',
+    mood: mood === 'happy' ? 'happy' : 'soft',
+    blush: 0.4,
+  })
+  return svgWrap(`${hairBack}${neckAndShoulders('#ffd1e0', '#d98ba8')}${camera}${face}${bangs}`, viewBox)
 }
 
 function portraitSeojun(mood, viewBox = '0 0 300 420') {
-  const hairBack = `<path d="M85 160 Q75 95 150 85 Q225 95 215 160 Q218 200 205 215 Q150 195 95 215 Q82 200 85 160 Z" fill="#2b2a35"/>`
+  const hairBack = `
+    <g fill="#2b2a35" stroke="#131219" stroke-width="2.5" stroke-linejoin="round">
+      <path d="M150 70 C205 70 232 112 230 165 C229 195 222 215 210 230 C206 216 204 196 202 178 C196 140 178 115 150 112 C122 115 104 140 98 178 C96 196 94 216 90 230 C78 215 71 195 70 165 C68 112 95 70 150 70 Z"/>
+    </g>
+  `
   const bangs = `
-    <path d="M85 150 Q150 90 220 155 Q210 115 150 100 Q95 112 85 150 Z" fill="#2b2a35"/>
+    <g fill="#2b2a35" stroke="#131219" stroke-width="2.2" stroke-linejoin="round">
+      <path d="M85 150 Q150 90 220 155 Q210 115 150 100 Q95 112 85 150 Z"/>
+    </g>
     <path d="M100 140 Q130 100 170 108 Q140 118 118 150 Z" fill="#3a3948"/>
   `
   const glasses = `
@@ -89,19 +144,32 @@ function portraitSeojun(mood, viewBox = '0 0 300 420') {
     <rect x="160" y="172" width="44" height="30" rx="6" fill="none" stroke="#3a3a3a" stroke-width="4"/>
     <line x1="140" y1="186" x2="160" y2="186" stroke="#3a3a3a" stroke-width="4"/>
   `
-  const collar = `<path d="M140 258 L150 284 L160 258 Z" fill="#eef2f5"/>`
-  const face = faceGroup({ iris: '#3e5066', brow: '#2b2a35', mood: mood === 'happy' ? 'happy' : 'calm', blush: 0.12 })
-  return svgWrap(`${hairBack}${neckAndShoulders('#5a7fa6')}${collar}${face}${glasses}${bangs}`, viewBox)
+  const collar = `<path d="M140 258 L150 284 L160 258 Z" fill="#eef2f5" stroke="#b9c2c8" stroke-width="1.5" stroke-linejoin="round"/>`
+  const face = faceGroup({
+    id: 'seojun',
+    irisLight: '#6a85a0',
+    irisDark: '#293845',
+    brow: '#2b2a35',
+    mood: mood === 'happy' ? 'happy' : 'calm',
+    blush: 0.12,
+  })
+  return svgWrap(`${hairBack}${neckAndShoulders('#5a7fa6', '#3a5a7a')}${collar}${face}${glasses}${bangs}`, viewBox)
 }
 
 function portraitRia(mood, viewBox = '0 0 300 420') {
-  const hairBack = `<path d="M75 155 Q65 90 150 80 Q235 90 225 155 Q232 220 215 300 L200 270 L190 300 L170 265 L150 300 L130 265 L110 300 L100 270 L85 300 Q68 220 75 155 Z" fill="#d9622f"/>`
+  const hairBack = `
+    <g fill="#d9622f" stroke="#9c431a" stroke-width="2.5" stroke-linejoin="round">
+      <path d="M75 155 Q65 90 150 80 Q235 90 225 155 Q232 220 215 300 L200 270 L190 300 L170 265 L150 300 L130 265 L110 300 L100 270 L85 300 Q68 220 75 155 Z"/>
+    </g>
+  `
   const bangs = `
-    <path d="M90 150 Q110 100 150 105 Q125 115 112 150 Z" fill="#d9622f"/>
-    <path d="M150 105 Q190 100 210 150 Q185 118 160 112 Z" fill="#d9622f"/>
-    <path d="M95 155 Q85 200 95 240 Q105 210 108 155 Z" fill="#e0457a"/>
-    <path d="M115 100 L128 68 L136 102 Z" fill="#d9622f"/>
-    <path d="M165 100 L178 70 L186 100 Z" fill="#d9622f"/>
+    <g fill="#d9622f" stroke="#9c431a" stroke-width="2.2" stroke-linejoin="round">
+      <path d="M90 150 Q110 100 150 105 Q125 115 112 150 Z"/>
+      <path d="M150 105 Q190 100 210 150 Q185 118 160 112 Z"/>
+      <path d="M115 100 L128 68 L136 102 Z"/>
+      <path d="M165 100 L178 70 L186 100 Z"/>
+    </g>
+    <path d="M95 155 Q85 200 95 240 Q105 210 108 155 Z" fill="#e0457a" stroke="#a82f56" stroke-width="1.5"/>
   `
   const headphones = `
     <path d="M115 260 Q150 290 185 260" fill="none" stroke="#2a2a2a" stroke-width="10" stroke-linecap="round"/>
@@ -109,8 +177,15 @@ function portraitRia(mood, viewBox = '0 0 300 420') {
     <circle cx="188" cy="258" r="14" fill="#2a2a2a"/><circle cx="188" cy="258" r="7" fill="#ffd76a"/>
   `
   const trim = `<path d="M100 270 Q150 295 200 270" fill="none" stroke="#ffd76a" stroke-width="3"/>`
-  const face = faceGroup({ iris: '#c97a1f', brow: '#8a3f1a', mood: mood === 'happy' ? 'happy' : 'smirk', blush: 0.22 })
-  return svgWrap(`${hairBack}${neckAndShoulders('#2a2a32')}${trim}${face}${headphones}${bangs}`, viewBox)
+  const face = faceGroup({
+    id: 'ria',
+    irisLight: '#e6b35a',
+    irisDark: '#8a4f0f',
+    brow: '#8a3f1a',
+    mood: mood === 'happy' ? 'happy' : 'smirk',
+    blush: 0.22,
+  })
+  return svgWrap(`${hairBack}${neckAndShoulders('#2a2a32', '#45454f')}${trim}${face}${headphones}${bangs}`, viewBox)
 }
 
 const PORTRAITS = { daeun: portraitDaeun, seojun: portraitSeojun, ria: portraitRia }
