@@ -41,6 +41,11 @@ jobs:
       - run: npm run build -- --base=/angular_pc/dating/
         working-directory: dating-sim
       - run: mkdir -p dist/dating && cp -r dating-sim/dist/. dist/dating/
+      - run: npm ci
+        working-directory: sailing-sim
+      - run: npm run build -- --base=/angular_pc/sailing/
+        working-directory: sailing-sim
+      - run: mkdir -p dist/sailing && cp -r sailing-sim/dist/. dist/sailing/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
