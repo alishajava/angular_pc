@@ -191,8 +191,8 @@ const { group: player, armL, armR, legL, legR } = createCharacter(0x3f7fd1)
 // Two NPCs standing around, with a gentle idle sway (see updateNpcs) so
 // the world doesn't feel frozen when the player isn't near them.
 const npcs = [
-  { ...createCharacter(0xd1553f), phase: 0 },
-  { ...createCharacter(0x55b86a), phase: 2.1 },
+  { ...createCharacter(0xd1553f), phase: 0, greeted: false },
+  { ...createCharacter(0x55b86a), phase: 2.1, greeted: false },
 ]
 npcs[0].group.position.set(4, 0, -3)
 npcs[0].group.rotation.y = Math.PI * 0.6
@@ -346,15 +346,16 @@ function held(names) {
 let yaw = Math.PI
 let pitch = 0.5
 const ORBIT_DISTANCE = 7
+const MOUSE_SENSITIVITY = 0.0022
 
 renderer.domElement.addEventListener('pointerdown', () => {
   if (document.pointerLockElement !== renderer.domElement) renderer.domElement.requestPointerLock()
 })
 window.addEventListener('pointermove', (e) => {
   if (document.pointerLockElement !== renderer.domElement) return
-  yaw -= e.movementX * 0.005
+  yaw -= e.movementX * MOUSE_SENSITIVITY
   const pitchMin = cameraMode === 'first' ? -1.2 : -0.6
-  pitch = Math.min(1.3, Math.max(pitchMin, pitch - e.movementY * 0.005))
+  pitch = Math.min(1.3, Math.max(pitchMin, pitch - e.movementY * MOUSE_SENSITIVITY))
 })
 
 function angleDelta(from, to) {
@@ -501,6 +502,35 @@ function updateNpcs(dt) {
     const sway = Math.sin(npcTime * IDLE_SWAY_RATE + npc.phase) * IDLE_SWAY_AMOUNT
     npc.armL.rotation.x = sway
     npc.armR.rotation.x = -sway
+  }
+}
+
+// Spoken out loud via the browser's built-in text-to-speech (no voice
+// files to generate or host) rather than a silent on-screen bubble.
+function speak(text) {
+  if (!window.speechSynthesis) return
+  const utter = new SpeechSynthesisUtterance(text)
+  utter.lang = 'ko-KR'
+  utter.pitch = 1.05
+  window.speechSynthesis.speak(utter)
+}
+
+// Fires once per approach, like the car's dock/enter prompts: greeted
+// flips true the frame the player enters GREET_RADIUS and back to false
+// only once they leave it, so walking up to the same NPC again later
+// (rather than just lingering nearby) triggers a fresh greeting.
+const GREET_RADIUS = 3
+
+function updateNpcGreetings() {
+  for (const npc of npcs) {
+    const dist = Math.hypot(player.position.x - npc.group.position.x, player.position.z - npc.group.position.z)
+    const near = dist < GREET_RADIUS
+    if (near && !npc.greeted) {
+      speak('안녕?')
+      npc.greeted = true
+    } else if (!near) {
+      npc.greeted = false
+    }
   }
 }
 
@@ -708,6 +738,7 @@ function loop(time) {
     resolveNpcCollisions(player.position, PLAYER_RADIUS)
     resolveCarCollision(player.position, PLAYER_RADIUS)
     updateVertical(dt)
+    updateNpcGreetings()
   }
   updateNpcs(dt)
   updateHint()
