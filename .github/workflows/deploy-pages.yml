@@ -56,6 +56,11 @@ jobs:
       - run: npm run build -- --base=/angular_pc/tunguska/
         working-directory: tunguska
       - run: mkdir -p dist/tunguska && cp -r tunguska/dist/. dist/tunguska/
+      - run: npm ci
+        working-directory: three-kingdoms
+      - run: npm run build -- --base=/angular_pc/strategy/
+        working-directory: three-kingdoms
+      - run: mkdir -p dist/strategy && cp -r three-kingdoms/dist/. dist/strategy/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
