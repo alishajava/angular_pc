@@ -601,6 +601,21 @@ function updateJumpAnim(dt) {
   }
 }
 
+// The direction the camera is actually looking, flattened to the ground
+// plane - NOT just (sin(yaw), cos(yaw)) by itself, because that only
+// matches the camera's facing in first-person. In orbit mode the camera
+// sits at target + dir*distance and looks back at the target, so what the
+// player sees as "forward" on screen is the opposite of that same dir
+// vector. Without this split, forward movement only happened to line up
+// with the view at yaw values a multiple of 180° apart and went sideways
+// or backward in between - which is exactly the "W goes backward after
+// turning the camera" bug this fixes.
+function cameraForwardXZ() {
+  const sin = Math.sin(yaw)
+  const cos = Math.cos(yaw)
+  return cameraMode === 'first' ? { x: sin, z: cos } : { x: -sin, z: -cos }
+}
+
 function updatePlayer(dt) {
   let moveX = 0
   let moveZ = 0
@@ -616,11 +631,13 @@ function updatePlayer(dt) {
   moveX /= len
   moveZ /= len
 
-  // Move relative to the camera's current yaw, so "forward" is always away from the camera.
-  const sin = Math.sin(yaw)
-  const cos = Math.cos(yaw)
-  const worldX = moveX * cos - moveZ * sin
-  const worldZ = moveX * sin + moveZ * cos
+  // Move relative to the camera's current facing: forward/back along the
+  // camera's view direction, left/right along its perpendicular.
+  const fwd = cameraForwardXZ()
+  const right = { x: -fwd.z, z: fwd.x }
+  const forwardAmount = -moveZ
+  const worldX = moveX * right.x + forwardAmount * fwd.x
+  const worldZ = moveX * right.z + forwardAmount * fwd.z
 
   const nextX = player.position.x + worldX * PLAYER_SPEED * dt
   player.position.x = Math.max(-GROUND_HALF, Math.min(GROUND_HALF, nextX))
