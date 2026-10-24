@@ -56,6 +56,11 @@ jobs:
       - run: npm run build -- --base=/angular_pc/tunguska/
         working-directory: tunguska
       - run: mkdir -p dist/tunguska && cp -r tunguska/dist/. dist/tunguska/
+      - run: npm ci
+        working-directory: last-relay
+      - run: npm run build -- --base=/angular_pc/rpg/
+        working-directory: last-relay
+      - run: mkdir -p dist/rpg && cp -r last-relay/dist/. dist/rpg/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
