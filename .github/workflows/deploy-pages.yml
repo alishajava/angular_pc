@@ -62,6 +62,11 @@ jobs:
         working-directory: three-kingdoms
       - run: mkdir -p dist/strategy && cp -r three-kingdoms/dist/. dist/strategy/
       - run: mkdir -p dist/learn2d && cp learn-2d/index.html dist/learn2d/
+      - run: npm ci
+        working-directory: learn-3d
+      - run: npm run build -- --base=/angular_pc/learn3d/
+        working-directory: learn-3d
+      - run: mkdir -p dist/learn3d && cp -r learn-3d/dist/. dist/learn3d/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
