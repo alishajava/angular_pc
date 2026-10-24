@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>게임 개발 1단계 (3D): 캐릭터 이동</title>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden; /* 3D 화면은 보통 화면 전체를 꽉 채운다 */
+        background: #222;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 2D 버전의 <canvas>와 달리, 3D에서는 Three.js가 알아서
+         <canvas>를 만들어서 <body>에 붙여준다. 그래서 여기엔
+         스크립트 하나만 연결해두면 된다. -->
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

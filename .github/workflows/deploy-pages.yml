@@ -1,0 +1,83 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - claude/vue-coii3t
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run build -- --base=/angular_pc/
+      - run: npm ci
+        working-directory: 3d-prototype
+      - run: npm run build -- --base=/angular_pc/3d/
+        working-directory: 3d-prototype
+      - run: mkdir -p dist/3d && cp -r 3d-prototype/dist/. dist/3d/
+      - run: npm ci
+        working-directory: topview-adventure
+      - run: npm run build -- --base=/angular_pc/topview/
+        working-directory: topview-adventure
+      - run: mkdir -p dist/topview && cp -r topview-adventure/dist/. dist/topview/
+      - run: npm ci
+        working-directory: dating-sim
+      - run: npm run build -- --base=/angular_pc/dating/
+        working-directory: dating-sim
+      - run: mkdir -p dist/dating && cp -r dating-sim/dist/. dist/dating/
+      - run: npm ci
+        working-directory: sailing-sim
+      - run: npm run build -- --base=/angular_pc/sailing/
+        working-directory: sailing-sim
+      - run: mkdir -p dist/sailing && cp -r sailing-sim/dist/. dist/sailing/
+      - run: npm ci
+        working-directory: brawler
+      - run: npm run build -- --base=/angular_pc/brawler/
+        working-directory: brawler
+      - run: mkdir -p dist/brawler && cp -r brawler/dist/. dist/brawler/
+      - run: npm ci
+        working-directory: tunguska
+      - run: npm run build -- --base=/angular_pc/tunguska/
+        working-directory: tunguska
+      - run: mkdir -p dist/tunguska && cp -r tunguska/dist/. dist/tunguska/
+      - run: npm ci
+        working-directory: three-kingdoms
+      - run: npm run build -- --base=/angular_pc/strategy/
+        working-directory: three-kingdoms
+      - run: mkdir -p dist/strategy && cp -r three-kingdoms/dist/. dist/strategy/
+      - run: mkdir -p dist/learn2d && cp learn-2d/index.html dist/learn2d/
+      - run: npm ci
+        working-directory: learn-3d
+      - run: npm run build -- --base=/angular_pc/learn3d/
+        working-directory: learn-3d
+      - run: mkdir -p dist/learn3d && cp -r learn-3d/dist/. dist/learn3d/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

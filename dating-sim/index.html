@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>동아리 연애 시뮬레이션</title>
+    <style>
+      :root {
+        --pink: #ff8fab;
+        --panel: #15101f;
+      }
+      html, body {
+        margin: 0;
+        width: 100%;
+        min-height: 100%;
+        background: #0a0712;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+        color: #f2eefb;
+        padding: 1rem;
+        box-sizing: border-box;
+      }
+      #app {
+        width: 100%;
+        max-width: 760px;
+        aspect-ratio: 4 / 3;
+        position: relative;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 16px 44px rgba(0, 0, 0, 0.55);
+        background: #1a1430;
+      }
+
+      .vn-bg {
+        position: absolute;
+        inset: 0;
+      }
+      .vn-bg svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+
+      .vn-portrait {
+        position: absolute;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        height: 97%;
+        width: auto;
+        filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.35));
+        pointer-events: none;
+      }
+      .vn-portrait img {
+        height: 100%;
+        width: auto;
+        display: block;
+      }
+
+      .vn-panel {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(180deg, rgba(8, 6, 16, 0) 0%, rgba(8, 6, 16, 0.88) 22%, rgba(8, 6, 16, 0.94) 100%);
+        padding: clamp(0.8rem, 4vh, 1.5rem) clamp(0.8rem, 3vw, 1.4rem) clamp(0.5rem, 1.5vh, 0.8rem);
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .speaker-tag {
+        display: inline-block;
+        align-self: flex-start;
+        background: var(--pink);
+        color: #1a1428;
+        font-weight: bold;
+        padding: 0.25rem 0.9rem;
+        border-radius: 8px 8px 0 0;
+        font-size: clamp(0.78rem, 2vw, 0.95rem);
+        margin-left: 0.6rem;
+        margin-bottom: -1px;
+        position: relative;
+        z-index: 1;
+      }
+      .dialogue-panel {
+        background: rgba(18, 14, 28, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 10px;
+        padding: clamp(0.45rem, 1.5vh, 0.65rem) clamp(0.7rem, 2.5vw, 1.1rem);
+        min-height: 2.6rem;
+        font-size: clamp(0.74rem, 2vw, 0.88rem);
+        line-height: 1.42;
+        white-space: pre-wrap;
+      }
+      .choice-list {
+        margin-top: 0.35rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+      }
+      .choice-btn {
+        font-family: inherit;
+        text-align: left;
+        padding: 0.4rem 0.8rem;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 8px;
+        color: inherit;
+        font-size: clamp(0.72rem, 1.8vw, 0.84rem);
+        cursor: pointer;
+      }
+      .choice-btn:hover { background: rgba(255, 255, 255, 0.18); }
+
+      .continue-btn {
+        font-family: inherit;
+        margin-top: 0.5rem;
+        align-self: flex-end;
+        padding: 0.45rem 1.1rem;
+        border-radius: 8px;
+        border: none;
+        background: var(--pink);
+        color: #1a1428;
+        font-weight: bold;
+        font-size: 0.82rem;
+        cursor: pointer;
+      }
+
+      /* Title screen */
+      .title-wrap { align-items: center; text-align: center; justify-content: flex-end; height: 100%; }
+      .title-wrap h1 { font-size: clamp(1.1rem, 4vw, 1.7rem); margin: 0 0 0.3rem; }
+      .title-wrap .subtitle { opacity: 0.8; font-size: clamp(0.7rem, 1.8vw, 0.85rem); margin-bottom: 0.9rem; }
+      .primary-btn {
+        font-family: inherit;
+        padding: 0.7rem 2rem;
+        background: var(--pink);
+        color: #1a1428;
+        font-weight: bold;
+        border: none;
+        border-radius: 10px;
+        font-size: 0.95rem;
+        cursor: pointer;
+        align-self: center;
+      }
+      .hint { font-size: 0.7rem; opacity: 0.55; margin-top: 0.6rem; }
+      .credit { font-size: 0.62rem; opacity: 0.4; margin-top: 0.3rem; }
+
+      /* Day-select screen */
+      #day-counter { font-size: 0.85rem; opacity: 0.85; margin-bottom: 0.5rem; }
+      .char-card {
+        display: flex;
+        align-items: center;
+        gap: 0.7rem;
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        padding: 0.45rem 0.7rem;
+        margin-bottom: 0.4rem;
+        width: 100%;
+        text-align: left;
+        color: inherit;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .char-card:hover { background: rgba(255, 255, 255, 0.13); }
+      .thumb {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        overflow: hidden;
+        flex-shrink: 0;
+        background: #2a2340;
+        border: 2px solid rgba(255, 255, 255, 0.25);
+      }
+      .thumb img { width: 100%; height: 100%; display: block; object-fit: cover; object-position: center 15%; }
+      .char-info { flex: 1; }
+      .char-name { font-weight: bold; font-size: 0.88rem; }
+      .char-desc { font-size: 0.68rem; opacity: 0.7; }
+      .hearts { font-size: 0.78rem; letter-spacing: 1px; color: var(--pink); }
+
+      .restart-btn {
+        font-family: inherit;
+        padding: 0.5rem 1.3rem;
+        background: var(--pink);
+        color: #1a1428;
+        font-weight: bold;
+        border: none;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        cursor: pointer;
+        align-self: center;
+        margin-top: 0.6rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

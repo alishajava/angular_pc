@@ -1,0 +1,540 @@
+const canvas = document.getElementById('game')
+canvas.width = 960
+canvas.height = 560
+const ctx = canvas.getContext('2d')
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
+
+// The 2.5D illusion: x scrolls the camera (true side-scroller axis), while
+// y is a shallow "depth" band the player and enemies can also move within.
+// Nothing about y is scrolled - it maps straight to screen y - but entities
+// are drawn in y order (painter's algorithm) so a character standing
+// "further forward" (larger y) draws over one standing further back, and
+// depthScale makes them a little bigger too. That's the whole trick.
+const WORLD_WIDTH = 3400
+const DEPTH_TOP = 300
+const DEPTH_BOTTOM = 460
+const DEPTH_MID = (DEPTH_TOP + DEPTH_BOTTOM) / 2
+const GROUND_TOP = 270
+
+function depthScale(y) {
+  return 0.82 + ((y - DEPTH_TOP) / (DEPTH_BOTTOM - DEPTH_TOP)) * 0.3
+}
+
+const PLAYER_SPEED = 170
+const PLAYER_MAX_HP = 100
+
+const ATTACKS = {
+  punch: { startup: 0.08, active: 0.08, recovery: 0.14, range: 52, damage: 10, knockback: 36 },
+  kick: { startup: 0.14, active: 0.1, recovery: 0.22, range: 60, damage: 16, knockback: 80 },
+}
+
+const ENEMY_TYPES = {
+  thug: { hp: 28, speed: 85, damage: 8, attackRange: 48, telegraph: 0.32, active: 0.14, cooldown: 0.85, color: '#c0564a' },
+  boss: { hp: 170, speed: 58, damage: 16, attackRange: 58, telegraph: 0.42, active: 0.2, cooldown: 1.0, color: '#7b3fa0' },
+}
+
+// Classic beat-em-up pacing: crossing a trigger spawns that wave and locks
+// the camera (see updateCamera's gateX clamp) until every enemy in it is
+// dead, so the player can't just outrun the fight. SPAWN_AHEAD puts
+// enemies just off the right edge of the now-locked screen so they walk
+// in rather than popping up already in frame.
+const SPAWN_AHEAD = 260
+const WAVES = [
+  { triggerX: 480, enemies: [{ dx: 0, dy: -50, type: 'thug' }, { dx: 40, dy: 45, type: 'thug' }] },
+  { triggerX: 1300, enemies: [{ dx: 0, dy: -55, type: 'thug' }, { dx: 30, dy: 0, type: 'thug' }, { dx: 60, dy: 55, type: 'thug' }] },
+  { triggerX: 2300, enemies: [{ dx: 0, dy: 0, type: 'boss' }] },
+]
+
+const HITSTUN_DURATION = 0.3
+const DEATH_FADE = 0.4
+
+function makePlayer() {
+  return {
+    x: 120,
+    y: DEPTH_MID,
+    hp: PLAYER_MAX_HP,
+    facing: 1,
+    moving: false,
+    walkPhase: 0,
+    attack: null, // { type, phase: 'startup' | 'active' | 'recovery', t, resolved }
+    hitstunTimer: 0,
+    flashTimer: 0,
+  }
+}
+
+function makeEnemy(type, x, y) {
+  return {
+    type,
+    x,
+    y,
+    hp: ENEMY_TYPES[type].hp,
+    maxHp: ENEMY_TYPES[type].hp,
+    facing: -1,
+    state: 'approach', // approach | telegraph | attack | cooldown-is-implicit | hitstun | dead
+    t: 0,
+    cooldownTimer: 0,
+    hitstunTimer: 0,
+    resolved: false,
+    walkPhase: Math.random() * 10,
+    deathTimer: 0,
+    flashTimer: 0,
+  }
+}
+
+function makeInitialState() {
+  return {
+    phase: 'playing', // playing | gameover | cleared
+    player: makePlayer(),
+    enemies: [],
+    cameraX: 0,
+    gateX: null,
+    waveIndex: 0,
+  }
+}
+let state = makeInitialState()
+
+const heldKeys = new Set()
+window.addEventListener('keydown', (e) => {
+  const key = e.key.toLowerCase()
+  heldKeys.add(key)
+  if (key === 'r') {
+    state = makeInitialState()
+    return
+  }
+  if (state.phase !== 'playing') return
+  if (key === 'j' && !state.player.attack && state.player.hitstunTimer <= 0) startAttack('punch')
+  if (key === 'k' && !state.player.attack && state.player.hitstunTimer <= 0) startAttack('kick')
+})
+window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
+function held(names) { return names.some((k) => heldKeys.has(k)) }
+
+const MOVE_KEYS = {
+  left: ['a', 'arrowleft'],
+  right: ['d', 'arrowright'],
+  up: ['w', 'arrowup'],
+  down: ['s', 'arrowdown'],
+}
+
+function startAttack(type) {
+  state.player.attack = { type, phase: 'startup', t: 0, resolved: false }
+}
+
+function playerMaxX() {
+  return state.gateX !== null ? state.gateX + canvas.width - 60 : WORLD_WIDTH - 40
+}
+
+function updatePlayer(dt) {
+  const p = state.player
+  if (p.flashTimer > 0) p.flashTimer -= dt
+
+  if (p.hitstunTimer > 0) {
+    p.hitstunTimer -= dt
+    p.moving = false
+  } else if (!p.attack) {
+    let dx = 0
+    let dy = 0
+    if (held(MOVE_KEYS.left)) dx -= 1
+    if (held(MOVE_KEYS.right)) dx += 1
+    if (held(MOVE_KEYS.up)) dy -= 1
+    if (held(MOVE_KEYS.down)) dy += 1
+    p.moving = dx !== 0 || dy !== 0
+    if (p.moving) {
+      const len = Math.hypot(dx, dy)
+      dx /= len
+      dy /= len
+      p.x = clamp(p.x + dx * PLAYER_SPEED * dt, 40, playerMaxX())
+      p.y = clamp(p.y + dy * PLAYER_SPEED * dt, DEPTH_TOP, DEPTH_BOTTOM)
+      if (dx !== 0) p.facing = Math.sign(dx)
+      p.walkPhase += dt * 9
+    }
+  } else {
+    p.moving = false
+  }
+
+  if (p.attack) updatePlayerAttack(dt)
+}
+
+function updatePlayerAttack(dt) {
+  const p = state.player
+  const atk = p.attack
+  const def = ATTACKS[atk.type]
+  atk.t += dt
+  if (atk.phase === 'startup' && atk.t >= def.startup) {
+    atk.phase = 'active'
+    atk.t = 0
+    atk.resolved = false
+  } else if (atk.phase === 'active') {
+    // Resolved exactly once on entering the active window - not "while
+    // active", which would hit every frame of it instead of just once.
+    if (!atk.resolved) {
+      resolvePlayerHit(atk.type)
+      atk.resolved = true
+    }
+    if (atk.t >= def.active) {
+      atk.phase = 'recovery'
+      atk.t = 0
+    }
+  } else if (atk.phase === 'recovery') {
+    if (atk.t >= def.recovery) p.attack = null
+  }
+}
+
+function resolvePlayerHit(type) {
+  const p = state.player
+  const def = ATTACKS[type]
+  for (const en of state.enemies) {
+    if (en.state === 'dead') continue
+    const dx = en.x - p.x
+    const dy = en.y - p.y
+    const inFront = p.facing > 0 ? dx > -15 : dx < 15
+    if (!inFront) continue
+    if (Math.abs(dx) > def.range || Math.abs(dy) > 50) continue
+    damageEnemy(en, def.damage, Math.sign(dx || p.facing) * def.knockback)
+  }
+}
+
+function damageEnemy(en, dmg, knockbackDx) {
+  en.hp -= dmg
+  en.flashTimer = 0.12
+  en.x = clamp(en.x + knockbackDx, 40, WORLD_WIDTH - 40)
+  if (en.hp <= 0) {
+    en.state = 'dead'
+    en.deathTimer = DEATH_FADE
+  } else {
+    en.state = 'hitstun'
+    en.hitstunTimer = HITSTUN_DURATION
+    en.t = 0
+  }
+}
+
+function damagePlayer(dmg, knockbackDx) {
+  const p = state.player
+  if (p.hitstunTimer > 0) return // brief invulnerability while already reeling
+  p.hp = Math.max(0, p.hp - dmg)
+  p.hitstunTimer = HITSTUN_DURATION
+  p.flashTimer = 0.15
+  p.attack = null
+  p.x = clamp(p.x + knockbackDx, 40, playerMaxX())
+  if (p.hp <= 0) state.phase = 'gameover'
+}
+
+function updateEnemies(dt) {
+  const p = state.player
+  for (const en of state.enemies) {
+    if (en.flashTimer > 0) en.flashTimer -= dt
+    if (en.state === 'dead') {
+      en.deathTimer -= dt
+      continue
+    }
+    if (en.cooldownTimer > 0) en.cooldownTimer -= dt
+
+    if (en.state === 'hitstun') {
+      en.hitstunTimer -= dt
+      if (en.hitstunTimer <= 0) en.state = 'approach'
+      continue
+    }
+
+    const stats = ENEMY_TYPES[en.type]
+    const dx = p.x - en.x
+    const dy = p.y - en.y
+    const dist = Math.hypot(dx, dy)
+
+    if (en.state === 'approach') {
+      if (dx !== 0) en.facing = Math.sign(dx)
+      if (dist <= stats.attackRange && en.cooldownTimer <= 0) {
+        en.state = 'telegraph'
+        en.t = 0
+      } else if (dist > stats.attackRange * 0.8) {
+        const nx = dx / (dist || 1)
+        const ny = dy / (dist || 1)
+        en.x = clamp(en.x + nx * stats.speed * dt, 40, WORLD_WIDTH - 40)
+        en.y = clamp(en.y + ny * stats.speed * dt, DEPTH_TOP, DEPTH_BOTTOM)
+        en.walkPhase += dt * 8
+      }
+    } else if (en.state === 'telegraph') {
+      en.t += dt
+      if (en.t >= stats.telegraph) {
+        en.state = 'attack'
+        en.t = 0
+        en.resolved = false
+      }
+    } else if (en.state === 'attack') {
+      en.t += dt
+      if (!en.resolved) {
+        const d2 = Math.hypot(p.x - en.x, p.y - en.y)
+        if (d2 <= stats.attackRange + 10) damagePlayer(stats.damage, Math.sign(-en.facing) * 30)
+        en.resolved = true
+      }
+      if (en.t >= stats.active) {
+        en.state = 'approach'
+        en.t = 0
+        en.cooldownTimer = stats.cooldown
+      }
+    }
+  }
+
+  resolveEnemySeparation()
+  state.enemies = state.enemies.filter((en) => !(en.state === 'dead' && en.deathTimer <= 0))
+}
+
+// Keeps enemies from all stacking on exactly the player's position -
+// same circle push-out idea used for the 3D prototype's NPCs, just
+// between enemies only (the player can still be surrounded).
+function resolveEnemySeparation() {
+  const alive = state.enemies.filter((e) => e.state !== 'dead')
+  for (let i = 0; i < alive.length; i++) {
+    for (let j = i + 1; j < alive.length; j++) {
+      const a = alive[i]
+      const b = alive[j]
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const dist = Math.hypot(dx, dy)
+      const minDist = 36
+      if (dist >= minDist || dist < 0.001) continue
+      const push = (minDist - dist) / 2
+      const nx = dx / dist
+      const ny = dy / dist
+      a.x -= nx * push
+      a.y = clamp(a.y - ny * push, DEPTH_TOP, DEPTH_BOTTOM)
+      b.x += nx * push
+      b.y = clamp(b.y + ny * push, DEPTH_TOP, DEPTH_BOTTOM)
+    }
+  }
+}
+
+function checkWaveTriggers() {
+  if (state.gateX !== null) return
+  const idx = state.waveIndex
+  if (idx >= WAVES.length) return
+  const wave = WAVES[idx]
+  if (state.player.x < wave.triggerX) return
+
+  for (const spec of wave.enemies) {
+    state.enemies.push(makeEnemy(spec.type, wave.triggerX + SPAWN_AHEAD + spec.dx, DEPTH_MID + spec.dy))
+  }
+  state.gateX = state.cameraX
+}
+
+function checkWaveCleared() {
+  if (state.gateX === null) return
+  if (state.enemies.some((e) => e.state !== 'dead')) return
+  state.gateX = null
+  state.waveIndex += 1
+  if (state.waveIndex >= WAVES.length) state.phase = 'cleared'
+}
+
+function updateCamera() {
+  const desired = state.player.x - canvas.width * 0.35
+  const maxCam = state.gateX !== null ? state.gateX : WORLD_WIDTH - canvas.width
+  state.cameraX = clamp(desired, 0, Math.max(0, maxCam))
+}
+
+function update(dt) {
+  if (state.phase !== 'playing') return
+  updatePlayer(dt)
+  updateEnemies(dt)
+  checkWaveTriggers()
+  checkWaveCleared()
+  updateCamera()
+}
+
+// --- Rendering ---
+
+function makeBuildings(count, xRange, hRange, wRange) {
+  const arr = []
+  for (let i = 0; i < count; i++) {
+    arr.push({
+      x: (i / count) * xRange,
+      w: wRange[0] + Math.random() * (wRange[1] - wRange[0]),
+      h: hRange[0] + Math.random() * (hRange[1] - hRange[0]),
+    })
+  }
+  return arr
+}
+const buildingsFar = makeBuildings(26, WORLD_WIDTH * 1.2, [90, 200], [60, 140])
+const buildingsMid = makeBuildings(34, WORLD_WIDTH * 1.2, [60, 140], [50, 110])
+
+function worldToScreenX(x) { return x - state.cameraX }
+
+function drawParallaxLayer(buildings, factor, color) {
+  ctx.fillStyle = color
+  const offset = state.cameraX * factor
+  for (const b of buildings) {
+    const sx = b.x - offset
+    if (sx < -b.w || sx > canvas.width + b.w) continue
+    ctx.fillRect(sx, GROUND_TOP - b.h, b.w, b.h)
+  }
+}
+
+function drawBackground() {
+  const grad = ctx.createLinearGradient(0, 0, 0, GROUND_TOP)
+  grad.addColorStop(0, '#2b1f4a')
+  grad.addColorStop(1, '#5d4a8a')
+  ctx.fillStyle = grad
+  ctx.fillRect(0, 0, canvas.width, GROUND_TOP)
+
+  drawParallaxLayer(buildingsFar, 0.25, '#20163a')
+  drawParallaxLayer(buildingsMid, 0.5, '#2e2050')
+
+  ctx.fillStyle = '#3a3a42'
+  ctx.fillRect(0, GROUND_TOP, canvas.width, canvas.height - GROUND_TOP)
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'
+  ctx.lineWidth = 2
+  for (let i = 0; i < 40; i++) {
+    const sx = i * 90 - state.cameraX
+    if (sx < -20 || sx > canvas.width + 20) continue
+    ctx.beginPath()
+    ctx.moveTo(sx, GROUND_TOP)
+    ctx.lineTo(sx - 30, canvas.height)
+    ctx.stroke()
+  }
+}
+
+function drawShadow(x, y, scale) {
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'
+  ctx.beginPath()
+  ctx.ellipse(worldToScreenX(x), y + 2, 22 * scale, 8 * scale, 0, 0, Math.PI * 2)
+  ctx.fill()
+}
+
+function drawHumanoid(x, y, opts) {
+  const scale = depthScale(y)
+  ctx.save()
+  ctx.globalAlpha = opts.alpha ?? 1
+  ctx.translate(worldToScreenX(x), y)
+  ctx.scale(scale * opts.facing, scale)
+
+  const bodyColor = opts.flash ? '#ffffff' : opts.color
+  const legSwing = opts.moving ? Math.sin(opts.walkPhase) * 10 : 0
+  const kicking = opts.attacking && opts.attackType === 'kick'
+  const punching = opts.attacking && !kicking
+
+  ctx.fillStyle = '#2a2a2a'
+  if (kicking) {
+    ctx.fillRect(-10, -26, 7, 26) // back leg planted
+    ctx.fillRect(8, -22, 24, 9) // front leg extended into the kick
+  } else {
+    ctx.fillRect(-10, -26 + legSwing * 0.2, 7, 26)
+    ctx.fillRect(3, -26 - legSwing * 0.2, 7, 26)
+  }
+
+  ctx.fillStyle = bodyColor
+  ctx.fillRect(-12, -56, 24, 32)
+
+  ctx.fillStyle = '#f2c79b'
+  ctx.beginPath()
+  ctx.arc(0, -66, 11, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.fillStyle = bodyColor
+  if (punching) {
+    ctx.fillRect(10, -52, 22, 8)
+    ctx.fillRect(-14, -50, 10, 20)
+  } else if (kicking) {
+    ctx.fillRect(8, -50, 8, 16) // arms pulled into a guard while the leg does the work
+    ctx.fillRect(-16, -50, 8, 16)
+  } else {
+    const armSwing = opts.moving ? Math.sin(opts.walkPhase + Math.PI) * 6 : 0
+    ctx.fillRect(10, -50 + armSwing * 0.3, 8, 18)
+    ctx.fillRect(-18, -50 - armSwing * 0.3, 8, 18)
+  }
+  ctx.restore()
+}
+
+function drawPlayerSprite() {
+  const p = state.player
+  drawShadow(p.x, p.y, depthScale(p.y))
+  drawHumanoid(p.x, p.y, {
+    color: '#3f7fd1',
+    facing: p.facing,
+    walkPhase: p.walkPhase,
+    moving: p.moving,
+    attacking: !!p.attack && p.attack.phase !== 'recovery',
+    attackType: p.attack && p.attack.type,
+    flash: p.hitstunTimer > 0 && Math.floor(p.hitstunTimer * 20) % 2 === 0,
+  })
+}
+
+function drawBossHealthBar(en) {
+  const sx = worldToScreenX(en.x)
+  const w = 70
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'
+  ctx.fillRect(sx - w / 2, en.y - 100, w, 6)
+  ctx.fillStyle = '#ff4d4d'
+  ctx.fillRect(sx - w / 2, en.y - 100, w * Math.max(0, en.hp / en.maxHp), 6)
+}
+
+function drawEnemySprite(en) {
+  const stats = ENEMY_TYPES[en.type]
+  const alpha = en.state === 'dead' ? Math.max(0, en.deathTimer / DEATH_FADE) : 1
+  drawShadow(en.x, en.y, depthScale(en.y))
+  drawHumanoid(en.x, en.y, {
+    color: en.state === 'telegraph' ? '#ffcf4d' : stats.color,
+    facing: en.facing,
+    walkPhase: en.walkPhase,
+    moving: en.state === 'approach',
+    attacking: en.state === 'attack',
+    flash: en.flashTimer > 0,
+    alpha,
+  })
+  if (en.type === 'boss' && en.state !== 'dead') drawBossHealthBar(en)
+}
+
+function drawWorld() {
+  drawBackground()
+  const drawables = [{ y: state.player.y, draw: drawPlayerSprite }]
+  for (const en of state.enemies) drawables.push({ y: en.y, draw: () => drawEnemySprite(en) })
+  drawables.sort((a, b) => a.y - b.y)
+  for (const d of drawables) d.draw()
+}
+
+function drawHud() {
+  const p = state.player
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'
+  ctx.fillRect(16, 16, 220, 22)
+  ctx.fillStyle = '#4dff88'
+  ctx.fillRect(18, 18, 216 * Math.max(0, p.hp / PLAYER_MAX_HP), 18)
+  ctx.strokeStyle = '#fff'
+  ctx.lineWidth = 1
+  ctx.strokeRect(16, 16, 220, 22)
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 13px sans-serif'
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'top'
+  ctx.fillText('HP', 20, 17)
+
+  const waveLabel =
+    state.waveIndex >= WAVES.length
+      ? 'CLEAR'
+      : state.waveIndex === WAVES.length - 1
+        ? 'BOSS'
+        : `WAVE ${state.waveIndex + 1}/${WAVES.length}`
+  ctx.fillText(waveLabel, 16, 46)
+}
+
+function drawOverlay() {
+  if (state.phase === 'playing') return
+  ctx.fillStyle = 'rgba(10,8,20,0.75)'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 36px sans-serif'
+  ctx.fillText(state.phase === 'cleared' ? 'STAGE CLEAR!' : 'GAME OVER', canvas.width / 2, canvas.height / 2 - 30)
+  ctx.font = '18px sans-serif'
+  ctx.fillText('R 키를 눌러 다시 시작', canvas.width / 2, canvas.height / 2 + 20)
+}
+
+let lastTime = performance.now()
+function loop(time) {
+  const dt = Math.min(0.05, (time - lastTime) / 1000)
+  lastTime = time
+
+  update(dt)
+  drawWorld()
+  drawHud()
+  drawOverlay()
+
+  requestAnimationFrame(loop)
+}
+requestAnimationFrame(loop)
