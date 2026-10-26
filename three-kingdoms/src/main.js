@@ -295,12 +295,22 @@ function maybeAutoEndHumanTurn() {
 }
 
 // --- Map actions ---------------------------------------------------------
+// Conquests from AI-vs-AI/neutral fights (the only thing autoResolveBattle
+// handles - a player-involved fight goes through startBattle/finishBattle
+// instead, which already toasts its own outcome) used to happen completely
+// silently: the player would end their turn, and regions would just be
+// owned by someone else with no explanation. turnEvents collects those
+// conquests so endTurn can summarize them in one toast.
+let turnEvents = []
+
 function autoResolveBattle(attackerId, defenderId) {
   const atk = regionById(attackerId)
   const def = regionById(defenderId)
   const atkPower = atk.troops * (0.85 + Math.random() * 0.3)
   const defPower = def.troops * (0.85 + Math.random() * 0.3) * 1.1 // defender's home-ground edge
   if (atkPower > defPower) {
+    const defName = def.name
+    turnEvents.push(`${FACTION_NAME[atk.owner]}이(가) ${defName}을(를) 점령`)
     def.owner = atk.owner
     def.troops = Math.max(1, Math.round(atk.troops - def.troops * 0.5))
   } else {
@@ -330,7 +340,11 @@ function moveOrAttack(sourceId, targetId) {
 
 function recruitAt(regionId) {
   const r = regionById(regionId)
-  if (r.owner !== 'player' || state.gold < RECRUIT_COST) return
+  if (r.owner !== 'player') return
+  if (state.gold < RECRUIT_COST) {
+    say('금이 부족합니다')
+    return
+  }
   state.gold -= RECRUIT_COST
   r.troops += RECRUIT_AMOUNT
   say(`${r.name}에 병력 +${RECRUIT_AMOUNT}`)
@@ -375,8 +389,24 @@ function runAiFaction(owner) {
   }
 }
 
+const TOAST_MAX_WIDTH = 240
+
+function announceTurnEvents() {
+  if (turnEvents.length === 0) return
+  const summary = `세력 다툼 ${turnEvents.length}건 발생`
+  const joined = turnEvents.join(' · ')
+  // Measuring against the actual toast font avoids a long region/faction
+  // name combo silently overflowing the toast box - fall back to the
+  // count-only summary whenever the full list wouldn't fit.
+  ctx.font = '12px sans-serif'
+  const text = turnEvents.length === 1 || ctx.measureText(joined).width <= TOAST_MAX_WIDTH ? joined : summary
+  say(text)
+  turnEvents = []
+}
+
 function endTurn() {
   if (state.phase !== 'map') return
+  turnEvents = []
   for (const r of ownedBy('player')) state.gold += r.income
   runAiFaction('factionB')
   if (state.phase === 'battle') {
@@ -385,6 +415,7 @@ function endTurn() {
     return
   }
   runAiFaction('factionC')
+  announceTurnEvents()
   state.turn += 1
   state.selected = null
   checkWinLose()
@@ -603,7 +634,9 @@ function drawPanel() {
   }
 
   for (const btn of uiButtons()) {
-    const disabled = btn.id === 'recruit' && (state.selected === null || regionById(state.selected).owner !== 'player')
+    const disabled =
+      btn.id === 'recruit' &&
+      (state.selected === null || regionById(state.selected).owner !== 'player' || state.gold < RECRUIT_COST)
     ctx.fillStyle = disabled ? '#3a3024' : '#5a4428'
     ctx.beginPath()
     ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 6)
