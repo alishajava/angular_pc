@@ -61,6 +61,11 @@ jobs:
       - run: npm run build -- --base=/angular_pc/strategy/
         working-directory: three-kingdoms
       - run: mkdir -p dist/strategy && cp -r three-kingdoms/dist/. dist/strategy/
+      - run: npm ci
+        working-directory: island-life
+      - run: npm run build -- --base=/angular_pc/island/
+        working-directory: island-life
+      - run: mkdir -p dist/island && cp -r island-life/dist/. dist/island/
       - run: mkdir -p dist/learn2d && cp learn-2d/index.html dist/learn2d/
       - run: npm ci
         working-directory: learn-3d
