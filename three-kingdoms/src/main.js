@@ -494,7 +494,7 @@ function restart() {
 
 // --- Rendering -----------------------------------------------------------
 function drawOverlay(lines, title, footer) {
-  ctx.fillStyle = 'rgba(8,6,4,0.9)'
+  ctx.fillStyle = 'rgba(26,20,14,0.88)'
   ctx.fillRect(0, 0, canvas.width, canvas.height)
   ctx.textAlign = 'center'
   ctx.fillStyle = '#e8c27a'
@@ -541,7 +541,7 @@ function drawLose() {
 }
 
 function drawMap() {
-  ctx.fillStyle = '#1b140c'
+  ctx.fillStyle = '#3e2e1c'
   ctx.fillRect(0, 0, MAP_W, canvas.height)
 
   ctx.strokeStyle = 'rgba(232,194,122,0.25)'
@@ -577,7 +577,7 @@ function drawMap() {
 }
 
 function drawPanel() {
-  ctx.fillStyle = '#241a10'
+  ctx.fillStyle = '#4c3722'
   ctx.fillRect(MAP_W, 0, canvas.width - MAP_W, canvas.height)
 
   ctx.fillStyle = '#e8c27a'
@@ -663,12 +663,12 @@ function drawPanel() {
 
 function drawBattle() {
   const b = state.battle
-  ctx.fillStyle = '#14100a'
+  ctx.fillStyle = '#322819'
   ctx.fillRect(0, 0, canvas.width, canvas.height)
 
   for (let row = 0; row < BATTLE_ROWS; row++) {
     for (let col = 0; col < BATTLE_COLS; col++) {
-      ctx.fillStyle = (row + col) % 2 === 0 ? '#241c12' : '#2c2216'
+      ctx.fillStyle = (row + col) % 2 === 0 ? '#413220' : '#4f3d28'
       ctx.fillRect(BATTLE_OFFSET_X + col * BATTLE_TILE, BATTLE_OFFSET_Y + row * BATTLE_TILE, BATTLE_TILE, BATTLE_TILE)
     }
   }
