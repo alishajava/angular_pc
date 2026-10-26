@@ -86,31 +86,21 @@ function ownedBy(owner) {
   return state.regions.filter((r) => r.owner === owner)
 }
 
-// --- Battle (tactical mini-map) ----------------------------------------
-// Each side gets up to 4 squads; a squad's HP is its share of the army's
-// troops. Moving onto an adjacent enemy squad is an attack: the mover
-// deals damage equal to its own current HP (a weakened squad hits
-// softer), the target loses that HP, and is removed at 0.
-const BATTLE_COLS = 9
-const BATTLE_ROWS = 5
-const BATTLE_TILE = 90
-const BATTLE_BAR_H = 56
-const BATTLE_OFFSET_X = (canvas.width - BATTLE_COLS * BATTLE_TILE) / 2
-const BATTLE_OFFSET_Y = (canvas.height - BATTLE_BAR_H - BATTLE_ROWS * BATTLE_TILE) / 2
-const MAX_ROUNDS = 10
-
-function makeSquads(troops, side) {
-  const count = Math.max(1, Math.min(4, Math.ceil(troops / 3)))
-  const base = Math.floor(troops / count)
-  const remainder = troops - base * count
-  const squads = []
-  for (let i = 0; i < count; i++) {
-    const hp = base + (i < remainder ? 1 : 0)
-    const row = Math.floor((BATTLE_ROWS - count) / 2) + i
-    const col = side === 'attacker' ? 1 : BATTLE_COLS - 2
-    squads.push({ side, hp, maxHp: hp, col, row, acted: false })
-  }
-  return squads
+// --- Battle (tactic duel) -------------------------------------------------
+// Each round both sides pick one of three tactics, revealed simultaneously,
+// rock-paper-scissors style: 돌격(charge) beats 기습(ambush), 기습 beats
+// 수비(defend), 수비 beats 돌격. Winning the matchup roughly triples your
+// casualties dealt vs taken that round; a tie is a plain trade. Whoever's
+// army is bigger still deals more absolute damage (it scales off your own
+// current troop count), so a lopsided fight is still over in one round
+// regardless of which tactic you pick - the tactic choice is what decides
+// close fights, not who clicks fastest through a side-by-side squad crawl.
+const MAX_ROUNDS = 6
+const TACTICS = ['charge', 'ambush', 'defend']
+const TACTIC_INFO = {
+  charge: { label: '돌격', beats: 'ambush' },
+  ambush: { label: '기습', beats: 'defend' },
+  defend: { label: '수비', beats: 'charge' },
 }
 
 function startBattle(attackerRegionId, defenderRegionId, attackerIsPlayer) {
@@ -122,48 +112,71 @@ function startBattle(attackerRegionId, defenderRegionId, attackerIsPlayer) {
     attackerIsPlayer,
     attackerOwner: atk.owner,
     defenderOwner: def.owner,
-    squads: [...makeSquads(atk.troops, 'attacker'), ...makeSquads(def.troops, 'defender')],
+    attackerTroops: atk.troops,
+    defenderTroops: def.troops,
+    initialAttackerTroops: atk.troops,
+    initialDefenderTroops: def.troops,
     round: 1,
-    turnSide: 'attacker',
-    selectedSquad: null,
-    log: attackerIsPlayer ? '내 군대가 공격을 시작했다.' : `${def.name}이(가) 침공당했다! 수비하라.`,
+    lastResult: null,
+    log: attackerIsPlayer ? '내 군대가 공격을 시작했다. 전술을 선택하세요.' : `${def.name}이(가) 침공당했다! 전술을 선택해 수비하라.`,
   }
   state.phase = 'battle'
-  // The attacker always goes first. If the player is the defender, that
-  // first turn belongs to the AI and nothing will ever click it into
-  // motion, so run it immediately instead of waiting on human input.
-  runAiTurnsUntilHumanOrEnd()
 }
 
-function battleSquadsOf(side) {
-  return state.battle.squads.filter((s) => s.side === side && s.hp > 0)
+function humanTroops() {
+  const b = state.battle
+  return b.attackerIsPlayer ? b.attackerTroops : b.defenderTroops
+}
+function aiTroops() {
+  const b = state.battle
+  return b.attackerIsPlayer ? b.defenderTroops : b.attackerTroops
+}
+function setHumanTroops(v) {
+  const b = state.battle
+  if (b.attackerIsPlayer) b.attackerTroops = v
+  else b.defenderTroops = v
+}
+function setAiTroops(v) {
+  const b = state.battle
+  if (b.attackerIsPlayer) b.defenderTroops = v
+  else b.attackerTroops = v
 }
 
-function tileOccupant(col, row) {
-  return state.battle.squads.find((s) => s.hp > 0 && s.col === col && s.row === row)
+// Light personality rather than pure chance: favors defending when
+// outnumbered and charging when ahead, random otherwise.
+function pickAiTactic() {
+  const hp = humanTroops()
+  const ap = aiTroops()
+  const roll = Math.random()
+  if (ap < hp * 0.7) return roll < 0.55 ? 'defend' : TACTICS[Math.floor(Math.random() * 3)]
+  if (ap > hp * 1.3) return roll < 0.55 ? 'charge' : TACTICS[Math.floor(Math.random() * 3)]
+  return TACTICS[Math.floor(Math.random() * 3)]
+}
+
+// From humanChoice's perspective.
+function matchupOutcome(humanChoice, aiChoice) {
+  if (humanChoice === aiChoice) return 'tie'
+  return TACTIC_INFO[humanChoice].beats === aiChoice ? 'win' : 'lose'
 }
 
 function finishBattle() {
   const b = state.battle
-  const atkAlive = battleSquadsOf('attacker')
-  const defAlive = battleSquadsOf('defender')
-  const atkHp = atkAlive.reduce((sum, s) => sum + s.hp, 0)
-  const defHp = defAlive.reduce((sum, s) => sum + s.hp, 0)
-  const attackerWins = atkHp > 0 && defHp <= 0
   const atkRegion = regionById(b.attackerRegionId)
   const defRegion = regionById(b.defenderRegionId)
+  const defenderWasPlayer = defRegion.owner === 'player'
+  const attackerWins = b.attackerTroops > b.defenderTroops
 
   if (attackerWins) {
     defRegion.owner = b.attackerOwner
-    defRegion.troops = atkHp
+    defRegion.troops = Math.max(1, Math.round(b.attackerTroops))
     atkRegion.troops = 0
     if (b.attackerIsPlayer) say(`${defRegion.name}을(를) 점령했다!`)
-    else if (defRegion.owner === 'player') say(`${defRegion.name}을(를) 빼앗겼다...`)
+    else if (defenderWasPlayer) say(`${defRegion.name}을(를) 빼앗겼다...`)
   } else {
-    defRegion.troops = defHp
+    defRegion.troops = Math.max(1, Math.round(b.defenderTroops))
     atkRegion.troops = 0
     if (b.attackerIsPlayer) say(`${defRegion.name} 공략에 실패했다...`)
-    else if (defRegion.owner === 'player') say(`${defRegion.name}을(를) 지켜냈다!`)
+    else if (defenderWasPlayer) say(`${defRegion.name}을(를) 지켜냈다!`)
   }
 
   state.battle = null
@@ -171,127 +184,29 @@ function finishBattle() {
   checkWinLose()
 }
 
-function aiActBattleSquad(squad) {
-  const enemies = battleSquadsOf(squad.side === 'attacker' ? 'defender' : 'attacker')
-  if (enemies.length === 0) return
-  let nearest = enemies[0]
-  let nearestDist = Math.abs(nearest.col - squad.col) + Math.abs(nearest.row - squad.row)
-  for (const e of enemies) {
-    const d = Math.abs(e.col - squad.col) + Math.abs(e.row - squad.row)
-    if (d < nearestDist) {
-      nearest = e
-      nearestDist = d
-    }
-  }
-  if (nearestDist === 1) {
-    attackSquad(squad, nearest)
-    return
-  }
-  const dc = Math.sign(nearest.col - squad.col)
-  const dr = Math.sign(nearest.row - squad.row)
-  tryMoveSquad(squad, squad.col + dc, squad.row) || tryMoveSquad(squad, squad.col, squad.row + dr)
-}
-
-function tryMoveSquad(squad, col, row) {
-  if (col < 0 || col >= BATTLE_COLS || row < 0 || row >= BATTLE_ROWS) return false
-  if (tileOccupant(col, row)) return false
-  squad.col = col
-  squad.row = row
-  squad.acted = true
-  return true
-}
-
-function attackSquad(attacker, defender) {
-  defender.hp -= attacker.hp
-  attacker.acted = true
-  if (defender.hp <= 0) {
-    state.battle.squads = state.battle.squads.filter((s) => s !== defender || s.hp > 0)
-  }
-}
-
-function isHumanBattleSide(side) {
+function chooseTactic(humanChoice) {
   const b = state.battle
-  return (side === 'attacker' && b.attackerIsPlayer) || (side === 'defender' && !b.attackerIsPlayer)
-}
+  if (!b) return
+  const aiChoice = pickAiTactic()
+  const outcome = matchupOutcome(humanChoice, aiChoice)
+  const hp = humanTroops()
+  const ap = aiTroops()
+  const humanRate = outcome === 'win' ? 0.45 : outcome === 'lose' ? 0.18 : 0.3
+  const aiRate = outcome === 'win' ? 0.18 : outcome === 'lose' ? 0.45 : 0.3
+  const dmgToAi = Math.max(1, Math.round(hp * humanRate))
+  const dmgToHuman = Math.max(1, Math.round(ap * aiRate))
+  setAiTroops(Math.max(0, ap - dmgToAi))
+  setHumanTroops(Math.max(0, hp - dmgToHuman))
 
-// Ends the current side's turn, advances to the other side (bumping the
-// round once both have gone), and - since the player only ever controls
-// one of the two sides - keeps auto-running AI turns until either the
-// battle ends or it's the human's turn again. This is also what makes an
-// AI-attacker-vs-player-defender battle start correctly: see the call in
-// startBattle.
-function advanceBattleTurn() {
-  const b = state.battle
-  for (const squad of b.squads) squad.acted = false
-  b.selectedSquad = null
+  const verb = outcome === 'win' ? '내 전술이 적중했다!' : outcome === 'lose' ? '적 전술에 당했다...' : '팽팽하게 맞붙었다.'
+  b.lastResult = { humanChoice, aiChoice, outcome, dmgToAi, dmgToHuman }
+  b.log = `나: ${TACTIC_INFO[humanChoice].label} vs 적: ${TACTIC_INFO[aiChoice].label} — ${verb} (적 피해 ${dmgToAi} · 내 피해 ${dmgToHuman})`
 
-  if (battleSquadsOf('attacker').length === 0 || battleSquadsOf('defender').length === 0) {
+  if (aiTroops() <= 0 || humanTroops() <= 0 || b.round >= MAX_ROUNDS) {
     finishBattle()
     return
   }
-  if (b.turnSide === 'defender') b.round += 1
-  b.turnSide = b.turnSide === 'attacker' ? 'defender' : 'attacker'
-  if (b.round > MAX_ROUNDS) {
-    finishBattle()
-    return
-  }
-  runAiTurnsUntilHumanOrEnd()
-}
-
-function runAiTurnsUntilHumanOrEnd() {
-  const b = state.battle
-  if (!b || isHumanBattleSide(b.turnSide)) return
-  for (const squad of battleSquadsOf(b.turnSide)) {
-    if (squad.hp > 0) aiActBattleSquad(squad)
-  }
-  advanceBattleTurn()
-}
-
-function handleBattleClick(mx, my) {
-  const b = state.battle
-  const humanSide = b.attackerIsPlayer ? 'attacker' : 'defender'
-  if (b.turnSide !== humanSide) return
-  const col = Math.floor((mx - BATTLE_OFFSET_X) / BATTLE_TILE)
-  const row = Math.floor((my - BATTLE_OFFSET_Y) / BATTLE_TILE)
-  if (col < 0 || col >= BATTLE_COLS || row < 0 || row >= BATTLE_ROWS) return
-
-  const clicked = tileOccupant(col, row)
-  if (b.selectedSquad) {
-    const sel = b.selectedSquad
-    const dist = Math.abs(col - sel.col) + Math.abs(row - sel.row)
-    if (clicked === sel) {
-      // Clicking your own selected squad again skips its action - needed
-      // so a boxed-in squad with no legal move/attack can't deadlock the
-      // turn (there's no separate "end turn" button in battle).
-      sel.acted = true
-      b.selectedSquad = null
-      maybeAutoEndHumanTurn()
-      return
-    }
-    if (clicked && clicked.side !== sel.side && dist === 1) {
-      attackSquad(sel, clicked)
-      b.selectedSquad = null
-      maybeAutoEndHumanTurn()
-      return
-    }
-    if (!clicked && dist === 1) {
-      tryMoveSquad(sel, col, row)
-      b.selectedSquad = null
-      maybeAutoEndHumanTurn()
-      return
-    }
-    b.selectedSquad = null
-  }
-  if (clicked && clicked.side === humanSide && !clicked.acted) {
-    b.selectedSquad = clicked
-  }
-}
-
-function maybeAutoEndHumanTurn() {
-  const b = state.battle
-  const humanSide = b.attackerIsPlayer ? 'attacker' : 'defender'
-  const remaining = battleSquadsOf(humanSide).filter((s) => !s.acted)
-  if (remaining.length === 0) advanceBattleTurn()
+  b.round += 1
 }
 
 // --- Map actions ---------------------------------------------------------
@@ -447,7 +362,7 @@ canvas.addEventListener('click', (e) => {
   if (state.phase === 'win' || state.phase === 'lose') return
 
   if (state.phase === 'battle') {
-    handleBattleClick(mx, my)
+    handleBattleTacticClick(mx, my)
     return
   }
 
@@ -522,10 +437,14 @@ function drawTitle() {
 function drawIntro() {
   drawOverlay(
     [
-      '그대는 낙양을 다스리는 신진 세력가.',
-      '업성과 강릉의 두 세력이 이미 힘을 키우고 있다.',
-      '매 턴 병력을 모으고, 인접 고을로 군대를 보내 점령하라.',
-      '내 군대가 걸린 전투는 직접 지휘할 수 있다.',
+      '목표: 7개 고을을 전부 점령하면 승리, 내 고을이 전부 사라지면 패배.',
+      '',
+      '매 턴: 금으로 병력을 모으고 → 인접 고을로 군대를 보내 이동/점령 → 턴 종료.',
+      '(공격하면 그 고을의 병력이 전부 빠져나가니, 수도를 비우고 공격하면 위험하다)',
+      '',
+      '전투: 내 군대가 걸린 전투는 직접 지휘한다.',
+      '매 라운드 돌격/기습/수비 중 하나를 고르면 — 돌격은 기습에, 기습은 수비에,',
+      '수비는 돌격에 강하다 (가위바위보와 같다). 이기는 전술을 고를수록 피해를 덜 입는다.',
     ],
     '천하 정세',
     '클릭해서 시작',
@@ -661,46 +580,91 @@ function drawPanel() {
   }
 }
 
+function tacticButtons() {
+  return TACTICS.map((t, i) => ({ id: t, x: 40 + i * 290, y: 460, w: 260, h: 90 }))
+}
+
+function handleBattleTacticClick(mx, my) {
+  for (const btn of tacticButtons()) {
+    if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+      chooseTactic(btn.id)
+      return
+    }
+  }
+}
+
+function drawTroopBar(x, y, w, label, troops, initialTroops, color) {
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#e8c27a'
+  ctx.font = 'bold 14px sans-serif'
+  ctx.fillText(label, x, y)
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'
+  ctx.fillRect(x, y + 12, w, 20)
+  const ratio = initialTroops > 0 ? Math.max(0, Math.min(1, troops / initialTroops)) : 0
+  ctx.fillStyle = color
+  ctx.fillRect(x, y + 12, w * ratio, 20)
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 14px sans-serif'
+  ctx.textAlign = 'right'
+  ctx.fillText(`${Math.max(0, Math.round(troops))}`, x + w, y + 54)
+  ctx.textAlign = 'left'
+}
+
 function drawBattle() {
   const b = state.battle
   ctx.fillStyle = '#322819'
   ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-  for (let row = 0; row < BATTLE_ROWS; row++) {
-    for (let col = 0; col < BATTLE_COLS; col++) {
-      ctx.fillStyle = (row + col) % 2 === 0 ? '#413220' : '#4f3d28'
-      ctx.fillRect(BATTLE_OFFSET_X + col * BATTLE_TILE, BATTLE_OFFSET_Y + row * BATTLE_TILE, BATTLE_TILE, BATTLE_TILE)
-    }
-  }
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#e8c27a'
+  ctx.font = 'bold 20px sans-serif'
+  ctx.fillText(`⚔ 전투 — ${b.round}/${MAX_ROUNDS} 라운드`, canvas.width / 2, 46)
+  ctx.textAlign = 'left'
 
-  const humanSide = b.attackerIsPlayer ? 'attacker' : 'defender'
-  for (const s of b.squads) {
-    if (s.hp <= 0) continue
-    const cx = BATTLE_OFFSET_X + s.col * BATTLE_TILE + BATTLE_TILE / 2
-    const cy = BATTLE_OFFSET_Y + s.row * BATTLE_TILE + BATTLE_TILE / 2
-    const isSelected = b.selectedSquad === s
+  const aiOwner = b.attackerIsPlayer ? b.defenderOwner : b.attackerOwner
+  const humanInitial = b.attackerIsPlayer ? b.initialAttackerTroops : b.initialDefenderTroops
+  const aiInitial = b.attackerIsPlayer ? b.initialDefenderTroops : b.initialAttackerTroops
+  drawTroopBar(80, 100, 330, `나 (${b.attackerIsPlayer ? '공격' : '수비'})`, humanTroops(), humanInitial, COLORS.player)
+  drawTroopBar(490, 100, 330, `${FACTION_NAME[aiOwner]} (${b.attackerIsPlayer ? '수비' : '공격'})`, aiTroops(), aiInitial, COLORS[aiOwner])
+
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'
+  ctx.fillRect(80, 190, 740, 220)
+  ctx.fillStyle = '#9fb8d8'
+  ctx.font = 'bold 13px sans-serif'
+  ctx.fillText('상성: 돌격 > 기습 > 수비 > 돌격', 100, 216)
+  ctx.fillStyle = '#fff'
+  ctx.font = '14px sans-serif'
+  ctx.fillText(b.log, 100, 250)
+  if (b.lastResult) {
+    ctx.fillStyle = '#ffd23f'
+    ctx.font = 'bold 13px sans-serif'
+    ctx.fillText(
+      `마지막 라운드: 나 ${TACTIC_INFO[b.lastResult.humanChoice].label} vs 적 ${TACTIC_INFO[b.lastResult.aiChoice].label}`,
+      100,
+      280,
+    )
+  }
+  ctx.fillStyle = '#9fb8d8'
+  ctx.font = '12px sans-serif'
+  ctx.fillText('아래 전술 중 하나를 선택하면 바로 그 라운드가 진행됩니다.', 100, 390)
+
+  for (const btn of tacticButtons()) {
+    const info = TACTIC_INFO[btn.id]
+    ctx.fillStyle = '#5a4428'
     ctx.beginPath()
-    ctx.arc(cx, cy, 30, 0, Math.PI * 2)
-    ctx.fillStyle = s.side === 'attacker' ? COLORS[b.attackerOwner] : COLORS[b.defenderOwner]
+    ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 8)
     ctx.fill()
-    ctx.lineWidth = isSelected ? 4 : s.acted ? 1 : 2
-    ctx.strokeStyle = isSelected ? '#fff' : s.acted ? 'rgba(255,255,255,0.3)' : '#ffd23f'
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)'
     ctx.stroke()
     ctx.fillStyle = '#fff'
     ctx.textAlign = 'center'
-    ctx.font = 'bold 18px sans-serif'
-    ctx.fillText(String(s.hp), cx, cy + 6)
+    ctx.font = 'bold 22px sans-serif'
+    ctx.fillText(info.label, btn.x + btn.w / 2, btn.y + 40)
+    ctx.fillStyle = '#ffd23f'
+    ctx.font = '12px sans-serif'
+    ctx.fillText(`${TACTIC_INFO[info.beats].label} 상대로 강함`, btn.x + btn.w / 2, btn.y + 66)
+    ctx.textAlign = 'left'
   }
-  ctx.textAlign = 'left'
-
-  ctx.fillStyle = 'rgba(0,0,0,0.6)'
-  ctx.fillRect(0, canvas.height - 56, canvas.width, 56)
-  ctx.fillStyle = '#e8c27a'
-  ctx.font = 'bold 14px sans-serif'
-  ctx.fillText(`${b.round}/${MAX_ROUNDS} 라운드 · ${b.turnSide === humanSide ? '내 차례' : '적 행동 중'}`, 14, canvas.height - 32)
-  ctx.fillStyle = '#fff'
-  ctx.font = '12px sans-serif'
-  ctx.fillText(b.log, 14, canvas.height - 12)
 }
 
 function render() {
