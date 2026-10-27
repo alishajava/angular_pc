@@ -32,11 +32,6 @@ jobs:
         working-directory: 3d-prototype
       - run: mkdir -p dist/3d && cp -r 3d-prototype/dist/. dist/3d/
       - run: npm ci
-        working-directory: topview-adventure
-      - run: npm run build -- --base=/angular_pc/topview/
-        working-directory: topview-adventure
-      - run: mkdir -p dist/topview && cp -r topview-adventure/dist/. dist/topview/
-      - run: npm ci
         working-directory: sailing-sim
       - run: npm run build -- --base=/angular_pc/sailing/
         working-directory: sailing-sim
@@ -46,11 +41,6 @@ jobs:
       - run: npm run build -- --base=/angular_pc/brawler/
         working-directory: brawler
       - run: mkdir -p dist/brawler && cp -r brawler/dist/. dist/brawler/
-      - run: npm ci
-        working-directory: tunguska
-      - run: npm run build -- --base=/angular_pc/tunguska/
-        working-directory: tunguska
-      - run: mkdir -p dist/tunguska && cp -r tunguska/dist/. dist/tunguska/
       - run: npm ci
         working-directory: three-kingdoms
       - run: npm run build -- --base=/angular_pc/strategy/
