@@ -72,6 +72,24 @@ const BASE_WIND_FROM = 0 // degrees; wind blows from the north, toward the south
 const WIND_OSC_AMOUNT = 20
 const WIND_OSC_RATE = 0.06
 
+// Typhoons: periodic moving storms. Inside one, the wind swings wildly
+// (so sail trim keeps getting blown off), overall speed is dragged down
+// regardless of trim, and the boat gets buffeted off its heading. Carrying
+// cargo through one risks losing it overboard. A wider warn ring lets the
+// player see one coming and route around it.
+const TYPHOON_RADIUS = 130
+const TYPHOON_WARN_RADIUS = 260
+const TYPHOON_LIFETIME = 40
+const TYPHOON_FIRST_AT = 16
+const TYPHOON_INTERVAL = 42
+const TYPHOON_WIND_CHAOS = rad(130) // extra wind-direction swing while inside
+const TYPHOON_SPEED_DRAG = 0.6 // overall speed multiplier while inside, on top of sail trim
+const TYPHOON_GUST_STRENGTH = 55 // px/s of chaotic buffeting drift while inside
+const TYPHOON_PULL_STRENGTH = 45 // px/s drawing the boat toward the eye, so it can't just drift out
+const TYPHOON_SPAWN_BOUNDS = { minX: -380, maxX: 420, minY: -260, maxY: 340 }
+const CARGO_LOSS_CHECK_INTERVAL = 4
+const CARGO_LOSS_CHANCE = 0.25
+
 const BASE_SPEED = 150
 const TURN_RATE = 1.6
 const BOAT_RADIUS = 14
@@ -109,6 +127,11 @@ function makeInitialState() {
     cargo: null, // { good, fromId, toId, reward }
     dockedPortId: null,
     toast: null, // { text, until }
+    typhoons: [],
+    nextTyphoonAt: TYPHOON_FIRST_AT,
+    activeTyphoon: null,
+    wasInStorm: false,
+    stormCargoTimer: 0,
   }
 }
 let state = makeInitialState()
@@ -123,7 +146,61 @@ window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
 function held(names) { return names.some((k) => heldKeys.has(k)) }
 
 function currentWindFrom() {
-  return rad(BASE_WIND_FROM + Math.sin(state.windTime * WIND_OSC_RATE) * WIND_OSC_AMOUNT)
+  let wind = rad(BASE_WIND_FROM + Math.sin(state.windTime * WIND_OSC_RATE) * WIND_OSC_AMOUNT)
+  const t = state.activeTyphoon
+  if (t) wind += Math.sin(state.elapsed * 2.3 + t.phase) * TYPHOON_WIND_CHAOS
+  return wind
+}
+
+function findActiveTyphoon(x, y) {
+  let nearest = null
+  let nearestDist = Infinity
+  for (const t of state.typhoons) {
+    const dist = Math.hypot(x - t.x, y - t.y)
+    if (dist <= TYPHOON_RADIUS && dist < nearestDist) {
+      nearest = t
+      nearestDist = dist
+    }
+  }
+  return nearest
+}
+
+function nearestTyphoonInfo(x, y) {
+  let best = null
+  let bestDist = Infinity
+  for (const t of state.typhoons) {
+    const dist = Math.hypot(x - t.x, y - t.y)
+    if (dist < bestDist) {
+      best = t
+      bestDist = dist
+    }
+  }
+  return best ? { typhoon: best, dist: bestDist } : null
+}
+
+function spawnTyphoonsIfDue() {
+  if (state.elapsed < state.nextTyphoonAt) return
+  const b = TYPHOON_SPAWN_BOUNDS
+  const dir = Math.random() * TAU
+  const speed = 14 + Math.random() * 10
+  state.typhoons.push({
+    x: b.minX + Math.random() * (b.maxX - b.minX),
+    y: b.minY + Math.random() * (b.maxY - b.minY),
+    vx: Math.cos(dir) * speed,
+    vy: Math.sin(dir) * speed,
+    bornAt: state.elapsed,
+    phase: Math.random() * TAU,
+  })
+  state.nextTyphoonAt = state.elapsed + TYPHOON_INTERVAL
+  showToast('태풍 발생! 소용돌이 구름을 피해 항해하세요')
+}
+
+function updateTyphoons(dt) {
+  for (const t of state.typhoons) {
+    t.x += t.vx * dt
+    t.y += t.vy * dt
+  }
+  state.typhoons = state.typhoons.filter((t) => state.elapsed - t.bornAt < TYPHOON_LIFETIME)
 }
 
 function pointOfSailInfo() {
@@ -160,13 +237,49 @@ function updateRacing(dt) {
   state.elapsed += dt
   state.windTime += dt
 
+  spawnTyphoonsIfDue()
+  updateTyphoons(dt)
+  state.activeTyphoon = findActiveTyphoon(state.boat.x, state.boat.y)
+  const inStorm = !!state.activeTyphoon
+  if (inStorm !== state.wasInStorm) {
+    showToast(inStorm ? '태풍 속으로 진입! 조타가 불안정해집니다' : '태풍을 빠져나왔다')
+    state.wasInStorm = inStorm
+  }
+
   if (held(['a', 'arrowleft'])) state.boat.heading -= TURN_RATE * dt
   if (held(['d', 'arrowright'])) state.boat.heading += TURN_RATE * dt
 
   const { mult } = pointOfSailInfo()
-  state.boat.speed = BASE_SPEED * mult
+  const dragMult = inStorm ? TYPHOON_SPEED_DRAG : 1
+  state.boat.speed = BASE_SPEED * mult * dragMult
   state.boat.x += Math.sin(state.boat.heading) * state.boat.speed * dt
   state.boat.y += -Math.cos(state.boat.heading) * state.boat.speed * dt
+
+  if (inStorm) {
+    const t = state.activeTyphoon
+    const toCenterX = t.x - state.boat.x
+    const toCenterY = t.y - state.boat.y
+    const centerDist = Math.hypot(toCenterX, toCenterY) || 1
+    state.boat.x += (toCenterX / centerDist) * TYPHOON_PULL_STRENGTH * dt
+    state.boat.y += (toCenterY / centerDist) * TYPHOON_PULL_STRENGTH * dt
+
+    const gustAngle = state.elapsed * 1.7 + t.phase
+    state.boat.x += Math.cos(gustAngle) * TYPHOON_GUST_STRENGTH * dt
+    state.boat.y += Math.sin(gustAngle) * TYPHOON_GUST_STRENGTH * dt
+
+    if (state.cargo) {
+      state.stormCargoTimer += dt
+      if (state.stormCargoTimer >= CARGO_LOSS_CHECK_INTERVAL) {
+        state.stormCargoTimer = 0
+        if (Math.random() < CARGO_LOSS_CHANCE) {
+          showToast(`태풍에 ${state.cargo.good}을(를) 잃어버렸다!`)
+          state.cargo = null
+        }
+      }
+    }
+  } else {
+    state.stormCargoTimer = 0
+  }
 
   resolveIslandCollisions()
 
@@ -337,6 +450,44 @@ function drawCheckpoints() {
   }
 }
 
+function drawTyphoons() {
+  for (const t of state.typhoons) {
+    const p = worldToScreen(t.x, t.y)
+    if (p.x < -TYPHOON_WARN_RADIUS || p.x > canvas.width + TYPHOON_WARN_RADIUS) continue
+    if (p.y < -TYPHOON_WARN_RADIUS || p.y > canvas.height + TYPHOON_WARN_RADIUS) continue
+
+    ctx.strokeStyle = 'rgba(255,90,90,0.35)'
+    ctx.setLineDash([6, 8])
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, TYPHOON_WARN_RADIUS, 0, TAU)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    ctx.fillStyle = 'rgba(30,30,40,0.55)'
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, TYPHOON_RADIUS, 0, TAU)
+    ctx.fill()
+
+    ctx.strokeStyle = 'rgba(220,220,230,0.6)'
+    ctx.lineWidth = 3
+    for (let arm = 0; arm < 3; arm++) {
+      const baseAngle = t.phase + (arm / 3) * TAU
+      ctx.beginPath()
+      for (let i = 0; i <= 20; i++) {
+        const frac = i / 20
+        const ang = baseAngle + state.elapsed * 1.2 + frac * 3.2
+        const r = frac * TYPHOON_RADIUS * 0.85
+        const x = p.x + Math.cos(ang) * r
+        const y = p.y + Math.sin(ang) * r
+        if (i === 0) ctx.moveTo(x, y)
+        else ctx.lineTo(x, y)
+      }
+      ctx.stroke()
+    }
+  }
+}
+
 function drawWake() {
   for (const w of state.wake) {
     const age = state.elapsed - w.t
@@ -372,6 +523,63 @@ function drawBoat() {
   ctx.closePath()
   ctx.fill()
   ctx.restore()
+}
+
+// Rain streaks + a dark vignette, drawn over everything (outside the
+// shaken world transform) so the warning stays legible while the world
+// itself is being buffeted.
+function drawStormOverlay() {
+  ctx.fillStyle = 'rgba(10,10,20,0.3)'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.strokeStyle = 'rgba(200,210,230,0.35)'
+  ctx.lineWidth = 1.5
+  const spacing = 26
+  const slant = 14
+  const scroll = (state.elapsed * 420) % spacing
+  ctx.beginPath()
+  for (let x = -spacing * 2; x < canvas.width + spacing * 2; x += spacing) {
+    const sx = x + scroll
+    ctx.moveTo(sx, 0)
+    ctx.lineTo(sx - slant, canvas.height)
+  }
+  ctx.stroke()
+}
+
+function drawStormRadar() {
+  const info = nearestTyphoonInfo(state.boat.x, state.boat.y)
+  if (!info) return
+  if (state.activeTyphoon) {
+    ctx.fillStyle = '#ff5c5c'
+    ctx.font = 'bold 14px sans-serif'
+    ctx.textAlign = 'left'
+    ctx.fillText('⚠ 태풍 속! 조타 불안정', 16, 156)
+    return
+  }
+  if (info.dist > TYPHOON_WARN_RADIUS * 2.2) return
+  const angle = Math.atan2(info.typhoon.y - state.boat.y, info.typhoon.x - state.boat.x)
+  const cx = canvas.width - 70
+  const cy = 170
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.arc(cx, cy, 26, 0, TAU)
+  ctx.stroke()
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.rotate(angle + Math.PI / 2)
+  ctx.fillStyle = info.dist < TYPHOON_WARN_RADIUS ? '#ff5c5c' : '#ffb84d'
+  ctx.beginPath()
+  ctx.moveTo(0, -22)
+  ctx.lineTo(6, -8)
+  ctx.lineTo(-6, -8)
+  ctx.closePath()
+  ctx.fill()
+  ctx.restore()
+  ctx.fillStyle = '#fff'
+  ctx.font = '11px sans-serif'
+  ctx.textAlign = 'center'
+  ctx.fillText(`태풍 ${Math.round(info.dist)}m`, cx, cy + 42)
+  ctx.textAlign = 'left'
 }
 
 function formatTime(t) {
@@ -438,6 +646,7 @@ function drawHud() {
   )
 
   drawWindCompass(info)
+  drawStormRadar()
 
   if (state.toast && state.elapsed < state.toast.until) {
     const alpha = Math.min(1, (state.toast.until - state.elapsed) / 0.5)
@@ -480,12 +689,20 @@ function loop(time) {
   if (state.phase === 'racing') updateRacing(dt)
   updateCargo()
 
+  const inStorm = !!state.activeTyphoon
+  ctx.save()
+  if (inStorm) {
+    ctx.translate(Math.sin(state.elapsed * 37) * 2.5, Math.cos(state.elapsed * 29) * 2.5)
+  }
   drawSea()
   drawIslands()
   drawPorts()
   drawCheckpoints()
+  drawTyphoons()
   drawWake()
   drawBoat()
+  ctx.restore()
+  if (inStorm) drawStormOverlay()
   drawHud()
   if (state.phase === 'finished') drawFinishOverlay()
 
