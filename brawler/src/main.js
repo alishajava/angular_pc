@@ -27,7 +27,15 @@ const PLAYER_MAX_HP = 100
 const ATTACKS = {
   punch: { startup: 0.08, active: 0.08, recovery: 0.14, range: 52, damage: 10, knockback: 36 },
   kick: { startup: 0.14, active: 0.1, recovery: 0.22, range: 60, damage: 16, knockback: 80 },
+  ultimate: { startup: 0.15, active: 0.2, recovery: 0.35, range: 150, damage: 35, knockback: 90 },
 }
+
+// Fills as the player lands hits (and a bit more when they get hit, so a
+// losing fight still builds toward a comeback). At max, L unleashes a big
+// 360-degree hit that also makes the player briefly invulnerable.
+const GAUGE_MAX = 100
+const GAUGE_PER_HIT = 6
+const GAUGE_PER_HURT = 15
 
 const ENEMY_TYPES = {
   thug: { hp: 28, speed: 85, damage: 8, attackRange: 48, telegraph: 0.32, active: 0.14, cooldown: 0.85, color: '#c0564a' },
@@ -60,6 +68,9 @@ function makePlayer() {
     attack: null, // { type, phase: 'startup' | 'active' | 'recovery', t, resolved }
     hitstunTimer: 0,
     flashTimer: 0,
+    gauge: 0,
+    invulnTimer: 0,
+    ultimateFlash: 0,
   }
 }
 
@@ -105,6 +116,9 @@ window.addEventListener('keydown', (e) => {
   if (state.phase !== 'playing') return
   if (key === 'j' && !state.player.attack && state.player.hitstunTimer <= 0) startAttack('punch')
   if (key === 'k' && !state.player.attack && state.player.hitstunTimer <= 0) startAttack('kick')
+  if (key === 'l' && !state.player.attack && state.player.hitstunTimer <= 0 && state.player.gauge >= GAUGE_MAX) {
+    startAttack('ultimate')
+  }
 })
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
 function held(names) { return names.some((k) => heldKeys.has(k)) }
@@ -117,7 +131,13 @@ const MOVE_KEYS = {
 }
 
 function startAttack(type) {
-  state.player.attack = { type, phase: 'startup', t: 0, resolved: false }
+  const p = state.player
+  p.attack = { type, phase: 'startup', t: 0, resolved: false }
+  if (type === 'ultimate') {
+    p.gauge = 0
+    p.ultimateFlash = 0.3
+    p.invulnTimer = ATTACKS.ultimate.startup + ATTACKS.ultimate.active
+  }
 }
 
 function playerMaxX() {
@@ -127,6 +147,8 @@ function playerMaxX() {
 function updatePlayer(dt) {
   const p = state.player
   if (p.flashTimer > 0) p.flashTimer -= dt
+  if (p.invulnTimer > 0) p.invulnTimer -= dt
+  if (p.ultimateFlash > 0) p.ultimateFlash -= dt
 
   if (p.hitstunTimer > 0) {
     p.hitstunTimer -= dt
@@ -183,14 +205,18 @@ function updatePlayerAttack(dt) {
 function resolvePlayerHit(type) {
   const p = state.player
   const def = ATTACKS[type]
+  const omni = type === 'ultimate' // hits all around, not just in front
   for (const en of state.enemies) {
     if (en.state === 'dead') continue
     const dx = en.x - p.x
     const dy = en.y - p.y
-    const inFront = p.facing > 0 ? dx > -15 : dx < 15
-    if (!inFront) continue
-    if (Math.abs(dx) > def.range || Math.abs(dy) > 50) continue
+    if (!omni) {
+      const inFront = p.facing > 0 ? dx > -15 : dx < 15
+      if (!inFront) continue
+    }
+    if (Math.abs(dx) > def.range || Math.abs(dy) > (omni ? 70 : 50)) continue
     damageEnemy(en, def.damage, Math.sign(dx || p.facing) * def.knockback)
+    if (!omni) p.gauge = Math.min(GAUGE_MAX, p.gauge + GAUGE_PER_HIT)
   }
 }
 
@@ -211,10 +237,12 @@ function damageEnemy(en, dmg, knockbackDx) {
 function damagePlayer(dmg, knockbackDx) {
   const p = state.player
   if (p.hitstunTimer > 0) return // brief invulnerability while already reeling
+  if (p.invulnTimer > 0) return // mid-ultimate invulnerability window
   p.hp = Math.max(0, p.hp - dmg)
   p.hitstunTimer = HITSTUN_DURATION
   p.flashTimer = 0.15
   p.attack = null
+  p.gauge = Math.min(GAUGE_MAX, p.gauge + GAUGE_PER_HURT)
   p.x = clamp(p.x + knockbackDx, 40, playerMaxX())
   if (p.hp <= 0) state.phase = 'gameover'
 }
@@ -487,6 +515,32 @@ function drawWorld() {
   for (const en of state.enemies) drawables.push({ y: en.y, draw: () => drawEnemySprite(en) })
   drawables.sort((a, b) => a.y - b.y)
   for (const d of drawables) d.draw()
+  drawUltimateEffect()
+}
+
+function drawUltimateEffect() {
+  const p = state.player
+  const atk = p.attack
+  if (!atk || atk.type !== 'ultimate') return
+  const def = ATTACKS.ultimate
+  const progress = atk.phase === 'startup' ? atk.t / def.startup : atk.phase === 'active' ? 1 : null
+  if (progress === null) return
+  const sx = worldToScreenX(p.x)
+  const radius = def.range * (0.3 + progress * 0.7)
+  ctx.save()
+  ctx.strokeStyle = `rgba(255, 220, 90, ${0.9 - progress * 0.5})`
+  ctx.lineWidth = 4
+  ctx.beginPath()
+  ctx.ellipse(sx, p.y - 30, radius, radius * 0.55, 0, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.restore()
+}
+
+function drawUltimateFlash() {
+  const p = state.player
+  if (p.ultimateFlash <= 0) return
+  ctx.fillStyle = `rgba(255, 240, 180, ${(p.ultimateFlash / 0.3) * 0.35})`
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
 }
 
 function drawHud() {
@@ -504,13 +558,24 @@ function drawHud() {
   ctx.textBaseline = 'top'
   ctx.fillText('HP', 20, 17)
 
+  const ready = p.gauge >= GAUGE_MAX
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'
+  ctx.fillRect(16, 42, 220, 14)
+  ctx.fillStyle = ready && Math.floor(performance.now() / 150) % 2 === 0 ? '#ffe066' : '#9a5cff'
+  ctx.fillRect(18, 44, 216 * (p.gauge / GAUGE_MAX), 10)
+  ctx.strokeStyle = '#fff'
+  ctx.strokeRect(16, 42, 220, 14)
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 10px sans-serif'
+  ctx.fillText(ready ? '필살기 준비 완료! (L)' : '필살기', 20, 43)
+
   const waveLabel =
     state.waveIndex >= WAVES.length
       ? 'CLEAR'
       : state.waveIndex === WAVES.length - 1
         ? 'BOSS'
         : `WAVE ${state.waveIndex + 1}/${WAVES.length}`
-  ctx.fillText(waveLabel, 16, 46)
+  ctx.fillText(waveLabel, 16, 62)
 }
 
 function drawOverlay() {
@@ -532,6 +597,7 @@ function loop(time) {
 
   update(dt)
   drawWorld()
+  drawUltimateFlash()
   drawHud()
   drawOverlay()
 
