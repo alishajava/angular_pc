@@ -2,14 +2,13 @@ const MAX_DAYS = 6
 const GOOD_ENDING_THRESHOLD = 7
 
 // --- Portrait art -----------------------------------------------------
-// 다은 is a real licensed illustration (see CREDIT below); 서준/리아 are
-// AI-generated (ChatGPT), cropped from a group shot, no attribution needed.
+// All four are AI-generated, cropped from a single group shot.
 const PORTRAIT_IMAGES = {
-  daeun: { soft: 'portraits/daeun_soft.webp', happy: 'portraits/daeun_happy.webp' },
+  daeun: { soft: 'portraits/daeun_soft.webp' },
   seojun: { soft: 'portraits/seojun_soft.webp' },
   ria: { soft: 'portraits/ria_soft.webp' },
+  eunseo: { soft: 'portraits/eunseo_soft.webp' },
 }
-const CREDIT = '다은 일러스트: aucrowne (itch.io/aucrowne) · CC BY-NC 4.0'
 
 function renderPortrait(ch, mood) {
   const images = PORTRAIT_IMAGES[ch.id]
@@ -129,6 +128,19 @@ const BACKGROUNDS = {
       <polygon points="90,0 210,0 260,180 40,180" fill="#fff" opacity="0.06"/>
       <polygon points="120,0 180,0 210,180 90,180" fill="#fff" opacity="0.08"/>
       ${starsDecor(10, 30)}
+    </svg>`,
+  },
+  bookcafe: {
+    gradient: 'linear-gradient(160deg, #5a3f2e 0%, #2e2015 75%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      ${Array.from({ length: 10 }, (_, i) => {
+        const x = 10 + i * 20
+        const h = 26 + (i % 3) * 8
+        const c = ['#8a6a4a', '#9a7a56', '#755638'][i % 3]
+        return `<rect x="${x}" y="${44 - h}" width="16" height="${h}" fill="${c}"/>`
+      }).join('')}
+      <circle cx="250" cy="34" r="30" fill="#ffdf8a" opacity="0.2"/>
+      <circle cx="250" cy="34" r="12" fill="#ffdf8a" opacity="0.32"/>
     </svg>`,
   },
 }
@@ -265,10 +277,51 @@ const CHARACTERS = [
     goodEnding:
       '리아: 나 사실 이 노래, 처음부터 끝까지 너 생각하면서 썼어. 가사 다시 읽어봐.\n...이제 알겠지? 그러니까 대답은, 지금 당장 듣고 싶은데.\n\n관객이 떠난 텅 빈 무대 위, 리아는 여전히 기타를 멘 채로 손을 내밀었다.\n\n— ENDING: 리아와의 앙코르 —',
   },
+  {
+    id: 'eunseo',
+    name: '은서',
+    color: '#b9c7ff',
+    desc: '문학 동아리 소속, 차분하지만 할 말은 다 하는 타입',
+    stages: [
+      {
+        bg: 'library',
+        text: '은서가 책상에 앉아 책 한 구절에 밑줄을 긋고 있다가 선배를 발견하고 손을 흔들었다.',
+        speaker: '은서',
+        line: '선배, 이 구절 좀 읽어봐요. 어떤 느낌이에요? ...대충 좋다고만 하면 바로 알아채니까 각오하세요.',
+        choices: [
+          { label: '구절을 짚어가며 꼼꼼히 감상 말해주기', delta: 3, response: '...오, 제대로 읽었네요. 생각보다 진지하게 들어주는 사람 처음이에요.' },
+          { label: '좋은 것 같다고 짧게 답하기', delta: 1, response: '역시 그럴 줄 알았어요. ...그래도 안 도망간 건 점수 줄게요.' },
+        ],
+      },
+      {
+        bg: 'study',
+        text: '시험 기간, 은서가 스터디룸 구석에서 혼자 문제집과 씨름하고 있었다. 평소와 다르게 지쳐 보인다.',
+        speaker: '은서',
+        line: '요즘 좀 벅차네요. ...이런 얘기 아무한테나 안 하는데, 선배한테는 그냥 해도 될 것 같아서.',
+        choices: [
+          { label: '지금 뭐가 제일 힘든지 구체적으로 물어봐 주기', delta: 3, response: '...진짜 궁금해서 묻는 거죠? 그럼 말할게요. 사실 완벽하지 않은 모습 보여주는 게 제일 무서워요.' },
+          { label: '너무 애쓰지 말라고 가볍게 다독이기', delta: 1, response: '...고마운데, 가끔은 그냥 옆에 있어주는 게 더 도움될 때도 있어요.' },
+        ],
+      },
+      {
+        bg: 'bookcafe',
+        text: '동아리 중고책 장터가 끝난 뒤, 은서가 유일하게 안 팔린 책 한 권을 만지작거리고 있었다.',
+        speaker: '은서',
+        line: '이 책, 사실 제일 아끼는 건데 장터에 내놨어요. ...근데 선배가 사 가면 안 팔린 척 해줄게요.',
+        choices: [
+          { label: '그 책 살게, 대신 너한테 직접 설명 들으면서', delta: 3, response: '(살짝 웃으며) ...그럼 돈은 됐고, 대신 끝까지 제 얘기 들어주기예요. 약속.' },
+          { label: '다음에 천천히 읽어볼게 하고 그냥 받기', delta: 1, response: '음... 선배는 가끔 너무 쉽게 넘어가네요. 그래도 나쁘진 않아요.' },
+        ],
+      },
+    ],
+    endingBg: 'bookcafe',
+    goodEnding:
+      '은서: (책을 내밀며) 사실 이 책 맨 뒷장에 뭐 하나 적어뒀어요. 나중에 읽지 말고, 지금 봐요.\n...거기 적힌 거, 진심이에요. 저랑 다음 챕터도 같이 읽을래요?\n\n텅 빈 장터 자리에 둘만 남아, 은서는 대답을 기다리며 조용히 웃고 있었다.\n\n— ENDING: 은서와의 다음 챕터 —',
+  },
 ]
 
 const FRIEND_ENDING =
-  '여섯 번째 날, 세 사람이 동시에 동아리방으로 몰려와 선배를 둘러쌌다.\n\n다은: "선배는 저한테도 잘해주고."\n서준: "나한테도 그랬지."\n리아: "나한테도!"\n\n셋이 동시에 선배를 쳐다보며 한숨을 쉰다.\n\n다은: "그러니까 결론은..."\n셋이 입을 모아: "너무 다정해서 아무도 못 고르는 타입이라는 거지."\n\n선배는 그저 웃을 수밖에 없었다. 동아리의 평화는 지켜졌다.\n\n— ENDING: 모두의 좋은 선배(?) —'
+  '여섯 번째 날, 네 사람이 동시에 동아리방으로 몰려와 선배를 둘러쌌다.\n\n다은: "선배는 저한테도 잘해주고."\n서준: "나한테도 그랬지."\n리아: "나한테도!"\n은서: "...저한테도요. 책까지 사 갔잖아요."\n\n넷이 동시에 선배를 쳐다보며 한숨을 쉰다.\n\n다은: "그러니까 결론은..."\n넷이 입을 모아: "너무 다정해서 아무도 못 고르는 타입이라는 거지."\n\n선배는 그저 웃을 수밖에 없었다. 동아리의 평화는 지켜졌다.\n\n— ENDING: 모두의 좋은 선배(?) —'
 
 function makeInitialState() {
   return {
@@ -342,7 +395,6 @@ function render() {
         <div id="day-counter">Day ${state.day} / ${MAX_DAYS}</div>
         ${cards}
         <div class="hint">오늘 함께 시간을 보낼 사람을 선택하세요.</div>
-        <div class="credit">${CREDIT}</div>
       </div>
     `
     applyBackground(document.getElementById('bg'), 'clubroom')
