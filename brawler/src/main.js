@@ -24,6 +24,13 @@ function depthScale(y) {
 const PLAYER_SPEED = 170
 const PLAYER_MAX_HP = 100
 
+// A jump is a straight-up hop (z), independent of the x/depth-y plane you
+// still steer mid-air. High enough off the ground, it also dodges grounded
+// enemy attacks - giving it a tactical reason to exist beyond looking nice.
+const JUMP_VELOCITY = 280
+const GRAVITY = 950
+const JUMP_DODGE_HEIGHT = 16
+
 const ATTACKS = {
   punch: { startup: 0.08, active: 0.08, recovery: 0.14, range: 52, damage: 10, knockback: 36 },
   kick: { startup: 0.14, active: 0.1, recovery: 0.22, range: 60, damage: 16, knockback: 80 },
@@ -71,6 +78,9 @@ function makePlayer() {
     gauge: 0,
     invulnTimer: 0,
     ultimateFlash: 0,
+    z: 0,
+    vz: 0,
+    jumping: false,
   }
 }
 
@@ -119,6 +129,10 @@ window.addEventListener('keydown', (e) => {
   if (key === 'l' && !state.player.attack && state.player.hitstunTimer <= 0 && state.player.gauge >= GAUGE_MAX) {
     startAttack('ultimate')
   }
+  if (key === ' ' && !state.player.jumping && !state.player.attack && state.player.hitstunTimer <= 0) {
+    e.preventDefault() // stop the page from scrolling on space
+    startJump()
+  }
 })
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
 function held(names) { return names.some((k) => heldKeys.has(k)) }
@@ -140,6 +154,12 @@ function startAttack(type) {
   }
 }
 
+function startJump() {
+  const p = state.player
+  p.jumping = true
+  p.vz = JUMP_VELOCITY
+}
+
 function playerMaxX() {
   return state.gateX !== null ? state.gateX + canvas.width - 60 : WORLD_WIDTH - 40
 }
@@ -149,6 +169,16 @@ function updatePlayer(dt) {
   if (p.flashTimer > 0) p.flashTimer -= dt
   if (p.invulnTimer > 0) p.invulnTimer -= dt
   if (p.ultimateFlash > 0) p.ultimateFlash -= dt
+
+  if (p.jumping) {
+    p.vz -= GRAVITY * dt
+    p.z += p.vz * dt
+    if (p.z <= 0) {
+      p.z = 0
+      p.vz = 0
+      p.jumping = false
+    }
+  }
 
   if (p.hitstunTimer > 0) {
     p.hitstunTimer -= dt
@@ -238,6 +268,7 @@ function damagePlayer(dmg, knockbackDx) {
   const p = state.player
   if (p.hitstunTimer > 0) return // brief invulnerability while already reeling
   if (p.invulnTimer > 0) return // mid-ultimate invulnerability window
+  if (p.jumping && p.z > JUMP_DODGE_HEIGHT) return // high enough to hop over a grounded attack
   p.hp = Math.max(0, p.hp - dmg)
   p.hitstunTimer = HITSTUN_DURATION
   p.flashTimer = 0.15
@@ -430,7 +461,7 @@ function drawHumanoid(x, y, opts) {
   const scale = depthScale(y)
   ctx.save()
   ctx.globalAlpha = opts.alpha ?? 1
-  ctx.translate(worldToScreenX(x), y)
+  ctx.translate(worldToScreenX(x), y - (opts.lift || 0))
   ctx.scale(scale * opts.facing, scale)
 
   const bodyColor = opts.flash ? '#ffffff' : opts.color
@@ -472,7 +503,8 @@ function drawHumanoid(x, y, opts) {
 
 function drawPlayerSprite() {
   const p = state.player
-  drawShadow(p.x, p.y, depthScale(p.y))
+  const shadowShrink = clamp(1 - p.z / 160, 0.55, 1)
+  drawShadow(p.x, p.y, depthScale(p.y) * shadowShrink)
   drawHumanoid(p.x, p.y, {
     color: '#3f7fd1',
     facing: p.facing,
@@ -481,6 +513,7 @@ function drawPlayerSprite() {
     attacking: !!p.attack && p.attack.phase !== 'recovery',
     attackType: p.attack && p.attack.type,
     flash: p.hitstunTimer > 0 && Math.floor(p.hitstunTimer * 20) % 2 === 0,
+    lift: p.z,
   })
 }
 
