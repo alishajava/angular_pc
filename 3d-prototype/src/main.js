@@ -200,12 +200,53 @@ npcs[0].group.rotation.y = Math.PI * 0.6
 npcs[1].group.position.set(-4, 0, 9)
 npcs[1].group.rotation.y = -Math.PI * 0.3
 
+// npc[0] patrols back and forth near its spawn point so it visibly walks
+// around rather than just standing still - paused while it's mid-greeting
+// with the player (see updateNpcPatrol).
+const NPC_WALK_SPEED = 1.6
+const NPC_PATROL_HALF = 2.5
+{
+  const spawn = { x: npcs[0].group.position.x, z: npcs[0].group.position.z }
+  npcs[0].patrol = {
+    from: { x: spawn.x, z: spawn.z - NPC_PATROL_HALF },
+    to: { x: spawn.x, z: spawn.z + NPC_PATROL_HALF },
+    goingTo: true,
+  }
+}
+
+// Splits a loaded model's named body-part mesh off into its own pivot Group,
+// positioned at that part's own top edge (shoulder for an arm, hip for a
+// leg) rather than the model's origin, so rotating the pivot swings the
+// limb like a real joint - the same trick makeLimb/makeLeg use for the
+// primitive characters, just derived from the imported mesh's own geometry
+// bounds instead of hand-picked numbers, since this model has no skeleton
+// to hinge on.
+function makeJointPivot(model, primaryName, extraNames) {
+  const primary = model.getObjectByName(primaryName)
+  if (!primary) return null
+  primary.geometry.computeBoundingBox()
+  const bb = primary.geometry.boundingBox
+  const jointX = (bb.min.x + bb.max.x) / 2
+  const jointY = bb.max.y
+  const pivot = new THREE.Group()
+  pivot.position.set(jointX, jointY, 0)
+  for (const name of [primaryName, ...extraNames]) {
+    const part = model.getObjectByName(name)
+    if (!part) continue
+    model.remove(part)
+    part.position.x -= jointX
+    part.position.y -= jointY
+    pivot.add(part)
+  }
+  model.add(pivot)
+  return pivot
+}
+
 // Swap npc[0]'s capsule-built body for an imported model once it loads,
 // as a proof that a real character.glb can drop into this scene - keep the
 // primitive parts underneath (just hidden) rather than deleting them, so
-// updateNpcs' arm-sway loop (which references npc.armL/armR) still has
-// something harmless to rotate and nothing else has to special-case this
-// npc.
+// anything that still references npc.armL/armR/legL/legR has something
+// harmless to rotate and nothing else has to special-case this npc.
 const MODEL_TARGET_HEIGHT = 1.85
 new GLTFLoader().load(`${import.meta.env.BASE_URL}models/character.glb`, (gltf) => {
   const model = gltf.scene
@@ -215,6 +256,12 @@ new GLTFLoader().load(`${import.meta.env.BASE_URL}models/character.glb`, (gltf) 
   model.scale.setScalar(scale)
   for (const child of npcs[0].group.children) child.visible = false
   npcs[0].group.add(model)
+  npcs[0].modelRig = {
+    legL: makeJointPivot(model, 'left_leg', ['left_shoe']),
+    legR: makeJointPivot(model, 'right_leg', ['right_shoe']),
+    armL: makeJointPivot(model, 'left_arm', ['left_hand']),
+    armR: makeJointPivot(model, 'right_arm', ['right_hand']),
+  }
 })
 
 // A drivable car: a body + cabin + 4 wheels. Each wheel is a tilted pivot
@@ -508,19 +555,71 @@ function updateVertical(dt) {
 }
 
 // NPCs just stand around, with a slow arm sway so they read as alive
-// rather than frozen. Each has its own phase offset so they don't sway
-// in lockstep.
+// rather than frozen - except npc[0], which actually patrols (see
+// updateNpcPatrol) and gets a real walk-cycle swing while it does. Each
+// idler has its own phase offset so they don't sway in lockstep.
 let npcTime = 0
 const IDLE_SWAY_RATE = 1.6
 const IDLE_SWAY_AMOUNT = 0.3
+const NPC_WALK_RATE = 8 * (NPC_WALK_SPEED / PLAYER_SPEED)
+const NPC_ARM_SWING = 0.6
+const NPC_LEG_SWING = 0.5
 
 function updateNpcs(dt) {
   npcTime += dt
   for (const npc of npcs) {
-    const sway = Math.sin(npcTime * IDLE_SWAY_RATE + npc.phase) * IDLE_SWAY_AMOUNT
-    npc.armL.rotation.x = sway
-    npc.armR.rotation.x = -sway
+    if (npc.walking) {
+      const swing = Math.sin(npcTime * NPC_WALK_RATE)
+      npc.armL.rotation.x = swing * NPC_ARM_SWING
+      npc.armR.rotation.x = -swing * NPC_ARM_SWING
+      npc.legL.hip.rotation.x = -swing * NPC_LEG_SWING
+      npc.legR.hip.rotation.x = swing * NPC_LEG_SWING
+      if (npc.modelRig) {
+        npc.modelRig.armL.rotation.x = swing * NPC_ARM_SWING
+        npc.modelRig.armR.rotation.x = -swing * NPC_ARM_SWING
+        npc.modelRig.legL.rotation.x = -swing * NPC_LEG_SWING
+        npc.modelRig.legR.rotation.x = swing * NPC_LEG_SWING
+      }
+    } else {
+      const sway = Math.sin(npcTime * IDLE_SWAY_RATE + npc.phase) * IDLE_SWAY_AMOUNT
+      npc.armL.rotation.x = sway
+      npc.armR.rotation.x = -sway
+      npc.legL.hip.rotation.x *= 0.85
+      npc.legR.hip.rotation.x *= 0.85
+      if (npc.modelRig) {
+        npc.modelRig.armL.rotation.x = sway
+        npc.modelRig.armR.rotation.x = -sway
+        npc.modelRig.legL.rotation.x *= 0.85
+        npc.modelRig.legR.rotation.x *= 0.85
+      }
+    }
   }
+}
+
+// Moves npc[0] back and forth between its patrol endpoints, facing the
+// direction it's walking - paused while it's mid-greeting (see
+// updateNpcGreetings) so it doesn't wander off mid-conversation.
+function updateNpcPatrol(dt) {
+  const npc = npcs[0]
+  const patrol = npc.patrol
+  if (!patrol || npc.greeted) {
+    npc.walking = false
+    return
+  }
+  const dest = patrol.goingTo ? patrol.to : patrol.from
+  const dx = dest.x - npc.group.position.x
+  const dz = dest.z - npc.group.position.z
+  const dist = Math.hypot(dx, dz)
+  if (dist < 0.05) {
+    patrol.goingTo = !patrol.goingTo
+    npc.walking = false
+    return
+  }
+  npc.walking = true
+  const step = Math.min(dist, NPC_WALK_SPEED * dt)
+  npc.group.position.x += (dx / dist) * step
+  npc.group.position.z += (dz / dist) * step
+  npc.group.rotation.y = Math.atan2(dx, dz)
 }
 
 // Spoken out loud via the browser's built-in text-to-speech (no voice
@@ -775,6 +874,7 @@ function loop(time) {
     updateVertical(dt)
     updateNpcGreetings()
   }
+  updateNpcPatrol(dt)
   updateNpcs(dt)
   updateHint()
   updateCamera()
