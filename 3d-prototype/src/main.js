@@ -257,6 +257,7 @@ new GLTFLoader().load(`${import.meta.env.BASE_URL}models/character.glb`, (gltf) 
   for (const child of npcs[0].group.children) child.visible = false
   npcs[0].group.add(model)
   npcs[0].modelRig = {
+    root: model,
     legL: makeJointPivot(model, 'left_leg', ['left_shoe']),
     legR: makeJointPivot(model, 'right_leg', ['right_shoe']),
     armL: makeJointPivot(model, 'left_arm', ['left_hand']),
@@ -561,9 +562,20 @@ function updateVertical(dt) {
 let npcTime = 0
 const IDLE_SWAY_RATE = 1.6
 const IDLE_SWAY_AMOUNT = 0.3
-const NPC_WALK_RATE = 8 * (NPC_WALK_SPEED / PLAYER_SPEED)
+// A real walking cadence (steps/sec) barely changes with a slow stroll like
+// this - what changes is stride length, not stride rate - so this stays
+// close to the player's own WALK_RATE rather than being scaled down by
+// NPC_WALK_SPEED. Scaling it down (an earlier version of this code did)
+// made the legs swing far slower than the body was translating, which read
+// as skating/sliding instead of walking: the feet barely moved while the
+// body coasted forward underneath them.
+const NPC_WALK_RATE = 6
 const NPC_ARM_SWING = 0.6
-const NPC_LEG_SWING = 0.5
+const NPC_LEG_SWING = 0.55
+// A small up/down bob, twice per stride (one bump per footfall), sells the
+// weight of a footstep landing - without it the body glides in a perfectly
+// flat line even with the legs swinging, which also reads as sliding.
+const NPC_BOB_HEIGHT = 0.05
 
 function updateNpcs(dt) {
   npcTime += dt
@@ -579,6 +591,7 @@ function updateNpcs(dt) {
         npc.modelRig.armR.rotation.x = -swing * NPC_ARM_SWING
         npc.modelRig.legL.rotation.x = -swing * NPC_LEG_SWING
         npc.modelRig.legR.rotation.x = swing * NPC_LEG_SWING
+        npc.modelRig.root.position.y = Math.abs(Math.sin(npcTime * NPC_WALK_RATE)) * NPC_BOB_HEIGHT
       }
     } else {
       const sway = Math.sin(npcTime * IDLE_SWAY_RATE + npc.phase) * IDLE_SWAY_AMOUNT
@@ -591,6 +604,7 @@ function updateNpcs(dt) {
         npc.modelRig.armR.rotation.x = -sway
         npc.modelRig.legL.rotation.x *= 0.85
         npc.modelRig.legR.rotation.x *= 0.85
+        npc.modelRig.root.position.y *= 0.8
       }
     }
   }
