@@ -207,7 +207,7 @@ npcs[1].group.rotation.y = -Math.PI * 0.3
 // something harmless to rotate and nothing else has to special-case this
 // npc.
 const MODEL_TARGET_HEIGHT = 1.85
-new GLTFLoader().load('/models/character.glb', (gltf) => {
+new GLTFLoader().load(`${import.meta.env.BASE_URL}models/character.glb`, (gltf) => {
   const model = gltf.scene
   const box = new THREE.Box3().setFromObject(model)
   const height = box.max.y - box.min.y || 1
