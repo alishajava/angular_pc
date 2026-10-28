@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 const SKY_COLOR = 0x9fd4f0
 
@@ -198,6 +199,23 @@ npcs[0].group.position.set(4, 0, -3)
 npcs[0].group.rotation.y = Math.PI * 0.6
 npcs[1].group.position.set(-4, 0, 9)
 npcs[1].group.rotation.y = -Math.PI * 0.3
+
+// Swap npc[0]'s capsule-built body for an imported model once it loads,
+// as a proof that a real character.glb can drop into this scene - keep the
+// primitive parts underneath (just hidden) rather than deleting them, so
+// updateNpcs' arm-sway loop (which references npc.armL/armR) still has
+// something harmless to rotate and nothing else has to special-case this
+// npc.
+const MODEL_TARGET_HEIGHT = 1.85
+new GLTFLoader().load('/models/character.glb', (gltf) => {
+  const model = gltf.scene
+  const box = new THREE.Box3().setFromObject(model)
+  const height = box.max.y - box.min.y || 1
+  const scale = MODEL_TARGET_HEIGHT / height
+  model.scale.setScalar(scale)
+  for (const child of npcs[0].group.children) child.visible = false
+  npcs[0].group.add(model)
+})
 
 // A drivable car: a body + cabin + 4 wheels. Each wheel is a tilted pivot
 // group (rotation.z = 90deg, so the cylinder's axis points sideways like
