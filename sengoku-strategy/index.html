@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>군웅할거</title>
+    <title>천하제패</title>
     <style>
       html, body {
         margin: 0;
         min-height: 100%;
-        background: #221b13;
+        background: #231b12;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -21,23 +21,21 @@
       }
       canvas {
         border-radius: 8px;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
         max-width: 100%;
-        cursor: pointer;
       }
       #hint {
         font-size: 0.85rem;
         opacity: 0.8;
         text-align: center;
-        max-width: 640px;
+        max-width: 760px;
       }
     </style>
   </head>
   <body>
     <canvas id="game"></canvas>
     <div id="hint">
-      내 지역 클릭 후 인접 지역 클릭 = 이동/공격 · 우측 패널 버튼으로 모병·턴 종료 · R 키로 재시작<br />
-      전투 중: 돌격/기습/수비 중 하나 클릭 = 그 라운드 진행 (돌격＞기습＞수비＞돌격)
+      영지를 클릭해 내정/외교/출진 — 모든 영지를 통일하거나 가장 강한 세력이 되는 것이 목표입니다 · R 키로 재시작
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

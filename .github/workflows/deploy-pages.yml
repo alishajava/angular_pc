@@ -47,10 +47,10 @@ jobs:
         working-directory: brawler
       - run: mkdir -p dist/brawler && cp -r brawler/dist/. dist/brawler/
       - run: npm ci
-        working-directory: three-kingdoms
+        working-directory: sengoku-strategy
       - run: npm run build -- --base=/angular_pc/strategy/
-        working-directory: three-kingdoms
-      - run: mkdir -p dist/strategy && cp -r three-kingdoms/dist/. dist/strategy/
+        working-directory: sengoku-strategy
+      - run: mkdir -p dist/strategy && cp -r sengoku-strategy/dist/. dist/strategy/
       - run: npm ci
         working-directory: island-life
       - run: npm run build -- --base=/angular_pc/island/
