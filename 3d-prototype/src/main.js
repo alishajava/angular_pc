@@ -242,27 +242,71 @@ function makeJointPivot(model, primaryName, extraNames) {
   return pivot
 }
 
-// Swap npc[0]'s capsule-built body for an imported model once it loads,
-// as a proof that a real character.glb can drop into this scene - keep the
-// primitive parts underneath (just hidden) rather than deleting them, so
-// anything that still references npc.armL/armR/legL/legR has something
-// harmless to rotate and nothing else has to special-case this npc.
+// The model's whole texture is a tiny 4x4 swatch grid - every part's UV is a
+// single point (min===max per accessor), i.e. each mesh
+// just samples one flat-color texel rather than any real texture detail. That
+// makes per-part recoloring trivial and bleed-free: clone a part's material,
+// drop its map so the texture lookup can't matter anymore, and set an
+// absolute color - nothing else sampling the same swatch cell (e.g. the eyes
+// share a cell with the shoes) is touched, since only the explicitly named
+// parts get a cloned material.
+const HAIR_PARTS = ['hair_cap', 'hair_left', 'hair_right', 'hair_bangs']
+const SHIRT_PARTS = ['torso', 'left_arm', 'right_arm']
+const SHORTS_PARTS = ['shorts']
+const SHOE_PARTS = ['left_shoe', 'right_shoe']
+const SKIN_PARTS = ['head', 'left_hand', 'right_hand', 'left_leg', 'right_leg']
+
+function recolorParts(model, names, hex) {
+  for (const name of names) {
+    const part = model.getObjectByName(name)
+    if (!part) continue
+    part.material = part.material.clone()
+    part.material.map = null
+    part.material.color.set(hex)
+    part.material.needsUpdate = true
+  }
+}
+
+// Clones the loaded character model (so each NPC gets its own independent
+// mesh/material instances to rig and recolor) and optionally overrides any
+// of its palette groups, producing a palette-swapped variant from the same
+// single sample asset instead of needing a separate model per NPC.
 const MODEL_TARGET_HEIGHT = 1.85
-new GLTFLoader().load(`${import.meta.env.BASE_URL}models/character.glb`, (gltf) => {
-  const model = gltf.scene
+function instantiateCharacterModel(sourceScene, variant = {}) {
+  const model = sourceScene.clone(true)
+  if (variant.hair) recolorParts(model, HAIR_PARTS, variant.hair)
+  if (variant.shirt) recolorParts(model, SHIRT_PARTS, variant.shirt)
+  if (variant.shorts) recolorParts(model, SHORTS_PARTS, variant.shorts)
+  if (variant.shoes) recolorParts(model, SHOE_PARTS, variant.shoes)
+  if (variant.skin) recolorParts(model, SKIN_PARTS, variant.skin)
   const box = new THREE.Box3().setFromObject(model)
   const height = box.max.y - box.min.y || 1
-  const scale = MODEL_TARGET_HEIGHT / height
-  model.scale.setScalar(scale)
-  for (const child of npcs[0].group.children) child.visible = false
-  npcs[0].group.add(model)
-  npcs[0].modelRig = {
+  model.scale.setScalar(MODEL_TARGET_HEIGHT / height)
+  return model
+}
+
+// Swaps an NPC's capsule-built body for an imported model - keeps the
+// primitive parts underneath (just hidden) rather than deleting them, so
+// anything that still references npc.armL/armR/legL/legR has something
+// harmless to rotate and nothing else has to special-case these npcs.
+function attachModelToNpc(npc, model) {
+  for (const child of npc.group.children) child.visible = false
+  npc.group.add(model)
+  npc.modelRig = {
     root: model,
     legL: makeJointPivot(model, 'left_leg', ['left_shoe']),
     legR: makeJointPivot(model, 'right_leg', ['right_shoe']),
     armL: makeJointPivot(model, 'left_arm', ['left_hand']),
     armR: makeJointPivot(model, 'right_arm', ['right_hand']),
   }
+}
+
+new GLTFLoader().load(`${import.meta.env.BASE_URL}models/character.glb`, (gltf) => {
+  attachModelToNpc(npcs[0], instantiateCharacterModel(gltf.scene))
+  attachModelToNpc(
+    npcs[1],
+    instantiateCharacterModel(gltf.scene, { hair: '#6b4226', shirt: '#55b86a', shorts: '#2f2f2f' }),
+  )
 })
 
 // A drivable car: a body + cabin + 4 wheels. Each wheel is a tilted pivot
