@@ -16,10 +16,207 @@ function renderPortrait(ch, mood) {
   return `<img src="${src}" alt="${ch.name}" />`
 }
 
-function renderThumb(ch) {
-  return `<img src="${PORTRAIT_IMAGES[ch.id].soft}" alt="${ch.name}" />`
+// --- Field map (동급생-style free movement hub) ------------------------
+// Replaces the old static day-select card list: walk up to a character's
+// usual spot and press space (or click them) to spend the day together.
+
+const FIELD_W = 760
+const FIELD_H = 570
+const FIELD_SPOTS = {
+  daeun: { x: 150, y: 150, label: '전시 공간' },
+  seojun: { x: 610, y: 150, label: '서가' },
+  eunseo: { x: 150, y: 430, label: '독서 코너' },
+  ria: { x: 610, y: 430, label: '소형 무대' },
+}
+const PLAYER_START = { x: 380, y: 290 }
+const PLAYER_SPEED = 160
+const INTERACT_RANGE = 48
+const SPRITE_R = 26
+
+const charImages = {}
+for (const id of Object.keys(PORTRAIT_IMAGES)) {
+  const img = new Image()
+  img.src = PORTRAIT_IMAGES[id].soft
+  charImages[id] = img
 }
 
+const field = { playerX: PLAYER_START.x, playerY: PLAYER_START.y, lastTime: 0 }
+const heldKeys = new Set()
+window.addEventListener('keydown', (e) => {
+  const key = e.key.toLowerCase()
+  heldKeys.add(key)
+  if (state.screen === 'day' && (key === ' ' || key === 'enter')) {
+    e.preventDefault()
+    tryInteract()
+  }
+})
+window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
+function held(names) {
+  return names.some((k) => heldKeys.has(k))
+}
+
+function nearbyCharId() {
+  for (const id of Object.keys(FIELD_SPOTS)) {
+    const spot = FIELD_SPOTS[id]
+    if (Math.hypot(field.playerX - spot.x, field.playerY - spot.y) < INTERACT_RANGE) return id
+  }
+  return null
+}
+function tryInteract() {
+  const id = nearbyCharId()
+  if (!id) return
+  state.activeCharId = id
+  state.screen = 'scene'
+  render()
+}
+
+function updateField(dt) {
+  let dx = 0
+  let dy = 0
+  if (held(['a', 'arrowleft'])) dx -= 1
+  if (held(['d', 'arrowright'])) dx += 1
+  if (held(['w', 'arrowup'])) dy -= 1
+  if (held(['s', 'arrowdown'])) dy += 1
+  if (dx === 0 && dy === 0) return
+  const len = Math.hypot(dx, dy)
+  dx /= len
+  dy /= len
+  field.playerX = Math.max(26, Math.min(FIELD_W - 26, field.playerX + dx * PLAYER_SPEED * dt))
+  field.playerY = Math.max(54, Math.min(FIELD_H - 26, field.playerY + dy * PLAYER_SPEED * dt))
+}
+
+function drawCharSprite(ctx, id, spot) {
+  const img = charImages[id]
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(spot.x, spot.y, SPRITE_R, 0, Math.PI * 2)
+  ctx.closePath()
+  ctx.clip()
+  if (img.complete && img.naturalWidth > 0) {
+    const size = SPRITE_R * 2
+    const scale = size / img.width
+    const drawH = img.height * scale
+    const offsetY = (drawH - size) * 0.15
+    ctx.drawImage(img, spot.x - SPRITE_R, spot.y - SPRITE_R - offsetY, size, drawH)
+  } else {
+    const ch = state.chars.find((c) => c.id === id)
+    ctx.fillStyle = ch.color
+    ctx.fillRect(spot.x - SPRITE_R, spot.y - SPRITE_R, SPRITE_R * 2, SPRITE_R * 2)
+  }
+  ctx.restore()
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.arc(spot.x, spot.y, SPRITE_R, 0, Math.PI * 2)
+  ctx.stroke()
+}
+
+function drawField(ctx) {
+  ctx.clearRect(0, 0, FIELD_W, FIELD_H)
+  ctx.fillStyle = '#2a2419'
+  ctx.fillRect(0, 0, FIELD_W, FIELD_H)
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)'
+  ctx.lineWidth = 4
+  for (let i = 0; i < 6; i++) {
+    ctx.beginPath()
+    ctx.moveTo(0, 90 + i * 85)
+    ctx.lineTo(FIELD_W, 90 + i * 85)
+    ctx.stroke()
+  }
+
+  for (const id of Object.keys(FIELD_SPOTS)) {
+    const spot = FIELD_SPOTS[id]
+    const ch = state.chars.find((c) => c.id === id)
+    ctx.fillStyle = 'rgba(255,255,255,0.05)'
+    ctx.beginPath()
+    ctx.arc(spot.x, spot.y, 58, 0, Math.PI * 2)
+    ctx.fill()
+    drawCharSprite(ctx, id, spot)
+    ctx.textAlign = 'center'
+    ctx.fillStyle = '#fff'
+    ctx.font = 'bold 12px sans-serif'
+    ctx.fillText(ch.name, spot.x, spot.y - 38)
+    ctx.font = '10px sans-serif'
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'
+    ctx.fillText(spot.label, spot.x, spot.y + 48)
+    ctx.fillStyle = '#ff8fab'
+    ctx.font = '11px sans-serif'
+    ctx.fillText(heartsFor(ch.affection), spot.x, spot.y + 62)
+  }
+
+  // player
+  ctx.save()
+  ctx.translate(field.playerX, field.playerY)
+  ctx.fillStyle = '#2b2440'
+  ctx.fillRect(-7, 7, 5, 9)
+  ctx.fillRect(2, 7, 5, 9)
+  ctx.fillStyle = '#5aa0e0'
+  ctx.beginPath()
+  ctx.roundRect(-9, -11, 18, 20, 4)
+  ctx.fill()
+  ctx.fillStyle = '#f2c79b'
+  ctx.beginPath()
+  ctx.arc(0, -8, 7, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+
+  const nearId = nearbyCharId()
+  if (nearId) {
+    const ch = state.chars.find((c) => c.id === nearId)
+    const label = `[스페이스] ${ch.name}와(과) 대화하기`
+    ctx.font = 'bold 12px sans-serif'
+    ctx.textAlign = 'center'
+    const w = ctx.measureText(label).width + 18
+    ctx.fillStyle = 'rgba(0,0,0,0.72)'
+    ctx.beginPath()
+    ctx.roundRect(field.playerX - w / 2, field.playerY - 48, w, 22, 6)
+    ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.fillText(label, field.playerX, field.playerY - 32)
+  }
+
+  ctx.textAlign = 'left'
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'
+  ctx.fillRect(0, 0, FIELD_W, 34)
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 13px sans-serif'
+  ctx.fillText(`Day ${state.day} / ${MAX_DAYS}`, 12, 22)
+  ctx.textAlign = 'right'
+  ctx.font = '11px sans-serif'
+  ctx.fillStyle = 'rgba(255,255,255,0.75)'
+  ctx.fillText('WASD/방향키 이동 · 스페이스 또는 클릭으로 대화', FIELD_W - 12, 22)
+}
+
+function fieldLoop(time) {
+  if (state.screen !== 'day') return
+  const dt = Math.min(0.05, (time - (field.lastTime || time)) / 1000)
+  field.lastTime = time
+  updateField(dt)
+  const canvas = document.getElementById('field-canvas')
+  if (!canvas) return
+  drawField(canvas.getContext('2d'))
+  requestAnimationFrame(fieldLoop)
+}
+
+function setupFieldCanvas() {
+  const canvas = document.getElementById('field-canvas')
+  canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect()
+    const scaleX = canvas.width / rect.width
+    const scaleY = canvas.height / rect.height
+    const mx = (e.clientX - rect.left) * scaleX
+    const my = (e.clientY - rect.top) * scaleY
+    for (const id of Object.keys(FIELD_SPOTS)) {
+      const spot = FIELD_SPOTS[id]
+      if (Math.hypot(mx - spot.x, my - spot.y) < SPRITE_R + 8) {
+        state.activeCharId = id
+        state.screen = 'scene'
+        render()
+        return
+      }
+    }
+  })
+}
 
 // --- Scene backgrounds --------------------------------------------------
 // Each is a CSS gradient plus a small bit of inline-SVG decoration, so
@@ -363,7 +560,7 @@ function render() {
         <h1>동아리 연애 시뮬레이션</h1>
         <div class="subtitle">6일간의 선택이 엔딩을 결정합니다</div>
         <button class="primary-btn" id="start-btn">시작하기</button>
-        <div class="hint">매일 한 사람을 골라 시간을 보내세요. 선택에 따라 호감도가 달라집니다.</div>
+        <div class="hint">동아리방을 돌아다니며 만나고 싶은 사람에게 다가가세요. 선택에 따라 호감도가 달라집니다.</div>
       </div>
     `
     applyBackground(document.getElementById('bg'), 'title')
@@ -376,35 +573,12 @@ function render() {
   }
 
   if (state.screen === 'day') {
-    const cards = state.chars
-      .map(
-        (c) => `
-        <button class="char-card" data-id="${c.id}">
-          <div class="thumb">${renderThumb(c)}</div>
-          <div class="char-info">
-            <div class="char-name">${c.name}</div>
-            <div class="char-desc">${c.desc}</div>
-            <div class="hearts">${heartsFor(c.affection)}</div>
-          </div>
-        </button>`,
-      )
-      .join('')
-    app.innerHTML = `
-      <div class="vn-bg" id="bg"></div>
-      <div class="vn-panel">
-        <div id="day-counter">Day ${state.day} / ${MAX_DAYS}</div>
-        ${cards}
-        <div class="hint">오늘 함께 시간을 보낼 사람을 선택하세요.</div>
-      </div>
-    `
-    applyBackground(document.getElementById('bg'), 'clubroom')
-    app.querySelectorAll('.char-card').forEach((btn) => {
-      btn.onclick = () => {
-        state.activeCharId = btn.dataset.id
-        state.screen = 'scene'
-        render()
-      }
-    })
+    app.innerHTML = `<canvas id="field-canvas" width="${FIELD_W}" height="${FIELD_H}" style="width:100%;height:100%;display:block;"></canvas>`
+    field.playerX = PLAYER_START.x
+    field.playerY = PLAYER_START.y
+    field.lastTime = 0
+    setupFieldCanvas()
+    requestAnimationFrame(fieldLoop)
     return
   }
 
