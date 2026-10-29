@@ -443,7 +443,11 @@ function renderTopAndPortrait(extraBodyHtml) {
       </div>
       <div class="body-row">
         <div class="portrait-col">
-          <canvas id="portrait-canvas" width="200" height="240"></canvas>
+          ${
+            stage.key === 'child'
+              ? `<img class="portrait-img" src="${import.meta.env.BASE_URL}portraits/child_default.webp" alt="${state.name}" />`
+              : `<canvas id="portrait-canvas" width="200" height="240"></canvas>`
+          }
           <div class="daughter-name">${state.name}</div>
           <div class="daughter-stage">${stage.label}</div>
           <div class="mood-tag">${mood.label}</div>
@@ -460,7 +464,8 @@ function renderTopAndPortrait(extraBodyHtml) {
       </div>
     </div>
   `
-  drawPortrait(document.getElementById('portrait-canvas'), { stageKey: stage.key, moodKey: mood.key, hairHex: state.hairHex })
+  const canvas = document.getElementById('portrait-canvas')
+  if (canvas) drawPortrait(canvas, { stageKey: stage.key, moodKey: mood.key, hairHex: state.hairHex })
 }
 
 function renderChoose() {

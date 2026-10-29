@@ -98,7 +98,7 @@
         padding: 1rem 0.8rem; background: linear-gradient(180deg, #fff6ec 0%, #ffe9d6 100%);
         border-right: 1px solid var(--soft);
       }
-      .portrait-col canvas { width: 200px; height: 240px; }
+      .portrait-col canvas, .portrait-col img.portrait-img { width: 200px; height: 240px; object-fit: contain; }
       .daughter-name { font-size: 1.05rem; font-weight: bold; margin-top: 0.2rem; }
       .daughter-stage { font-size: 0.75rem; opacity: 0.65; margin-bottom: 0.6rem; }
       .mood-tag {
@@ -166,7 +166,7 @@
       @media (max-width: 640px) {
         .body-row { flex-direction: column; }
         .portrait-col { flex-direction: row; flex: 0 0 auto; border-right: none; border-bottom: 1px solid var(--soft); gap: 0.8rem; }
-        .portrait-col canvas { width: 110px; height: 132px; }
+        .portrait-col canvas, .portrait-col img.portrait-img { width: 110px; height: 132px; }
       }
     </style>
   </head>
