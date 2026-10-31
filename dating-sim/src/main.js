@@ -1,0 +1,660 @@
+const MAX_DAYS = 6
+const GOOD_ENDING_THRESHOLD = 7
+
+// --- Portrait art -----------------------------------------------------
+// All four are AI-generated, cropped from a single group shot.
+const PORTRAIT_IMAGES = {
+  daeun: { soft: 'portraits/daeun_soft.webp' },
+  seojun: { soft: 'portraits/seojun_soft.webp' },
+  ria: { soft: 'portraits/ria_soft.webp' },
+  eunseo: { soft: 'portraits/eunseo_soft.webp' },
+}
+
+function renderPortrait(ch, mood) {
+  const images = PORTRAIT_IMAGES[ch.id]
+  const src = images[mood] || images.soft
+  return `<img src="${src}" alt="${ch.name}" />`
+}
+
+// --- Field map (동급생-style free movement hub) ------------------------
+// Replaces the old static day-select card list: walk up to a character's
+// usual spot and press space (or click them) to spend the day together.
+
+const FIELD_W = 760
+const FIELD_H = 570
+const FIELD_SPOTS = {
+  daeun: { x: 150, y: 150, label: '전시 공간' },
+  seojun: { x: 610, y: 150, label: '서가' },
+  eunseo: { x: 150, y: 430, label: '독서 코너' },
+  ria: { x: 610, y: 430, label: '소형 무대' },
+}
+const PLAYER_START = { x: 380, y: 290 }
+const PLAYER_SPEED = 160
+const INTERACT_RANGE = 48
+const SPRITE_R = 26
+
+const charImages = {}
+for (const id of Object.keys(PORTRAIT_IMAGES)) {
+  const img = new Image()
+  img.src = PORTRAIT_IMAGES[id].soft
+  charImages[id] = img
+}
+
+const field = { playerX: PLAYER_START.x, playerY: PLAYER_START.y, lastTime: 0 }
+const heldKeys = new Set()
+window.addEventListener('keydown', (e) => {
+  const key = e.key.toLowerCase()
+  heldKeys.add(key)
+  if (state.screen === 'day' && (key === ' ' || key === 'enter')) {
+    e.preventDefault()
+    tryInteract()
+  }
+})
+window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
+function held(names) {
+  return names.some((k) => heldKeys.has(k))
+}
+
+function nearbyCharId() {
+  for (const id of Object.keys(FIELD_SPOTS)) {
+    const spot = FIELD_SPOTS[id]
+    if (Math.hypot(field.playerX - spot.x, field.playerY - spot.y) < INTERACT_RANGE) return id
+  }
+  return null
+}
+function tryInteract() {
+  const id = nearbyCharId()
+  if (!id) return
+  state.activeCharId = id
+  state.screen = 'scene'
+  render()
+}
+
+function updateField(dt) {
+  let dx = 0
+  let dy = 0
+  if (held(['a', 'arrowleft'])) dx -= 1
+  if (held(['d', 'arrowright'])) dx += 1
+  if (held(['w', 'arrowup'])) dy -= 1
+  if (held(['s', 'arrowdown'])) dy += 1
+  if (dx === 0 && dy === 0) return
+  const len = Math.hypot(dx, dy)
+  dx /= len
+  dy /= len
+  field.playerX = Math.max(26, Math.min(FIELD_W - 26, field.playerX + dx * PLAYER_SPEED * dt))
+  field.playerY = Math.max(54, Math.min(FIELD_H - 26, field.playerY + dy * PLAYER_SPEED * dt))
+}
+
+function drawCharSprite(ctx, id, spot) {
+  const img = charImages[id]
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(spot.x, spot.y, SPRITE_R, 0, Math.PI * 2)
+  ctx.closePath()
+  ctx.clip()
+  if (img.complete && img.naturalWidth > 0) {
+    const size = SPRITE_R * 2
+    const scale = size / img.width
+    const drawH = img.height * scale
+    const offsetY = (drawH - size) * 0.15
+    ctx.drawImage(img, spot.x - SPRITE_R, spot.y - SPRITE_R - offsetY, size, drawH)
+  } else {
+    const ch = state.chars.find((c) => c.id === id)
+    ctx.fillStyle = ch.color
+    ctx.fillRect(spot.x - SPRITE_R, spot.y - SPRITE_R, SPRITE_R * 2, SPRITE_R * 2)
+  }
+  ctx.restore()
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.arc(spot.x, spot.y, SPRITE_R, 0, Math.PI * 2)
+  ctx.stroke()
+}
+
+function drawField(ctx) {
+  ctx.clearRect(0, 0, FIELD_W, FIELD_H)
+  ctx.fillStyle = '#2a2419'
+  ctx.fillRect(0, 0, FIELD_W, FIELD_H)
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)'
+  ctx.lineWidth = 4
+  for (let i = 0; i < 6; i++) {
+    ctx.beginPath()
+    ctx.moveTo(0, 90 + i * 85)
+    ctx.lineTo(FIELD_W, 90 + i * 85)
+    ctx.stroke()
+  }
+
+  for (const id of Object.keys(FIELD_SPOTS)) {
+    const spot = FIELD_SPOTS[id]
+    const ch = state.chars.find((c) => c.id === id)
+    ctx.fillStyle = 'rgba(255,255,255,0.05)'
+    ctx.beginPath()
+    ctx.arc(spot.x, spot.y, 58, 0, Math.PI * 2)
+    ctx.fill()
+    drawCharSprite(ctx, id, spot)
+    ctx.textAlign = 'center'
+    ctx.fillStyle = '#fff'
+    ctx.font = 'bold 12px sans-serif'
+    ctx.fillText(ch.name, spot.x, spot.y - 38)
+    ctx.font = '10px sans-serif'
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'
+    ctx.fillText(spot.label, spot.x, spot.y + 48)
+    ctx.fillStyle = '#ff8fab'
+    ctx.font = '11px sans-serif'
+    ctx.fillText(heartsFor(ch.affection), spot.x, spot.y + 62)
+  }
+
+  // player
+  ctx.save()
+  ctx.translate(field.playerX, field.playerY)
+  ctx.fillStyle = '#2b2440'
+  ctx.fillRect(-7, 7, 5, 9)
+  ctx.fillRect(2, 7, 5, 9)
+  ctx.fillStyle = '#5aa0e0'
+  ctx.beginPath()
+  ctx.roundRect(-9, -11, 18, 20, 4)
+  ctx.fill()
+  ctx.fillStyle = '#f2c79b'
+  ctx.beginPath()
+  ctx.arc(0, -8, 7, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+
+  const nearId = nearbyCharId()
+  if (nearId) {
+    const ch = state.chars.find((c) => c.id === nearId)
+    const label = `[스페이스] ${ch.name}와(과) 대화하기`
+    ctx.font = 'bold 12px sans-serif'
+    ctx.textAlign = 'center'
+    const w = ctx.measureText(label).width + 18
+    ctx.fillStyle = 'rgba(0,0,0,0.72)'
+    ctx.beginPath()
+    ctx.roundRect(field.playerX - w / 2, field.playerY - 48, w, 22, 6)
+    ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.fillText(label, field.playerX, field.playerY - 32)
+  }
+
+  ctx.textAlign = 'left'
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'
+  ctx.fillRect(0, 0, FIELD_W, 34)
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 13px sans-serif'
+  ctx.fillText(`Day ${state.day} / ${MAX_DAYS}`, 12, 22)
+  ctx.textAlign = 'right'
+  ctx.font = '11px sans-serif'
+  ctx.fillStyle = 'rgba(255,255,255,0.75)'
+  ctx.fillText('WASD/방향키 이동 · 스페이스 또는 클릭으로 대화', FIELD_W - 12, 22)
+}
+
+function fieldLoop(time) {
+  if (state.screen !== 'day') return
+  const dt = Math.min(0.05, (time - (field.lastTime || time)) / 1000)
+  field.lastTime = time
+  updateField(dt)
+  const canvas = document.getElementById('field-canvas')
+  if (!canvas) return
+  drawField(canvas.getContext('2d'))
+  requestAnimationFrame(fieldLoop)
+}
+
+function setupFieldCanvas() {
+  const canvas = document.getElementById('field-canvas')
+  canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect()
+    const scaleX = canvas.width / rect.width
+    const scaleY = canvas.height / rect.height
+    const mx = (e.clientX - rect.left) * scaleX
+    const my = (e.clientY - rect.top) * scaleY
+    for (const id of Object.keys(FIELD_SPOTS)) {
+      const spot = FIELD_SPOTS[id]
+      if (Math.hypot(mx - spot.x, my - spot.y) < SPRITE_R + 8) {
+        state.activeCharId = id
+        state.screen = 'scene'
+        render()
+        return
+      }
+    }
+  })
+}
+
+// --- Scene backgrounds --------------------------------------------------
+// Each is a CSS gradient plus a small bit of inline-SVG decoration, so
+// every stage reads as a distinct "scene" the way a VN's background CG
+// would, even though the character sprite itself doesn't change pose.
+
+function starsDecor(n, area) {
+  let out = ''
+  for (let i = 0; i < n; i++) {
+    const x = (i * 97) % 300
+    const y = ((i * 53) % area) + 10
+    const r = 1 + (i % 3) * 0.6
+    out += `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" opacity="${0.4 + (i % 4) * 0.15}"/>`
+  }
+  return out
+}
+
+const BACKGROUNDS = {
+  title: {
+    gradient: 'linear-gradient(160deg, #3a2a5c 0%, #1f1733 70%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">${starsDecor(26, 160)}</svg>`,
+  },
+  clubroom: {
+    gradient: 'linear-gradient(160deg, #4a3f2e 0%, #2a2419 75%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      <rect x="0" y="40" width="300" height="6" fill="#5a4a33" opacity="0.6"/>
+      <rect x="0" y="90" width="300" height="6" fill="#5a4a33" opacity="0.6"/>
+      <rect x="0" y="140" width="300" height="6" fill="#5a4a33" opacity="0.6"/>
+    </svg>`,
+  },
+  gallery: {
+    gradient: 'linear-gradient(160deg, #e8dcc8 0%, #c9b896 75%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      <rect x="20" y="20" width="50" height="38" fill="#fff" stroke="#8a7a5a" stroke-width="2"/>
+      <rect x="100" y="14" width="46" height="46" fill="#fff" stroke="#8a7a5a" stroke-width="2"/>
+      <rect x="220" y="22" width="56" height="34" fill="#fff" stroke="#8a7a5a" stroke-width="2"/>
+    </svg>`,
+  },
+  rain: {
+    gradient: 'linear-gradient(180deg, #4a5a6e 0%, #2a3440 85%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      ${Array.from({ length: 24 }, (_, i) => {
+        const x = (i * 37) % 300
+        return `<line x1="${x}" y1="0" x2="${x - 12}" y2="40" stroke="#cfe0ea" stroke-width="1.5" opacity="0.45"/>`
+      }).join('')}
+    </svg>`,
+  },
+  festival: {
+    gradient: 'linear-gradient(180deg, #1a1430 0%, #3a2550 100%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      ${starsDecor(14, 60)}
+      ${Array.from({ length: 10 }, (_, i) => {
+        const x = 20 + i * 28
+        const y = 30 + Math.sin(i * 0.8) * 10
+        return `<circle cx="${x}" cy="${y}" r="3.2" fill="#ffd76a" opacity="0.9"/>`
+      }).join('')}
+    </svg>`,
+  },
+  library: {
+    gradient: 'linear-gradient(160deg, #5a4530 0%, #3a2e20 75%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      ${Array.from({ length: 14 }, (_, i) => {
+        const x = 10 + i * 20
+        const h = 30 + (i % 3) * 10
+        const c = ['#7a5a3a', '#8a6a4a', '#6a4a2e'][i % 3]
+        return `<rect x="${x}" y="${50 - h}" width="16" height="${h}" fill="${c}"/>`
+      }).join('')}
+    </svg>`,
+  },
+  study: {
+    gradient: 'linear-gradient(160deg, #2e3540 0%, #1a1f28 75%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      <circle cx="230" cy="40" r="40" fill="#ffdf8a" opacity="0.18"/>
+      <circle cx="230" cy="40" r="18" fill="#ffdf8a" opacity="0.3"/>
+    </svg>`,
+  },
+  rooftop: {
+    gradient: 'linear-gradient(180deg, #0d1b33 0%, #1f3358 100%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      ${starsDecor(24, 90)}
+      ${Array.from({ length: 8 }, (_, i) => {
+        const x = i * 38
+        const h = 20 + (i % 4) * 14
+        return `<rect x="${x}" y="${120 - h}" width="34" height="${h}" fill="#0a1626" opacity="0.8"/>`
+      }).join('')}
+    </svg>`,
+  },
+  bandroom: {
+    gradient: 'linear-gradient(160deg, #3a1f2e 0%, #231018 75%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      <rect x="10" y="90" width="50" height="60" rx="4" fill="#1a1012" opacity="0.8"/>
+      <circle cx="35" cy="112" r="14" fill="#2a1a1c"/>
+      <rect x="240" y="90" width="50" height="60" rx="4" fill="#1a1012" opacity="0.8"/>
+      <circle cx="265" cy="112" r="14" fill="#2a1a1c"/>
+    </svg>`,
+  },
+  backstage: {
+    gradient: 'linear-gradient(160deg, #2a2035 0%, #171022 75%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      ${Array.from({ length: 10 }, (_, i) => `<circle cx="${15 + i * 30}" cy="18" r="3" fill="#ffe29a" opacity="0.85"/>`).join('')}
+    </svg>`,
+  },
+  stage: {
+    gradient: 'linear-gradient(180deg, #120a1f 0%, #2e1a3a 100%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      <polygon points="90,0 210,0 260,180 40,180" fill="#fff" opacity="0.06"/>
+      <polygon points="120,0 180,0 210,180 90,180" fill="#fff" opacity="0.08"/>
+      ${starsDecor(10, 30)}
+    </svg>`,
+  },
+  bookcafe: {
+    gradient: 'linear-gradient(160deg, #5a3f2e 0%, #2e2015 75%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      ${Array.from({ length: 10 }, (_, i) => {
+        const x = 10 + i * 20
+        const h = 26 + (i % 3) * 8
+        const c = ['#8a6a4a', '#9a7a56', '#755638'][i % 3]
+        return `<rect x="${x}" y="${44 - h}" width="16" height="${h}" fill="${c}"/>`
+      }).join('')}
+      <circle cx="250" cy="34" r="30" fill="#ffdf8a" opacity="0.2"/>
+      <circle cx="250" cy="34" r="12" fill="#ffdf8a" opacity="0.32"/>
+    </svg>`,
+  },
+}
+
+function applyBackground(el, id) {
+  const bg = BACKGROUNDS[id] || BACKGROUNDS.clubroom
+  el.style.background = bg.gradient
+  el.innerHTML = bg.decor
+}
+
+// --- Story data -----------------------------------------------------
+
+const CHARACTERS = [
+  {
+    id: 'daeun',
+    name: '다은',
+    color: '#ffb3c6',
+    desc: '사진 동아리 신입생, 밝고 솔직함',
+    stages: [
+      {
+        bg: 'gallery',
+        text: '다은이 전시회 벽 앞에서 선배를 기다리고 있었다.',
+        speaker: '다은',
+        line: '선배! 이번 동아리 전시회에 제 사진 걸었어요. 어때요, 솔직하게 말해주세요. 저 입시 때보다 늘었죠?',
+        choices: [
+          { label: '사진 속 빛 쓰는 방식이 진짜 늘었어', delta: 3, response: '와... 선배가 그런 말 해주니까 진짜 뿌듯하다. 역시 보는 눈이 있으시네요!' },
+          { label: '어... 잘 찍은 것 같아 (대충)', delta: 1, response: '음... 선배 지금 자세히 안 본 거죠? 그래도 봐준 건 고마워요.' },
+        ],
+      },
+      {
+        bg: 'rain',
+        text: '다은이 동아리방 앞에서 비를 맞으며 서 있었다. 우산을 깜빡한 모양이다.',
+        speaker: '다은',
+        line: '아 맞다, 우산... 오늘 날씨 좋다고 안 가져왔는데. 선배는 우산 있어요?',
+        choices: [
+          { label: '우산 같이 쓰고 가자, 집 방향 비슷하잖아', delta: 3, response: '진짜요? 좋아요! ...근데 왜 귀까지 빨개요, 선배?' },
+          { label: '우산 빌려줄게, 난 비 맞고 뛰어갈게', delta: 1, response: '어... 고마워요. 근데 선배가 감기 걸릴까봐 좀 걸려요.' },
+        ],
+      },
+      {
+        bg: 'festival',
+        text: '축제 마지막 날 밤, 다은이 자기 작품 앞에서 괜히 사진들을 다시 정리하고 있었다.',
+        speaker: '다은',
+        line: '선배, 사실... 이 사진들 중에 선배 몰래 찍은 거 하나 있어요. 보여드릴까, 말까 고민 중인데.',
+        choices: [
+          { label: '보여줘, 궁금해. 그리고... 나도 할 말 있어', delta: 3, response: '(사진을 내민다) 이거예요. 선배가 웃는 거 처음 제대로 찍혔더라고요. ...선배 할 말이 뭔데요? 설마.' },
+          { label: '나중에 천천히 보여줘도 돼', delta: 1, response: '...선배는 가끔 너무 신사적이에요. 그게 장점이자 단점.' },
+        ],
+      },
+    ],
+    endingBg: 'festival',
+    goodEnding:
+      '다은: (사진을 내밀며) 저... 사실 이 사진, 선배한테 주고 싶어서 인화해놨어요.\n그리고 하나만 물어볼게요. 저랑, 계속 이렇게 옆에 있어 줄 수 있어요?\n\n축제의 마지막 불빛 아래, 두 사람은 한참을 그렇게 마주 보고 있었다.\n\n— ENDING: 다은과의 봄날 —',
+  },
+  {
+    id: 'seojun',
+    name: '서준',
+    color: '#9ec5ff',
+    desc: '책 좋아하는 무뚝뚝 선배, 알고 보면 다정함',
+    stages: [
+      {
+        bg: 'library',
+        text: '서준이 책 한 권을 책상 위로 슥 밀어주었다.',
+        speaker: '서준',
+        line: '이거 읽어봐. 너 요즘 하는 고민이랑 비슷한 얘기 나와. ...뭐, 읽든 말든 상관없고.',
+        choices: [
+          { label: '지금 바로 몇 장 같이 읽어볼래?', delta: 3, response: '...생각보다 끈질기네. 좋아, 여기 이 구절부터 보자.' },
+          { label: '고마워, 나중에 꼭 읽을게 (가방에 넣는다)', delta: 1, response: '말은 저래 놓고 안 읽는 애들 많더라. ...너는 아니었으면 좋겠다.' },
+        ],
+      },
+      {
+        bg: 'study',
+        text: '서준이 노트북 앞에서 머리를 감싸 쥐고 있었다. 화면엔 빨간 글씨가 가득했다.',
+        speaker: '서준',
+        line: '마감이 내일인데 하나도 안 풀려. ...너 이런 거 잘하지 않았나?',
+        choices: [
+          { label: '같이 풀어보자, 오늘 밤 새워도 상관없어', delta: 3, response: '(살짝 웃으며) 진짜 옆에 있어주네. ...고맙다는 말, 잘 안 하는데 지금은 해야겠다.' },
+          { label: '에너지 드링크 사다 줄게, 힘내', delta: 1, response: '...고맙다. 근데 이걸로 해결될 문제는 아닌데.' },
+        ],
+      },
+      {
+        bg: 'rooftop',
+        text: '축제 준비로 지친 서준이 옥상에서 바람을 쐬고 있었다.',
+        speaker: '서준',
+        line: '가끔 이렇게 혼자 올라와서 생각해. 나중에 뭐가 되고 싶은지, 사실 아직도 잘 모르겠어. ...너한테 이런 말 하는 거 처음이다.',
+        choices: [
+          { label: '나도 사실 두려운 거 많아. 같이 얘기해보자', delta: 3, response: '(한참을 보다가) ...너랑 있으면 이상하게 센치해지네. 싫지 않은데, 그게 더 당황스럽다.' },
+          { label: '그런 고민은 다 하는 거야, 너무 걱정 마', delta: 1, response: '...그래, 네 말이 맞을지도. 근데 가끔은 그냥 들어주기만 해도 되는데.' },
+        ],
+      },
+    ],
+    endingBg: 'rooftop',
+    goodEnding:
+      '서준: ...나 원래 이런 말 잘 못 하는데. 그냥, 네가 있어서 이번 학기가 안 외로웠어. 그게 다야.\n...근데 혹시, 다음 학기도 이 옥상에 같이 올라올 생각 있어?\n\n서준은 평소답지 않게 귀까지 빨개진 채로 밤하늘만 보고 있었다.\n\n— ENDING: 서준과의 조용한 밤 —',
+  },
+  {
+    id: 'ria',
+    name: '리아',
+    color: '#ffd76a',
+    desc: '밴드 보컬, 자신감 넘치고 에너지 폭발',
+    stages: [
+      {
+        bg: 'bandroom',
+        text: '리아가 방금 만든 곡을 자신 있게 불러주었다. 끝나자마자 눈을 반짝이며 쳐다본다.',
+        speaker: '리아',
+        line: '어때?! 이번 곡, 내가 진짜 밤새서 만든 거야. 솔직한 피드백 원해. 진짜 솔직하게!',
+        choices: [
+          { label: '2절 전개가 좀 급해, 거기만 다듬으면 완벽해', delta: 3, response: '오... 그거 나도 걸렸던 부분인데! 역시 믿고 물어보길 잘했다. 땡큐!' },
+          { label: '완전 좋아, 역시 리아밖에 없다!', delta: 1, response: '음... 그거 칭찬 맞아? 왠지 대충 들은 느낌인데.' },
+        ],
+      },
+      {
+        bg: 'backstage',
+        text: '공연 10분 전, 평소와 달리 리아가 계속 핸드폰 화면만 만지작거리고 있었다.',
+        speaker: '리아',
+        line: '나 사실 좀 떨려... 이런 티 안 내려고 했는데. 티 많이 나?',
+        choices: [
+          { label: '지난달보다 훨씬 안정됐어, 그때의 리아는 이제 없어', delta: 3, response: '...그걸 기억하고 있었어? 와, 진짜 든든하다. 좋아, 무대 올라가서 다 보여줄게.' },
+          { label: '괜찮아, 넌 항상 잘하잖아', delta: 1, response: '그렇긴 한데... 오늘은 왠지 좀 더 구체적인 말이 듣고 싶었어.' },
+        ],
+      },
+      {
+        bg: 'stage',
+        text: '공연을 성공적으로 마친 리아가 땀범벅이 된 채로 환하게 웃으며 다가왔다.',
+        speaker: '리아',
+        line: '봤어?! 마지막 소절에서 관객들 완전 떼창했잖아! ...근데 사실 그 순간에 너 보고 불렀던 거 알아?',
+        choices: [
+          { label: '알아, 그 순간 완전 시선 고정이었어. 나도 할 말 있어', delta: 3, response: '(잠깐 말을 잃더니 씩 웃는다) 역시 눈치는 있네. 좋아, 말해봐. 나 지금 심장 엄청 뛰는 중이니까 빨리.' },
+          { label: '멀리서 봤는데 진짜 멋있더라, 축하해', delta: 1, response: '고마워... 근데 선배는 가끔 좀 멀리서만 보는 느낌이야.' },
+        ],
+      },
+    ],
+    endingBg: 'stage',
+    goodEnding:
+      '리아: 나 사실 이 노래, 처음부터 끝까지 너 생각하면서 썼어. 가사 다시 읽어봐.\n...이제 알겠지? 그러니까 대답은, 지금 당장 듣고 싶은데.\n\n관객이 떠난 텅 빈 무대 위, 리아는 여전히 기타를 멘 채로 손을 내밀었다.\n\n— ENDING: 리아와의 앙코르 —',
+  },
+  {
+    id: 'eunseo',
+    name: '은서',
+    color: '#b9c7ff',
+    desc: '문학 동아리 소속, 차분하지만 할 말은 다 하는 타입',
+    stages: [
+      {
+        bg: 'library',
+        text: '은서가 책상에 앉아 책 한 구절에 밑줄을 긋고 있다가 선배를 발견하고 손을 흔들었다.',
+        speaker: '은서',
+        line: '선배, 이 구절 좀 읽어봐요. 어떤 느낌이에요? ...대충 좋다고만 하면 바로 알아채니까 각오하세요.',
+        choices: [
+          { label: '구절을 짚어가며 꼼꼼히 감상 말해주기', delta: 3, response: '...오, 제대로 읽었네요. 생각보다 진지하게 들어주는 사람 처음이에요.' },
+          { label: '좋은 것 같다고 짧게 답하기', delta: 1, response: '역시 그럴 줄 알았어요. ...그래도 안 도망간 건 점수 줄게요.' },
+        ],
+      },
+      {
+        bg: 'study',
+        text: '시험 기간, 은서가 스터디룸 구석에서 혼자 문제집과 씨름하고 있었다. 평소와 다르게 지쳐 보인다.',
+        speaker: '은서',
+        line: '요즘 좀 벅차네요. ...이런 얘기 아무한테나 안 하는데, 선배한테는 그냥 해도 될 것 같아서.',
+        choices: [
+          { label: '지금 뭐가 제일 힘든지 구체적으로 물어봐 주기', delta: 3, response: '...진짜 궁금해서 묻는 거죠? 그럼 말할게요. 사실 완벽하지 않은 모습 보여주는 게 제일 무서워요.' },
+          { label: '너무 애쓰지 말라고 가볍게 다독이기', delta: 1, response: '...고마운데, 가끔은 그냥 옆에 있어주는 게 더 도움될 때도 있어요.' },
+        ],
+      },
+      {
+        bg: 'bookcafe',
+        text: '동아리 중고책 장터가 끝난 뒤, 은서가 유일하게 안 팔린 책 한 권을 만지작거리고 있었다.',
+        speaker: '은서',
+        line: '이 책, 사실 제일 아끼는 건데 장터에 내놨어요. ...근데 선배가 사 가면 안 팔린 척 해줄게요.',
+        choices: [
+          { label: '그 책 살게, 대신 너한테 직접 설명 들으면서', delta: 3, response: '(살짝 웃으며) ...그럼 돈은 됐고, 대신 끝까지 제 얘기 들어주기예요. 약속.' },
+          { label: '다음에 천천히 읽어볼게 하고 그냥 받기', delta: 1, response: '음... 선배는 가끔 너무 쉽게 넘어가네요. 그래도 나쁘진 않아요.' },
+        ],
+      },
+    ],
+    endingBg: 'bookcafe',
+    goodEnding:
+      '은서: (책을 내밀며) 사실 이 책 맨 뒷장에 뭐 하나 적어뒀어요. 나중에 읽지 말고, 지금 봐요.\n...거기 적힌 거, 진심이에요. 저랑 다음 챕터도 같이 읽을래요?\n\n텅 빈 장터 자리에 둘만 남아, 은서는 대답을 기다리며 조용히 웃고 있었다.\n\n— ENDING: 은서와의 다음 챕터 —',
+  },
+]
+
+const FRIEND_ENDING =
+  '여섯 번째 날, 네 사람이 동시에 동아리방으로 몰려와 선배를 둘러쌌다.\n\n다은: "선배는 저한테도 잘해주고."\n서준: "나한테도 그랬지."\n리아: "나한테도!"\n은서: "...저한테도요. 책까지 사 갔잖아요."\n\n넷이 동시에 선배를 쳐다보며 한숨을 쉰다.\n\n다은: "그러니까 결론은..."\n넷이 입을 모아: "너무 다정해서 아무도 못 고르는 타입이라는 거지."\n\n선배는 그저 웃을 수밖에 없었다. 동아리의 평화는 지켜졌다.\n\n— ENDING: 모두의 좋은 선배(?) —'
+
+function makeInitialState() {
+  return {
+    screen: 'title',
+    day: 1,
+    chars: CHARACTERS.map((c) => ({ ...c, affection: 0, stage: 0 })),
+    activeCharId: null,
+    pendingResponse: null,
+    lastChoiceGood: false,
+  }
+}
+
+let state = makeInitialState()
+
+function heartsFor(affection) {
+  const filled = Math.max(0, Math.min(5, Math.round((affection / 9) * 5)))
+  return '♥'.repeat(filled) + '♡'.repeat(5 - filled)
+}
+
+function fillerScene() {
+  return {
+    bg: 'clubroom',
+    text: '오늘은 별다른 이벤트 없이 매점에서 같이 떡볶이를 먹으며 시간을 보냈다. 소소하지만 편안한 시간.',
+    line: '그냥 이렇게 같이 있는 시간도 괜찮다.',
+    choices: [
+      { label: '이야기에 적극적으로 맞장구치기', delta: 2, response: '...덕분에 오늘도 즐거웠어.' },
+      { label: '가볍게 안부만 묻기', delta: 1, response: '그래, 또 보자.' },
+    ],
+  }
+}
+
+function render() {
+  const app = document.getElementById('app')
+
+  if (state.screen === 'title') {
+    app.innerHTML = `
+      <div class="vn-bg" id="bg"></div>
+      <div class="vn-panel title-wrap">
+        <h1>동아리 연애 시뮬레이션</h1>
+        <div class="subtitle">6일간의 선택이 엔딩을 결정합니다</div>
+        <button class="primary-btn" id="start-btn">시작하기</button>
+        <div class="hint">동아리방을 돌아다니며 만나고 싶은 사람에게 다가가세요. 선택에 따라 호감도가 달라집니다.</div>
+      </div>
+    `
+    applyBackground(document.getElementById('bg'), 'title')
+    document.getElementById('start-btn').onclick = () => {
+      state = makeInitialState()
+      state.screen = 'day'
+      render()
+    }
+    return
+  }
+
+  if (state.screen === 'day') {
+    app.innerHTML = `<canvas id="field-canvas" width="${FIELD_W}" height="${FIELD_H}" style="width:100%;height:100%;display:block;"></canvas>`
+    field.playerX = PLAYER_START.x
+    field.playerY = PLAYER_START.y
+    field.lastTime = 0
+    setupFieldCanvas()
+    requestAnimationFrame(fieldLoop)
+    return
+  }
+
+  if (state.screen === 'scene') {
+    const ch = state.chars.find((c) => c.id === state.activeCharId)
+    const scene = ch.stage < ch.stages.length ? ch.stages[ch.stage] : fillerScene()
+    const defaultMood = 'soft'
+
+    if (state.pendingResponse) {
+      const mood = state.lastChoiceGood ? 'happy' : defaultMood
+      app.innerHTML = `
+        <div class="vn-bg" id="bg"></div>
+        <div class="vn-portrait">${renderPortrait(ch, mood)}</div>
+        <div class="vn-panel">
+          <div class="speaker-tag">${ch.name}</div>
+          <div class="dialogue-panel">${state.pendingResponse}</div>
+          <button class="continue-btn" id="continue-btn">다음 날로 ▶</button>
+        </div>
+      `
+      applyBackground(document.getElementById('bg'), scene.bg || 'clubroom')
+      document.getElementById('continue-btn').onclick = () => {
+        state.pendingResponse = null
+        state.activeCharId = null
+        state.day += 1
+        state.screen = state.day > MAX_DAYS ? 'ending' : 'day'
+        render()
+      }
+      return
+    }
+
+    const choiceButtons = scene.choices
+      .map((c, i) => `<button class="choice-btn" data-i="${i}">${c.label}</button>`)
+      .join('')
+    app.innerHTML = `
+      <div class="vn-bg" id="bg"></div>
+      <div class="vn-portrait">${renderPortrait(ch, defaultMood)}</div>
+      <div class="vn-panel">
+        <div class="speaker-tag">${ch.name}</div>
+        <div class="dialogue-panel">${scene.text}\n\n"${scene.line}"</div>
+        <div class="choice-list">${choiceButtons}</div>
+      </div>
+    `
+    applyBackground(document.getElementById('bg'), scene.bg || 'clubroom')
+    app.querySelectorAll('.choice-btn').forEach((btn) => {
+      btn.onclick = () => {
+        const choice = scene.choices[Number(btn.dataset.i)]
+        ch.affection += choice.delta
+        state.lastChoiceGood = choice.delta >= 3
+        if (ch.stage < ch.stages.length) ch.stage += 1
+        state.pendingResponse = choice.response
+        render()
+      }
+    })
+    return
+  }
+
+  if (state.screen === 'ending') {
+    const best = state.chars.reduce((a, b) => (b.affection > a.affection ? b : a))
+    const isGood = best.affection >= GOOD_ENDING_THRESHOLD
+    const ending = isGood ? best.goodEnding : FRIEND_ENDING
+    const bg = isGood ? best.endingBg : 'clubroom'
+    app.innerHTML = `
+      <div class="vn-bg" id="bg"></div>
+      ${isGood ? `<div class="vn-portrait">${renderPortrait(best, 'happy')}</div>` : ''}
+      <div class="vn-panel">
+        <div class="dialogue-panel">${ending}</div>
+        <button class="restart-btn" id="restart-btn">다시 시작하기</button>
+      </div>
+    `
+    applyBackground(document.getElementById('bg'), bg)
+    document.getElementById('restart-btn').onclick = () => {
+      state = makeInitialState()
+      render()
+    }
+    return
+  }
+}
+
+render()

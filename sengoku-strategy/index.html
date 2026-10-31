@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>천하제패</title>
+    <style>
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        background: #231b12;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+        color: #eee;
+        gap: 0.75rem;
+        padding: 1rem;
+        box-sizing: border-box;
+      }
+      canvas {
+        border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        max-width: 100%;
+      }
+      #hint {
+        font-size: 0.85rem;
+        opacity: 0.8;
+        text-align: center;
+        max-width: 760px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="hint">
+      영지를 클릭해 내정/외교/출진 — 모든 영지를 통일하거나 가장 강한 세력이 되는 것이 목표입니다 · R 키로 재시작
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

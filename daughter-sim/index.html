@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>딸 키우기</title>
+    <style>
+      :root {
+        --coral: #ff8f6b;
+        --cream: #fff6ec;
+        --panel: #ffffff;
+        --ink: #4a3b32;
+        --soft: #f3dfc9;
+      }
+      html, body {
+        margin: 0;
+        width: 100%;
+        min-height: 100%;
+        background: linear-gradient(160deg, #ffe8d6 0%, #ffd6c2 45%, #ffc9b8 100%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+        color: var(--ink);
+        padding: 1rem;
+        box-sizing: border-box;
+      }
+      #app {
+        width: 100%;
+        max-width: 860px;
+        min-height: 560px;
+        position: relative;
+        border-radius: 20px;
+        overflow: hidden;
+        box-shadow: 0 18px 48px rgba(120, 70, 40, 0.28);
+        background: var(--cream);
+      }
+
+      /* ---------- Title ---------- */
+      .title-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        height: 100%;
+        min-height: 560px;
+        padding: 2rem 1.5rem;
+        box-sizing: border-box;
+        background: radial-gradient(circle at 50% 20%, #fff2e2 0%, #ffe3cf 60%, #ffd3bb 100%);
+      }
+      .title-wrap h1 { font-size: clamp(1.5rem, 5vw, 2.3rem); margin: 0 0 0.4rem; color: #c1502c; }
+      .title-wrap .subtitle { opacity: 0.75; font-size: clamp(0.8rem, 2vw, 0.95rem); margin-bottom: 1.6rem; }
+      .field-row { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1rem; width: 100%; max-width: 320px; }
+      .field-row label { font-size: 0.82rem; font-weight: bold; text-align: left; }
+      .field-row input {
+        font-family: inherit;
+        font-size: 0.95rem;
+        padding: 0.55rem 0.8rem;
+        border-radius: 10px;
+        border: 1px solid #e3b68f;
+        background: #fffaf3;
+        color: var(--ink);
+      }
+      .swatch-row { display: flex; gap: 0.6rem; justify-content: center; margin-bottom: 1.2rem; }
+      .swatch {
+        width: 38px; height: 38px; border-radius: 50%; cursor: pointer;
+        border: 3px solid transparent; box-sizing: border-box;
+      }
+      .swatch.selected { border-color: #c1502c; }
+      .primary-btn {
+        font-family: inherit;
+        padding: 0.75rem 2.2rem;
+        background: var(--coral);
+        color: #fff;
+        font-weight: bold;
+        border: none;
+        border-radius: 12px;
+        font-size: 1rem;
+        cursor: pointer;
+        box-shadow: 0 6px 16px rgba(255, 143, 107, 0.45);
+      }
+      .hint { font-size: 0.72rem; opacity: 0.6; margin-top: 0.8rem; max-width: 420px; line-height: 1.5; }
+
+      /* ---------- Main game ---------- */
+      .game-wrap { display: flex; flex-direction: column; height: 100%; min-height: 560px; }
+      .topbar {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0.7rem 1.1rem; background: var(--coral); color: #fff;
+        font-size: 0.85rem; font-weight: bold;
+      }
+      .topbar .money { opacity: 0.95; }
+      .body-row { display: flex; flex: 1; min-height: 0; }
+      .portrait-col {
+        flex: 0 0 240px;
+        display: flex; flex-direction: column; align-items: center;
+        padding: 1rem 0.8rem; background: linear-gradient(180deg, #fff6ec 0%, #ffe9d6 100%);
+        border-right: 1px solid var(--soft);
+      }
+      .portrait-col canvas, .portrait-col img.portrait-img { width: 200px; height: 240px; object-fit: contain; }
+      .daughter-name { font-size: 1.05rem; font-weight: bold; margin-top: 0.2rem; }
+      .daughter-stage { font-size: 0.75rem; opacity: 0.65; margin-bottom: 0.6rem; }
+      .mood-tag {
+        font-size: 0.72rem; padding: 0.2rem 0.7rem; border-radius: 999px;
+        background: #fff; border: 1px solid var(--soft); margin-top: 0.3rem;
+      }
+
+      .stats-col { flex: 1; padding: 1rem 1.2rem; display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto; }
+      .stat-row { display: flex; align-items: center; gap: 0.6rem; }
+      .stat-label { width: 56px; font-size: 0.78rem; font-weight: bold; flex-shrink: 0; }
+      .stat-bar-bg { flex: 1; height: 12px; border-radius: 999px; background: #f0dcc6; overflow: hidden; }
+      .stat-bar-fill { height: 100%; border-radius: 999px; transition: width 0.3s; }
+      .stat-val { width: 30px; font-size: 0.72rem; text-align: right; opacity: 0.7; flex-shrink: 0; }
+
+      .log-box {
+        margin-top: 0.6rem; background: #fffaf3; border: 1px solid var(--soft); border-radius: 10px;
+        padding: 0.6rem 0.8rem; font-size: 0.78rem; line-height: 1.5; min-height: 3.2rem; white-space: pre-wrap;
+      }
+
+      .activity-grid {
+        display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-top: 0.7rem;
+      }
+      .activity-btn {
+        font-family: inherit; text-align: left; padding: 0.55rem 0.7rem; border-radius: 10px;
+        border: 1px solid var(--soft); background: #fff; cursor: pointer; font-size: 0.78rem; color: var(--ink);
+      }
+      .activity-btn:hover { background: #fff1e4; }
+      .activity-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      .activity-btn .act-name { font-weight: bold; display: block; margin-bottom: 0.15rem; }
+      .activity-btn .act-desc { opacity: 0.65; font-size: 0.7rem; }
+
+      .continue-btn {
+        font-family: inherit; margin-top: 0.6rem; align-self: flex-end; padding: 0.5rem 1.2rem;
+        border-radius: 10px; border: none; background: var(--coral); color: #fff; font-weight: bold;
+        font-size: 0.82rem; cursor: pointer;
+      }
+
+      /* ---------- Ending ---------- */
+      .ending-wrap {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        text-align: center; height: 100%; min-height: 560px; padding: 2rem 1.6rem; box-sizing: border-box;
+        background: radial-gradient(circle at 50% 15%, #fff2e2 0%, #ffd9c2 100%);
+      }
+      .ending-wrap canvas { margin-bottom: 0.8rem; }
+      .ending-title { font-size: clamp(1.3rem, 4vw, 1.8rem); color: #c1502c; margin: 0 0 0.6rem; }
+      .ending-text { font-size: 0.88rem; line-height: 1.7; max-width: 480px; margin-bottom: 1rem; white-space: pre-wrap; }
+      .ending-stats { font-size: 0.75rem; opacity: 0.7; margin-bottom: 1.2rem; }
+      .restart-btn {
+        font-family: inherit; padding: 0.6rem 1.6rem; background: var(--coral); color: #fff;
+        font-weight: bold; border: none; border-radius: 10px; font-size: 0.88rem; cursor: pointer;
+      }
+
+      /* ---------- Event modal ---------- */
+      .modal-overlay {
+        position: absolute; inset: 0; background: rgba(60, 40, 20, 0.45);
+        display: flex; align-items: center; justify-content: center; padding: 1.2rem; box-sizing: border-box;
+      }
+      .modal-box {
+        background: #fff; border-radius: 14px; padding: 1.4rem 1.3rem; max-width: 360px;
+        box-shadow: 0 12px 30px rgba(0,0,0,0.25); text-align: center;
+      }
+      .modal-box .modal-title { font-weight: bold; font-size: 0.95rem; margin-bottom: 0.5rem; color: #c1502c; }
+      .modal-box .modal-text { font-size: 0.82rem; line-height: 1.6; margin-bottom: 1rem; white-space: pre-wrap; }
+
+      @media (max-width: 640px) {
+        .body-row { flex-direction: column; }
+        .portrait-col { flex-direction: row; flex: 0 0 auto; border-right: none; border-bottom: 1px solid var(--soft); gap: 0.8rem; }
+        .portrait-col canvas, .portrait-col img.portrait-img { width: 110px; height: 132px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
