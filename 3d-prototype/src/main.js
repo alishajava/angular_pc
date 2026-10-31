@@ -345,7 +345,7 @@ function instantiateCharacterModel(sourceScene, variant = {}) {
   if (variant.skin) recolorParts(model, SKIN_PARTS, variant.skin)
   const box = new THREE.Box3().setFromObject(model)
   const height = box.max.y - box.min.y || 1
-  model.scale.setScalar(MODEL_TARGET_HEIGHT / height)
+  model.scale.setScalar((variant.height || MODEL_TARGET_HEIGHT) / height)
   return model
 }
 
@@ -367,16 +367,21 @@ function attachModelToNpc(npc, model) {
 
 // Five NPCs scattered around the map, each a palette-swapped clone of the
 // one sample model (see recolorParts above) so they read as distinct
-// people without needing separate assets. Two patrol a short back-and-forth
-// path (see updateNpcPatrol); the rest just stand with an idle sway. 'arin'
-// and 'eunho' double as the delivery quest's giver/target (see updateQuest).
+// people without needing separate assets. Every palette group (hair,
+// shirt, shorts, shoes, skin) is given its own value per NPC, plus a
+// height variation, specifically so no two land on the same silhouette +
+// colors even at a glance - coloring only 2-3 of the groups left them
+// reading as near-identical recolors of each other. Two patrol a short
+// back-and-forth path (see updateNpcPatrol); the rest just stand with an
+// idle sway. 'arin' doubles as the delivery quest's giver (see
+// updateNpcGreetings - any of the others can be that quest's target).
 const NPC_WALK_SPEED = 1.6
 const NPC_DEFS = [
-  { id: 'arin', name: '아린', primitiveColor: 0xd1553f, pos: [4, -3], rotY: Math.PI * 0.6, variant: {}, patrol: { axis: 'z', half: 2.5 } },
-  { id: 'bomi', name: '보미', primitiveColor: 0x55b86a, pos: [-4, 9], rotY: -Math.PI * 0.3, variant: { hair: '#6b4226', shirt: '#55b86a', shorts: '#2f2f2f' } },
-  { id: 'chanho', name: '찬호', primitiveColor: 0x4477cc, pos: [10, 10], rotY: Math.PI * 0.9, variant: { hair: '#2b2320', shirt: '#4477cc', shorts: '#1f1f1f' } },
-  { id: 'dain', name: '다인', primitiveColor: 0xe0a93f, pos: [-6, -12], rotY: -Math.PI * 0.5, variant: { hair: '#9c3b2e', shirt: '#e0a93f', shorts: '#3a2e20' }, patrol: { axis: 'z', half: 2.5 } },
-  { id: 'eunho', name: '은호', primitiveColor: 0x9c6bd6, pos: [18, -2], rotY: Math.PI * 0.2, variant: { hair: '#45324f', shirt: '#9c6bd6', shorts: '#2f2f3a' } },
+  { id: 'arin', name: '아린', primitiveColor: 0xd1553f, pos: [4, -3], rotY: Math.PI * 0.6, variant: { hair: '#45324f', shirt: '#79b8da', shorts: '#314a79', shoes: '#202437', skin: '#f5c5a6', height: 1.85 }, patrol: { axis: 'z', half: 2.5 } },
+  { id: 'bomi', name: '보미', primitiveColor: 0x55b86a, pos: [-4, 9], rotY: -Math.PI * 0.3, variant: { hair: '#6b4226', shirt: '#55b86a', shorts: '#2f2f2f', shoes: '#3a2e20', skin: '#e8b48f', height: 1.78 } },
+  { id: 'chanho', name: '찬호', primitiveColor: 0x4477cc, pos: [10, 10], rotY: Math.PI * 0.9, variant: { hair: '#2b2320', shirt: '#4477cc', shorts: '#1f1f1f', shoes: '#c0392b', skin: '#f5c5a6', height: 1.93 } },
+  { id: 'dain', name: '다인', primitiveColor: 0xe0a93f, pos: [-6, -12], rotY: -Math.PI * 0.5, variant: { hair: '#9c3b2e', shirt: '#e0a93f', shorts: '#3a2e20', shoes: '#e8d9b5', skin: '#d99a76', height: 1.7 }, patrol: { axis: 'z', half: 2.5 } },
+  { id: 'eunho', name: '은호', primitiveColor: 0x9c6bd6, pos: [18, -2], rotY: Math.PI * 0.2, variant: { hair: '#1f3a52', shirt: '#9c6bd6', shorts: '#2f2f3a', shoes: '#4a7a4a', skin: '#c98a63', height: 1.88 } },
 ]
 
 const npcs = NPC_DEFS.map((def, i) => {
@@ -979,15 +984,31 @@ function speak(text) {
   window.speechSynthesis.speak(utter)
 }
 
-// A simple repeatable fetch quest: approach the giver (arin) while no
-// quest is active to get asked to carry something to the target (eunho),
-// clear across the map; approach the target while it's active to complete
-// it and reopen the loop. Piggybacks on the same greeted edge-trigger as
-// the regular hello below, so it fires once per approach rather than every
-// frame spent standing in GREET_RADIUS.
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)]
+}
+
+// A repeatable fetch quest: approach the giver (arin) while no quest is
+// active to get asked to carry an item to a random other NPC, clear across
+// the map; approach that NPC while it's active to complete it and reopen
+// the loop. The target, item, and phrasing are all re-rolled each time
+// (excluding whoever was just the target, so two deliveries in a row never
+// send the player to the same place) rather than a single fixed line -
+// otherwise every single offer and every single thank-you reads as the
+// exact same two sentences on repeat, which got old fast. Piggybacks on
+// the same greeted edge-trigger as the regular hello below, so it fires
+// once per approach rather than every frame spent standing in GREET_RADIUS.
 const QUEST_GIVER_ID = 'arin'
-const QUEST_TARGET_ID = 'eunho'
+const QUEST_ITEMS = ['책', '편지', '빵', '우산', '화분', '열쇠']
+const QUEST_OFFER_LINES = [
+  (target, item) => `저 멀리 ${target}에게 전해줄 ${item}이(가) 있어요. 가져다 줄래요?`,
+  (target, item) => `이 ${item} 좀 ${target}한테 갖다 줄 수 있어요?`,
+  (target, item) => `${target}가 ${item}을(를) 기다리고 있대요. 부탁해도 될까요?`,
+  (target, item) => `미안한데 ${item} 하나만 ${target}에게 전달해 줄래요?`,
+]
+const QUEST_DONE_LINES = ['고마워요! 덕분에 살았어요.', '오, 드디어 왔네요! 고마워요.', '와, 정말 감사해요!', '이걸 기다렸어요. 고마워요!']
 let questState = 'none' // 'none' | 'active'
+let questTargetId = null
 
 function npcById(id) {
   return npcs.find((n) => n.id === id)
@@ -1018,13 +1039,19 @@ function updateNpcGreetings() {
     if (near && !npc.greeted) {
       npc.greeted = true
       if (npc.id === QUEST_GIVER_ID && questState === 'none') {
+        const candidates = npcs.filter((n) => n.id !== QUEST_GIVER_ID && n.id !== questTargetId)
+        const target = pick(candidates)
+        const item = pick(QUEST_ITEMS)
         questState = 'active'
-        const target = npcById(QUEST_TARGET_ID)
-        speak(`${npc.name}: 저 멀리 ${target.name}에게 전해줄 물건이 있어요. 가져다 줄래요?`)
-        setQuestBanner(`퀘스트: ${target.name}에게 물건 전달하기`)
-      } else if (npc.id === QUEST_TARGET_ID && questState === 'active') {
+        questTargetId = target.id
+        speak(`${npc.name}: ${pick(QUEST_OFFER_LINES)(target.name, item)}`)
+        setQuestBanner(`퀘스트: ${target.name}에게 ${item} 전달하기`)
+      } else if (npc.id === questTargetId && questState === 'active') {
         questState = 'none'
-        speak(`${npc.name}: 고마워요! 덕분에 살았어요.`)
+        // questTargetId is deliberately left set (not cleared to null) -
+        // the next offer's candidate filter excludes it so two deliveries
+        // in a row never send the player back to the same NPC.
+        speak(`${npc.name}: ${pick(QUEST_DONE_LINES)}`)
         setQuestBanner('퀘스트 완료! 다시 아린에게 가보세요.', 5000)
       } else {
         speak('안녕?')
