@@ -765,6 +765,7 @@ const NPC_BOB_HEIGHT = 0.05
 function updateNpcs(dt) {
   npcTime += dt
   for (const npc of npcs) {
+    if (npc.hit) continue
     if (npc.walking) {
       const swing = Math.sin(npcTime * NPC_WALK_RATE)
       npc.armL.rotation.x = swing * NPC_ARM_SWING
@@ -801,7 +802,7 @@ function updateNpcs(dt) {
 function updateNpcPatrol(dt) {
   for (const npc of npcs) {
     const patrol = npc.patrol
-    if (!patrol || npc.dodging) continue
+    if (!patrol || npc.dodging || npc.hit) continue
     if (npc.greeted) {
       npc.walking = false
       continue
@@ -844,6 +845,7 @@ function updateNpcDodge(dt) {
 
   for (const npc of npcs) {
     if (npc.dodgeCooldown > 0) npc.dodgeCooldown -= dt
+    if (npc.hit) continue
 
     if (npc.dodging) {
       const d = npc.dodging
@@ -873,6 +875,97 @@ function updateNpcDodge(dt) {
     const sign = dx * rightX + dz * rightZ >= 0 ? 1 : -1
     npc.dodging = { timer: NPC_DODGE_DURATION, dir: { x: rightX * sign, z: rightZ * sign } }
     npc.walking = true
+  }
+}
+
+// If the dodge above didn't clear in time (or never got the chance to -
+// hit detection runs regardless of whether an npc was mid-dodge), an actual
+// overlap at real speed knocks the NPC down instead of the car just
+// quietly shoving through them: a short knockback slide away from the
+// impact, a tip onto the ground (rotating the whole group around its own
+// feet - crude as a fall, but reads fine at this scale), a beat lying
+// there, then back up. Limb rotations are reset once on impact so they
+// don't hold a mid-stride walk-cycle pose while lying down.
+const HIT_SPEED_THRESHOLD = 2
+const HIT_KNOCKBACK_SPEED = 6
+const HIT_KNOCKBACK_FRICTION = 10
+const HIT_FALL_DURATION = 0.3
+const HIT_GROUND_DURATION = 1.6
+const HIT_RISE_DURATION = 0.35
+
+function resetNpcLimbPose(npc) {
+  npc.armL.rotation.x = 0
+  npc.armR.rotation.x = 0
+  npc.legL.hip.rotation.x = 0
+  npc.legR.hip.rotation.x = 0
+  if (npc.modelRig) {
+    npc.modelRig.armL.rotation.x = 0
+    npc.modelRig.armR.rotation.x = 0
+    npc.modelRig.legL.rotation.x = 0
+    npc.modelRig.legR.rotation.x = 0
+    npc.modelRig.root.position.y = 0
+  }
+}
+
+// Split from the animation below on purpose: this only runs while driving,
+// right after updateCar() moves the car and before resolveNpcCollisions
+// corrects that position back out - see the call site for why the ordering
+// matters. The knockback/fall/rise animation itself has to keep running
+// every frame regardless of whether the player is still in the car (they
+// might hop out mid-animation), so it's a separate function called
+// unconditionally.
+function triggerNpcHits() {
+  if (!driving || Math.abs(carSpeed) <= HIT_SPEED_THRESHOLD) return
+  for (const npc of npcs) {
+    if (npc.hit) continue
+    const dx = npc.group.position.x - car.group.position.x
+    const dz = npc.group.position.z - car.group.position.z
+    const dist = Math.hypot(dx, dz)
+    if (dist >= CAR_RADIUS + NPC_RADIUS) continue
+
+    npc.dodging = null
+    const [nx, nz] = dist > 0.0001 ? [dx / dist, dz / dist] : [0, 1]
+    npc.group.rotation.y = Math.atan2(nx, nz)
+    npc.hit = { phase: 'fall', t: 0, vx: nx * HIT_KNOCKBACK_SPEED, vz: nz * HIT_KNOCKBACK_SPEED }
+    resetNpcLimbPose(npc)
+  }
+}
+
+function updateNpcHitAnimation(dt) {
+  for (const npc of npcs) {
+    const h = npc.hit
+    if (!h) continue
+    h.t += dt
+
+    const speed = Math.hypot(h.vx, h.vz)
+    if (speed > 0.01) {
+      npc.group.position.x += h.vx * dt
+      npc.group.position.z += h.vz * dt
+      const decay = Math.max(0, speed - HIT_KNOCKBACK_FRICTION * dt) / speed
+      h.vx *= decay
+      h.vz *= decay
+    }
+
+    if (h.phase === 'fall') {
+      const t = Math.min(1, h.t / HIT_FALL_DURATION)
+      npc.group.rotation.x = -t * (Math.PI / 2)
+      if (t >= 1) {
+        h.phase = 'ground'
+        h.t = 0
+      }
+    } else if (h.phase === 'ground') {
+      if (h.t >= HIT_GROUND_DURATION) {
+        h.phase = 'rise'
+        h.t = 0
+      }
+    } else if (h.phase === 'rise') {
+      const t = Math.min(1, h.t / HIT_RISE_DURATION)
+      npc.group.rotation.x = -(1 - t) * (Math.PI / 2)
+      if (t >= 1) {
+        npc.hit = null
+        npc.dodgeCooldown = 0.3
+      }
+    }
   }
 }
 
@@ -1156,6 +1249,14 @@ function loop(time) {
 
   if (driving) {
     updateCar(dt)
+    // Checked against the car's raw post-movement position, before
+    // resolveNpcCollisions below gets a chance to correct it back out to
+    // exactly NPC_RADIUS+CAR_RADIUS apart - which is also triggerNpcHits'
+    // own trigger distance, so checking after that correction would never
+    // see a real overlap at all (every frame the car grazed an NPC, it'd
+    // already have been pushed back to precisely the "just barely not
+    // touching" distance before the hit check ever ran).
+    triggerNpcHits()
     resolveBoxCollisions(car.group.position, CAR_RADIUS)
     resolveWallCollisions(car.group.position, CAR_RADIUS)
     resolveNpcCollisions(car.group.position, CAR_RADIUS)
@@ -1169,6 +1270,7 @@ function loop(time) {
     updateVertical(dt)
     updateNpcGreetings()
   }
+  updateNpcHitAnimation(dt)
   updateNpcPatrol(dt)
   updateNpcs(dt)
   updateHint()
