@@ -14,11 +14,100 @@ renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 document.body.appendChild(renderer.domElement)
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x6b8caf, 1.4))
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x6b8caf, 1.4)
+scene.add(hemiLight)
 const sun = new THREE.DirectionalLight(0xffffff, 1.8)
 sun.position.set(10, 20, 10)
 scene.add(sun)
-scene.add(new THREE.AmbientLight(0xffffff, 0.4))
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.4)
+scene.add(ambientLight)
+
+// A small flat-shaded disc standing in for the sun/moon - not physically
+// placed relative to the directional light's actual falloff (there isn't
+// any at this scale), just parked far along the same direction so the sky
+// has something to visibly cross as the day cycles. `fog: false` keeps it
+// fully bright at the horizon instead of fading into the sky color, which
+// is what actually sells "that's the light source" rather than a blob.
+const sunMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(5, 16, 16),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }),
+)
+scene.add(sunMesh)
+const moonMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(3.5, 16, 16),
+  new THREE.MeshBasicMaterial({ color: 0xcdd6e8, fog: false }),
+)
+scene.add(moonMesh)
+
+// A full day/night cycle every DAY_LENGTH seconds - sky/fog color, the sun's
+// color+intensity+position, and the ambient/hemisphere fill lights all
+// interpolate between a handful of keyframes across dayTime (0..1, where 0.5
+// is noon). Keeping fill-light keyframes alongside the sun's own means dusk
+// and dawn warm the whole scene's shadows instead of just the direct light.
+const DAY_LENGTH = 180
+let dayTime = 0.28
+const SKY_KEYFRAMES = [
+  { t: 0.0, sky: 0x0a1020, sun: 0x8ea9ff, sunI: 0.1, hemiI: 0.35, hemiGround: 0x0c1830, ambI: 0.08 },
+  { t: 0.22, sky: 0xffb37a, sun: 0xffd9a0, sunI: 1.1, hemiI: 0.9, hemiGround: 0x5a4030, ambI: 0.25 },
+  { t: 0.5, sky: 0x9fd4f0, sun: 0xffffff, sunI: 1.8, hemiI: 1.4, hemiGround: 0x6b8caf, ambI: 0.4 },
+  { t: 0.78, sky: 0xff7e4d, sun: 0xffb37a, sunI: 1.0, hemiI: 0.9, hemiGround: 0x5a3020, ambI: 0.25 },
+  { t: 1.0, sky: 0x0a1020, sun: 0x8ea9ff, sunI: 0.1, hemiI: 0.35, hemiGround: 0x0c1830, ambI: 0.08 },
+]
+// THREE.Color.lerp() interpolates in the renderer's linear working color
+// space, not the sRGB space these hex values are written in. For a lerp
+// between a near-black keyframe (night) and a bright one (dawn/dusk), that
+// difference isn't cosmetic: dark sRGB values map to tiny linear values, so
+// even a 10% linear-space blend toward the bright color overshoots into a
+// muddy, desaturated brown rather than a subtle tint. Lerping the raw sRGB
+// byte components ourselves and only converting to a THREE.Color at the end
+// (via setHex, a single sRGB->linear conversion for correct rendering)
+// keeps the perceived color changing smoothly across the whole cycle.
+function lerpHex(hexA, hexB, t) {
+  const ar = (hexA >> 16) & 255, ag = (hexA >> 8) & 255, ab = hexA & 255
+  const br = (hexB >> 16) & 255, bg = (hexB >> 8) & 255, bb = hexB & 255
+  const r = Math.round(ar + (br - ar) * t)
+  const g = Math.round(ag + (bg - ag) * t)
+  const b = Math.round(ab + (bb - ab) * t)
+  return (r << 16) | (g << 8) | b
+}
+
+function updateDayNight(dt) {
+  dayTime = (dayTime + dt / DAY_LENGTH) % 1
+
+  let kf0 = SKY_KEYFRAMES[0]
+  let kf1 = SKY_KEYFRAMES[SKY_KEYFRAMES.length - 1]
+  for (let i = 0; i < SKY_KEYFRAMES.length - 1; i++) {
+    if (dayTime >= SKY_KEYFRAMES[i].t && dayTime <= SKY_KEYFRAMES[i + 1].t) {
+      kf0 = SKY_KEYFRAMES[i]
+      kf1 = SKY_KEYFRAMES[i + 1]
+      break
+    }
+  }
+  const localT = (dayTime - kf0.t) / (kf1.t - kf0.t || 1)
+
+  const skyHex = lerpHex(kf0.sky, kf1.sky, localT)
+  scene.background.setHex(skyHex)
+  scene.fog.color.setHex(skyHex)
+
+  const sunHex = lerpHex(kf0.sun, kf1.sun, localT)
+  sun.color.setHex(sunHex)
+  sun.intensity = THREE.MathUtils.lerp(kf0.sunI, kf1.sunI, localT)
+  hemiLight.intensity = THREE.MathUtils.lerp(kf0.hemiI, kf1.hemiI, localT)
+  hemiLight.groundColor.setHex(lerpHex(kf0.hemiGround, kf1.hemiGround, localT))
+  ambientLight.intensity = THREE.MathUtils.lerp(kf0.ambI, kf1.ambI, localT)
+
+  const angle = dayTime * Math.PI * 2 - Math.PI / 2
+  const sunDist = 60
+  sun.position.set(Math.cos(angle) * sunDist, Math.max(4, Math.sin(angle) * sunDist), 15)
+
+  const skyDist = 150
+  sunMesh.position.set(Math.cos(angle) * skyDist, Math.sin(angle) * skyDist, 40)
+  sunMesh.material.color.setHex(sunHex)
+  sunMesh.visible = Math.sin(angle) > -0.15
+  const moonAngle = angle + Math.PI
+  moonMesh.position.set(Math.cos(moonAngle) * skyDist, Math.sin(moonAngle) * skyDist, 40)
+  moonMesh.visible = Math.sin(moonAngle) > -0.15
+}
 
 // Ground: a big flat plane plus a grid overlay so movement has a visual reference.
 const GROUND_SIZE = 100
@@ -189,31 +278,6 @@ function createCharacter(outfitColor) {
 // the rest of this file already addresses them that way.
 const { group: player, armL, armR, legL, legR } = createCharacter(0x3f7fd1)
 
-// Two NPCs standing around, with a gentle idle sway (see updateNpcs) so
-// the world doesn't feel frozen when the player isn't near them.
-const npcs = [
-  { ...createCharacter(0xd1553f), phase: 0, greeted: false },
-  { ...createCharacter(0x55b86a), phase: 2.1, greeted: false },
-]
-npcs[0].group.position.set(4, 0, -3)
-npcs[0].group.rotation.y = Math.PI * 0.6
-npcs[1].group.position.set(-4, 0, 9)
-npcs[1].group.rotation.y = -Math.PI * 0.3
-
-// npc[0] patrols back and forth near its spawn point so it visibly walks
-// around rather than just standing still - paused while it's mid-greeting
-// with the player (see updateNpcPatrol).
-const NPC_WALK_SPEED = 1.6
-const NPC_PATROL_HALF = 2.5
-{
-  const spawn = { x: npcs[0].group.position.x, z: npcs[0].group.position.z }
-  npcs[0].patrol = {
-    from: { x: spawn.x, z: spawn.z - NPC_PATROL_HALF },
-    to: { x: spawn.x, z: spawn.z + NPC_PATROL_HALF },
-    goingTo: true,
-  }
-}
-
 // Splits a loaded model's named body-part mesh off into its own pivot Group,
 // positioned at that part's own top edge (shoulder for an arm, hip for a
 // leg) rather than the model's origin, so rotating the pivot swings the
@@ -301,12 +365,38 @@ function attachModelToNpc(npc, model) {
   }
 }
 
+// Five NPCs scattered around the map, each a palette-swapped clone of the
+// one sample model (see recolorParts above) so they read as distinct
+// people without needing separate assets. Two patrol a short back-and-forth
+// path (see updateNpcPatrol); the rest just stand with an idle sway. 'arin'
+// and 'eunho' double as the delivery quest's giver/target (see updateQuest).
+const NPC_WALK_SPEED = 1.6
+const NPC_DEFS = [
+  { id: 'arin', name: '아린', primitiveColor: 0xd1553f, pos: [4, -3], rotY: Math.PI * 0.6, variant: {}, patrol: { axis: 'z', half: 2.5 } },
+  { id: 'bomi', name: '보미', primitiveColor: 0x55b86a, pos: [-4, 9], rotY: -Math.PI * 0.3, variant: { hair: '#6b4226', shirt: '#55b86a', shorts: '#2f2f2f' } },
+  { id: 'chanho', name: '찬호', primitiveColor: 0x4477cc, pos: [10, 10], rotY: Math.PI * 0.9, variant: { hair: '#2b2320', shirt: '#4477cc', shorts: '#1f1f1f' } },
+  { id: 'dain', name: '다인', primitiveColor: 0xe0a93f, pos: [-6, -12], rotY: -Math.PI * 0.5, variant: { hair: '#9c3b2e', shirt: '#e0a93f', shorts: '#3a2e20' }, patrol: { axis: 'z', half: 2.5 } },
+  { id: 'eunho', name: '은호', primitiveColor: 0x9c6bd6, pos: [18, -2], rotY: Math.PI * 0.2, variant: { hair: '#45324f', shirt: '#9c6bd6', shorts: '#2f2f3a' } },
+]
+
+const npcs = NPC_DEFS.map((def, i) => {
+  const npc = { ...createCharacter(def.primitiveColor), phase: i * 1.7, greeted: false, id: def.id, name: def.name }
+  npc.group.position.set(def.pos[0], 0, def.pos[1])
+  npc.group.rotation.y = def.rotY
+  if (def.patrol) {
+    const half = def.patrol.half
+    npc.patrol =
+      def.patrol.axis === 'x'
+        ? { from: { x: def.pos[0] - half, z: def.pos[1] }, to: { x: def.pos[0] + half, z: def.pos[1] }, goingTo: true }
+        : { from: { x: def.pos[0], z: def.pos[1] - half }, to: { x: def.pos[0], z: def.pos[1] + half }, goingTo: true }
+  }
+  return npc
+})
+
 new GLTFLoader().load(`${import.meta.env.BASE_URL}models/character.glb`, (gltf) => {
-  attachModelToNpc(npcs[0], instantiateCharacterModel(gltf.scene))
-  attachModelToNpc(
-    npcs[1],
-    instantiateCharacterModel(gltf.scene, { hair: '#6b4226', shirt: '#55b86a', shorts: '#2f2f2f' }),
-  )
+  NPC_DEFS.forEach((def, i) => {
+    attachModelToNpc(npcs[i], instantiateCharacterModel(gltf.scene, def.variant))
+  })
 })
 
 // A drivable car: a body + cabin + 4 wheels. Each wheel is a tilted pivot
@@ -654,30 +744,32 @@ function updateNpcs(dt) {
   }
 }
 
-// Moves npc[0] back and forth between its patrol endpoints, facing the
-// direction it's walking - paused while it's mid-greeting (see
+// Moves every patrolling NPC back and forth between its patrol endpoints,
+// facing the direction it's walking - paused while it's mid-greeting (see
 // updateNpcGreetings) so it doesn't wander off mid-conversation.
 function updateNpcPatrol(dt) {
-  const npc = npcs[0]
-  const patrol = npc.patrol
-  if (!patrol || npc.greeted) {
-    npc.walking = false
-    return
+  for (const npc of npcs) {
+    const patrol = npc.patrol
+    if (!patrol) continue
+    if (npc.greeted) {
+      npc.walking = false
+      continue
+    }
+    const dest = patrol.goingTo ? patrol.to : patrol.from
+    const dx = dest.x - npc.group.position.x
+    const dz = dest.z - npc.group.position.z
+    const dist = Math.hypot(dx, dz)
+    if (dist < 0.05) {
+      patrol.goingTo = !patrol.goingTo
+      npc.walking = false
+      continue
+    }
+    npc.walking = true
+    const step = Math.min(dist, NPC_WALK_SPEED * dt)
+    npc.group.position.x += (dx / dist) * step
+    npc.group.position.z += (dz / dist) * step
+    npc.group.rotation.y = Math.atan2(dx, dz)
   }
-  const dest = patrol.goingTo ? patrol.to : patrol.from
-  const dx = dest.x - npc.group.position.x
-  const dz = dest.z - npc.group.position.z
-  const dist = Math.hypot(dx, dz)
-  if (dist < 0.05) {
-    patrol.goingTo = !patrol.goingTo
-    npc.walking = false
-    return
-  }
-  npc.walking = true
-  const step = Math.min(dist, NPC_WALK_SPEED * dt)
-  npc.group.position.x += (dx / dist) * step
-  npc.group.position.z += (dz / dist) * step
-  npc.group.rotation.y = Math.atan2(dx, dz)
 }
 
 // Spoken out loud via the browser's built-in text-to-speech (no voice
@@ -688,6 +780,32 @@ function speak(text) {
   utter.lang = 'ko-KR'
   utter.pitch = 1.05
   window.speechSynthesis.speak(utter)
+}
+
+// A simple repeatable fetch quest: approach the giver (arin) while no
+// quest is active to get asked to carry something to the target (eunho),
+// clear across the map; approach the target while it's active to complete
+// it and reopen the loop. Piggybacks on the same greeted edge-trigger as
+// the regular hello below, so it fires once per approach rather than every
+// frame spent standing in GREET_RADIUS.
+const QUEST_GIVER_ID = 'arin'
+const QUEST_TARGET_ID = 'eunho'
+let questState = 'none' // 'none' | 'active'
+
+function npcById(id) {
+  return npcs.find((n) => n.id === id)
+}
+
+const questBannerEl = document.getElementById('quest-banner')
+function setQuestBanner(text, autoHideMs) {
+  if (!questBannerEl) return
+  questBannerEl.textContent = text
+  questBannerEl.style.opacity = text ? '1' : '0'
+  if (autoHideMs) {
+    setTimeout(() => {
+      if (questBannerEl.textContent === text) questBannerEl.style.opacity = '0'
+    }, autoHideMs)
+  }
 }
 
 // Fires once per approach, like the car's dock/enter prompts: greeted
@@ -701,8 +819,19 @@ function updateNpcGreetings() {
     const dist = Math.hypot(player.position.x - npc.group.position.x, player.position.z - npc.group.position.z)
     const near = dist < GREET_RADIUS
     if (near && !npc.greeted) {
-      speak('안녕?')
       npc.greeted = true
+      if (npc.id === QUEST_GIVER_ID && questState === 'none') {
+        questState = 'active'
+        const target = npcById(QUEST_TARGET_ID)
+        speak(`${npc.name}: 저 멀리 ${target.name}에게 전해줄 물건이 있어요. 가져다 줄래요?`)
+        setQuestBanner(`퀘스트: ${target.name}에게 물건 전달하기`)
+      } else if (npc.id === QUEST_TARGET_ID && questState === 'active') {
+        questState = 'none'
+        speak(`${npc.name}: 고마워요! 덕분에 살았어요.`)
+        setQuestBanner('퀘스트 완료! 다시 아린에게 가보세요.', 5000)
+      } else {
+        speak('안녕?')
+      }
     } else if (!near) {
       npc.greeted = false
     }
@@ -916,6 +1045,8 @@ let lastTime = performance.now()
 function loop(time) {
   const dt = Math.min(0.05, (time - lastTime) / 1000)
   lastTime = time
+
+  updateDayNight(dt)
 
   if (driving) {
     updateCar(dt)
