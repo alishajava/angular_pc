@@ -450,7 +450,7 @@ function createCar() {
   group.add(headlightR)
 
   scene.add(group)
-  return { group, wheels }
+  return { group, wheels, headlightMat }
 }
 
 const CAR_RADIUS = 1.2
@@ -493,11 +493,55 @@ function exitCar() {
   grounded = true
 }
 
+// Synthesized rather than an audio file - a couple of overlapping sawtooth
+// tones with a quick attack/decay envelope reads as a honk close enough for
+// this. AudioContext is created lazily on first use since browsers refuse
+// to start one before a user gesture, and a key press already is one.
+let audioCtx = null
+const HORN_DURATION = 0.35
+function playHorn() {
+  if (!(window.AudioContext || window.webkitAudioContext)) return
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+  const now = audioCtx.currentTime
+  for (const freq of [320, 400]) {
+    const osc = audioCtx.createOscillator()
+    osc.type = 'sawtooth'
+    osc.frequency.value = freq
+    const gain = audioCtx.createGain()
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.02)
+    gain.gain.setValueAtTime(0.22, now + HORN_DURATION - 0.05)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + HORN_DURATION)
+    osc.connect(gain).connect(audioCtx.destination)
+    osc.start(now)
+    osc.stop(now + HORN_DURATION + 0.02)
+  }
+}
+
+// Honking both plays the sound and widens/speeds up the NPC dodge check
+// below (see updateNpcDodge) for HORN_EFFECT_DURATION seconds - a quiet
+// approach only makes NPCs step aside at the last moment, a honk gets
+// their attention from further out. The headlights flash bright white
+// briefly too, as a silent-mode-friendly visual echo of the same beat.
+const HORN_EFFECT_DURATION = 1.4
+let hornActiveUntil = 0
+let headlightFlashUntil = 0
+const HEADLIGHT_NORMAL = 0x554400
+const HEADLIGHT_FLASH = 0xffffff
+
+function honk() {
+  playHorn()
+  const now = performance.now() / 1000
+  hornActiveUntil = now + HORN_EFFECT_DURATION
+  headlightFlashUntil = now + 0.15
+  car.headlightMat.emissive.setHex(HEADLIGHT_FLASH)
+}
+
 const hintEl = document.getElementById('hint')
 const DEFAULT_HINT = hintEl ? hintEl.textContent : ''
 function updateHint() {
   if (!hintEl) return
-  if (driving) hintEl.textContent = 'W/S 가속·후진 · A/D 조향 · E 키로 하차 · V 키로 시점 전환'
+  if (driving) hintEl.textContent = 'W/S 가속·후진 · A/D 조향 · H 키로 경적 · E 키로 하차 · V 키로 시점 전환'
   else if (nearCar()) hintEl.textContent = 'E 키를 눌러 차에 탑승'
   else hintEl.textContent = DEFAULT_HINT
 }
@@ -508,8 +552,15 @@ function updateHint() {
 const heldKeys = new Set()
 const JUMP_KEYS = [' ', 'spacebar']
 const ENTER_KEYS = ['e', 'f']
+const HORN_KEYS = ['h']
 window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase()
+  // Checked before heldKeys.add() below, using that same set as the
+  // repeat-guard - otherwise the browser's own key-repeat would retrigger
+  // the horn (and its sound) every frame the key stays held.
+  if (HORN_KEYS.includes(key) && driving && !heldKeys.has(key)) {
+    honk()
+  }
   heldKeys.add(key)
   if (JUMP_KEYS.includes(key) && !driving && grounded && jumpState === 'none') {
     jumpState = 'windup'
@@ -750,7 +801,7 @@ function updateNpcs(dt) {
 function updateNpcPatrol(dt) {
   for (const npc of npcs) {
     const patrol = npc.patrol
-    if (!patrol) continue
+    if (!patrol || npc.dodging) continue
     if (npc.greeted) {
       npc.walking = false
       continue
@@ -769,6 +820,59 @@ function updateNpcPatrol(dt) {
     npc.group.position.x += (dx / dist) * step
     npc.group.position.z += (dz / dist) * step
     npc.group.rotation.y = Math.atan2(dx, dz)
+  }
+}
+
+// NPCs step out of the oncoming car's way rather than just being a wall
+// it bumps into (resolveNpcCollisions below is still there as a backstop,
+// for a model that hasn't loaded yet or a dodge that doesn't quite clear
+// in time). Sidesteps relative to the car's own heading - using the
+// lateral offset (the component of the NPC's position perpendicular to
+// where the car is pointed) rather than just "away from the car" - so an
+// NPC standing directly in the car's path still has a clear side to jump
+// toward instead of the two vectors cancelling out near zero.
+// Honking (see honk()) widens the radius they notice from and is the
+// difference between a leisurely step aside and a last-second flinch.
+const NPC_DODGE_RADIUS = 3.5
+const NPC_DODGE_RADIUS_HORN = 7
+const NPC_DODGE_SPEED = 5
+const NPC_DODGE_DURATION = 0.5
+const NPC_DODGE_COOLDOWN = 0.6
+
+function updateNpcDodge(dt) {
+  const hornActive = performance.now() / 1000 < hornActiveUntil
+
+  for (const npc of npcs) {
+    if (npc.dodgeCooldown > 0) npc.dodgeCooldown -= dt
+
+    if (npc.dodging) {
+      const d = npc.dodging
+      npc.group.position.x += d.dir.x * NPC_DODGE_SPEED * dt
+      npc.group.position.z += d.dir.z * NPC_DODGE_SPEED * dt
+      npc.group.rotation.y = Math.atan2(d.dir.x, d.dir.z)
+      npc.walking = true
+      d.timer -= dt
+      if (d.timer <= 0) {
+        npc.dodging = null
+        npc.dodgeCooldown = NPC_DODGE_COOLDOWN
+        npc.walking = false
+      }
+      continue
+    }
+
+    if (!driving || Math.abs(carSpeed) < 1 || npc.dodgeCooldown > 0) continue
+
+    const dx = npc.group.position.x - car.group.position.x
+    const dz = npc.group.position.z - car.group.position.z
+    const dist = Math.hypot(dx, dz)
+    if (dist >= (hornActive ? NPC_DODGE_RADIUS_HORN : NPC_DODGE_RADIUS)) continue
+
+    const heading = car.group.rotation.y
+    const rightX = Math.cos(heading)
+    const rightZ = -Math.sin(heading)
+    const sign = dx * rightX + dz * rightZ >= 0 ? 1 : -1
+    npc.dodging = { timer: NPC_DODGE_DURATION, dir: { x: rightX * sign, z: rightZ * sign } }
+    npc.walking = true
   }
 }
 
@@ -1047,6 +1151,8 @@ function loop(time) {
   lastTime = time
 
   updateDayNight(dt)
+  updateNpcDodge(dt)
+  if (performance.now() / 1000 > headlightFlashUntil) car.headlightMat.emissive.setHex(HEADLIGHT_NORMAL)
 
   if (driving) {
     updateCar(dt)
