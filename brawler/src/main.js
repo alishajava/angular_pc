@@ -35,7 +35,27 @@ const ATTACKS = {
   punch: { startup: 0.08, active: 0.08, recovery: 0.14, range: 52, damage: 10, knockback: 36 },
   kick: { startup: 0.14, active: 0.1, recovery: 0.22, range: 60, damage: 16, knockback: 80 },
   ultimate: { startup: 0.15, active: 0.2, recovery: 0.35, range: 150, damage: 35, knockback: 90 },
+  // Not a simple knockback like the others - resolvePlayerThrow launches
+  // the grabbed enemy into its own little gravity arc (see the enemy
+  // 'thrown' state in updateEnemies), so `knockback` here is unused but
+  // kept for shape-consistency with the rest of this table.
+  throw: { startup: 0.12, active: 0.1, recovery: 0.35, range: 46, damage: 20, knockback: 0 },
 }
+
+// A quick burst forward on double-tapping a direction - classic fighting-
+// game "dash" input. Tracked by logical direction (not the exact key) so
+// tapping 'a' then quickly 'arrowleft' still counts; DOUBLE_TAP_WINDOW is
+// generous since this is a beat-em-up, not a frame-perfect fighter.
+const DASH_SPEED = 480
+const DASH_DURATION = 0.18
+const DOUBLE_TAP_WINDOW = 280
+let lastTapTime = { left: -9999, right: -9999 }
+
+// Punch and kick pressed together (within this window, in either order)
+// throws instead - see the keydown handler and canThrowOverride below.
+const THROW_WINDOW = 120
+let lastPunchPress = -9999
+let lastKickPress = -9999
 
 // Fills as the player lands hits (and a bit more when they get hit, so a
 // losing fight still builds toward a comeback). At max, L unleashes a big
@@ -81,6 +101,9 @@ function makePlayer() {
     z: 0,
     vz: 0,
     jumping: false,
+    dashing: false,
+    dashTimer: 0,
+    dashDir: 1,
   }
 }
 
@@ -92,7 +115,7 @@ function makeEnemy(type, x, y) {
     hp: ENEMY_TYPES[type].hp,
     maxHp: ENEMY_TYPES[type].hp,
     facing: -1,
-    state: 'approach', // approach | telegraph | attack | cooldown-is-implicit | hitstun | dead
+    state: 'approach', // approach | telegraph | attack | cooldown-is-implicit | hitstun | thrown | dead
     t: 0,
     cooldownTimer: 0,
     hitstunTimer: 0,
@@ -100,6 +123,7 @@ function makeEnemy(type, x, y) {
     walkPhase: Math.random() * 10,
     deathTimer: 0,
     flashTimer: 0,
+    thrown: null,
   }
 }
 
@@ -115,21 +139,60 @@ function makeInitialState() {
 }
 let state = makeInitialState()
 
+function canAct() {
+  const p = state.player
+  return !p.attack && !p.dashing && p.hitstunTimer <= 0
+}
+// A throw is allowed to cancel the *other* button's attack, but only while
+// that attack is still in its startup window (hasn't dealt damage or
+// committed to recovery yet) - otherwise mashing both buttons during an
+// active hit would let you cancel recovery frames for free.
+function canThrowOverride() {
+  const p = state.player
+  return !p.dashing && p.hitstunTimer <= 0 && (!p.attack || p.attack.phase === 'startup')
+}
+
 const heldKeys = new Set()
 window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase()
+  const isRepeat = heldKeys.has(key)
   heldKeys.add(key)
   if (key === 'r') {
     state = makeInitialState()
     return
   }
   if (state.phase !== 'playing') return
-  if (key === 'j' && !state.player.attack && state.player.hitstunTimer <= 0) startAttack('punch')
-  if (key === 'k' && !state.player.attack && state.player.hitstunTimer <= 0) startAttack('kick')
-  if (key === 'l' && !state.player.attack && state.player.hitstunTimer <= 0 && state.player.gauge >= GAUGE_MAX) {
+
+  if (!isRepeat) {
+    const now = performance.now()
+    if (MOVE_KEYS.left.includes(key)) {
+      if (now - lastTapTime.left < DOUBLE_TAP_WINDOW) startDash(-1)
+      lastTapTime.left = now
+    }
+    if (MOVE_KEYS.right.includes(key)) {
+      if (now - lastTapTime.right < DOUBLE_TAP_WINDOW) startDash(1)
+      lastTapTime.right = now
+    }
+  }
+
+  if (key === 'j') {
+    const now = performance.now()
+    const isThrow = now - lastKickPress <= THROW_WINDOW
+    lastPunchPress = now
+    if (isThrow && canThrowOverride()) startAttack('throw')
+    else if (canAct()) startAttack('punch')
+  }
+  if (key === 'k') {
+    const now = performance.now()
+    const isThrow = now - lastPunchPress <= THROW_WINDOW
+    lastKickPress = now
+    if (isThrow && canThrowOverride()) startAttack('throw')
+    else if (canAct()) startAttack('kick')
+  }
+  if (key === 'l' && canAct() && state.player.gauge >= GAUGE_MAX) {
     startAttack('ultimate')
   }
-  if (key === ' ' && !state.player.jumping && !state.player.attack && state.player.hitstunTimer <= 0) {
+  if (key === ' ' && !state.player.jumping && canAct()) {
     e.preventDefault() // stop the page from scrolling on space
     startJump()
   }
@@ -160,6 +223,15 @@ function startJump() {
   p.vz = JUMP_VELOCITY
 }
 
+function startDash(dir) {
+  const p = state.player
+  if (p.attack || p.hitstunTimer > 0 || p.dashing || p.jumping) return
+  p.dashing = true
+  p.dashTimer = DASH_DURATION
+  p.dashDir = dir
+  p.facing = dir
+}
+
 function playerMaxX() {
   return state.gateX !== null ? state.gateX + canvas.width - 60 : WORLD_WIDTH - 40
 }
@@ -178,6 +250,15 @@ function updatePlayer(dt) {
       p.vz = 0
       p.jumping = false
     }
+  }
+
+  if (p.dashing) {
+    p.dashTimer -= dt
+    p.moving = true
+    p.walkPhase += dt * 20 // fast leg blur, faster than the normal run cycle
+    p.x = clamp(p.x + p.dashDir * DASH_SPEED * dt, 40, playerMaxX())
+    if (p.dashTimer <= 0) p.dashing = false
+    return // skip the hitstun/attack/movement branch below entirely
   }
 
   if (p.hitstunTimer > 0) {
@@ -233,6 +314,7 @@ function updatePlayerAttack(dt) {
 }
 
 function resolvePlayerHit(type) {
+  if (type === 'throw') return resolvePlayerThrow()
   const p = state.player
   const def = ATTACKS[type]
   const omni = type === 'ultimate' // hits all around, not just in front
@@ -248,6 +330,48 @@ function resolvePlayerHit(type) {
     damageEnemy(en, def.damage, Math.sign(dx || p.facing) * def.knockback)
     if (!omni) p.gauge = Math.min(GAUGE_MAX, p.gauge + GAUGE_PER_HIT)
   }
+}
+
+// Grabs the single nearest valid enemy in front (dead or already-thrown
+// enemies can't be grabbed) and launches it into a gravity arc rather than
+// a simple sideways knockback - see the 'thrown' state in updateEnemies for
+// the actual flight physics, and drawEnemySprite for how its height gets
+// rendered as lift, same trick as the player's own jump.
+const THROW_LAUNCH_VZ = 260
+const THROW_LAUNCH_VX = 220
+
+function resolvePlayerThrow() {
+  const p = state.player
+  const def = ATTACKS.throw
+  let best = null
+  let bestDist = Infinity
+  for (const en of state.enemies) {
+    if (en.state === 'dead' || en.state === 'thrown') continue
+    const dx = en.x - p.x
+    const dy = en.y - p.y
+    const inFront = p.facing > 0 ? dx > -15 : dx < 15
+    if (!inFront) continue
+    if (Math.abs(dx) > def.range || Math.abs(dy) > 50) continue
+    const dist = Math.hypot(dx, dy)
+    if (dist < bestDist) {
+      bestDist = dist
+      best = en
+    }
+  }
+  if (!best) return
+
+  const dir = Math.sign(best.x - p.x) || p.facing
+  best.hp -= def.damage
+  best.flashTimer = 0.12
+  best.facing = -dir
+  p.gauge = Math.min(GAUGE_MAX, p.gauge + GAUGE_PER_HIT)
+  if (best.hp <= 0) {
+    best.state = 'dead'
+    best.deathTimer = DEATH_FADE
+    return
+  }
+  best.state = 'thrown'
+  best.thrown = { z: 0, vz: THROW_LAUNCH_VZ, vx: dir * THROW_LAUNCH_VX }
 }
 
 function damageEnemy(en, dmg, knockbackDx) {
@@ -273,6 +397,7 @@ function damagePlayer(dmg, knockbackDx) {
   p.hitstunTimer = HITSTUN_DURATION
   p.flashTimer = 0.15
   p.attack = null
+  p.dashing = false // otherwise next frame's dash branch would run before this stun and ignore it entirely
   p.gauge = Math.min(GAUGE_MAX, p.gauge + GAUGE_PER_HURT)
   p.x = clamp(p.x + knockbackDx, 40, playerMaxX())
   if (p.hp <= 0) state.phase = 'gameover'
@@ -291,6 +416,21 @@ function updateEnemies(dt) {
     if (en.state === 'hitstun') {
       en.hitstunTimer -= dt
       if (en.hitstunTimer <= 0) en.state = 'approach'
+      continue
+    }
+
+    if (en.state === 'thrown') {
+      const th = en.thrown
+      th.vz -= GRAVITY * dt
+      th.z += th.vz * dt
+      en.x = clamp(en.x + th.vx * dt, 40, WORLD_WIDTH - 40)
+      if (th.z <= 0) {
+        th.z = 0
+        en.thrown = null
+        en.state = 'hitstun'
+        en.hitstunTimer = HITSTUN_DURATION * 1.5 // a beat longer than a normal hit - they just landed hard
+        en.t = 0
+      }
       continue
     }
 
@@ -341,7 +481,7 @@ function updateEnemies(dt) {
 // same circle push-out idea used for the 3D prototype's NPCs, just
 // between enemies only (the player can still be surrounded).
 function resolveEnemySeparation() {
-  const alive = state.enemies.filter((e) => e.state !== 'dead')
+  const alive = state.enemies.filter((e) => e.state !== 'dead' && e.state !== 'thrown')
   for (let i = 0; i < alive.length; i++) {
     for (let j = i + 1; j < alive.length; j++) {
       const a = alive[i]
@@ -467,12 +607,16 @@ function drawHumanoid(x, y, opts) {
   const bodyColor = opts.flash ? '#ffffff' : opts.color
   const legSwing = opts.moving ? Math.sin(opts.walkPhase) * 10 : 0
   const kicking = opts.attacking && opts.attackType === 'kick'
-  const punching = opts.attacking && !kicking
+  const throwing = opts.attacking && opts.attackType === 'throw'
+  const punching = opts.attacking && !kicking && !throwing
 
   ctx.fillStyle = '#2a2a2a'
   if (kicking) {
     ctx.fillRect(-10, -26, 7, 26) // back leg planted
     ctx.fillRect(8, -22, 24, 9) // front leg extended into the kick
+  } else if (throwing) {
+    ctx.fillRect(-9, -26, 7, 26) // a braced, wide stance for hauling an opponent around
+    ctx.fillRect(6, -26, 7, 26)
   } else {
     ctx.fillRect(-10, -26 + legSwing * 0.2, 7, 26)
     ctx.fillRect(3, -26 - legSwing * 0.2, 7, 26)
@@ -493,6 +637,9 @@ function drawHumanoid(x, y, opts) {
   } else if (kicking) {
     ctx.fillRect(8, -50, 8, 16) // arms pulled into a guard while the leg does the work
     ctx.fillRect(-16, -50, 8, 16)
+  } else if (throwing) {
+    ctx.fillRect(8, -58, 26, 10) // both arms reaching out wide for the grab
+    ctx.fillRect(-16, -50, 10, 18)
   } else {
     const armSwing = opts.moving ? Math.sin(opts.walkPhase + Math.PI) * 6 : 0
     ctx.fillRect(10, -50 + armSwing * 0.3, 8, 18)
@@ -505,6 +652,22 @@ function drawPlayerSprite() {
   const p = state.player
   const shadowShrink = clamp(1 - p.z / 160, 0.55, 1)
   drawShadow(p.x, p.y, depthScale(p.y) * shadowShrink)
+
+  if (p.dashing) {
+    // Cheap afterimage trail: a few faint copies behind the dash direction,
+    // fading out with distance - no history buffer needed since the dash
+    // moves in a straight line, so a fixed offset per copy is enough.
+    for (let i = 3; i >= 1; i--) {
+      drawHumanoid(p.x - p.dashDir * i * 14, p.y, {
+        color: '#3f7fd1',
+        facing: p.facing,
+        walkPhase: p.walkPhase,
+        moving: true,
+        alpha: 0.12 * (4 - i),
+      })
+    }
+  }
+
   drawHumanoid(p.x, p.y, {
     color: '#3f7fd1',
     facing: p.facing,
@@ -529,7 +692,9 @@ function drawBossHealthBar(en) {
 function drawEnemySprite(en) {
   const stats = ENEMY_TYPES[en.type]
   const alpha = en.state === 'dead' ? Math.max(0, en.deathTimer / DEATH_FADE) : 1
-  drawShadow(en.x, en.y, depthScale(en.y))
+  const liftZ = en.thrown ? en.thrown.z : 0
+  const shadowShrink = clamp(1 - liftZ / 160, 0.55, 1)
+  drawShadow(en.x, en.y, depthScale(en.y) * shadowShrink)
   drawHumanoid(en.x, en.y, {
     color: en.state === 'telegraph' ? '#ffcf4d' : stats.color,
     facing: en.facing,
@@ -538,6 +703,7 @@ function drawEnemySprite(en) {
     attacking: en.state === 'attack',
     flash: en.flashTimer > 0,
     alpha,
+    lift: liftZ,
   })
   if (en.type === 'boss' && en.state !== 'dead') drawBossHealthBar(en)
 }
