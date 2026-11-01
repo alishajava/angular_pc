@@ -18,19 +18,26 @@ function renderPortrait(ch, mood) {
 }
 
 // --- Field map (동급생-style free movement hub) ------------------------
-// Replaces the old static day-select card list: walk up to a character's
-// usual spot and press space (or click them) to spend the day together.
+// A town of fixed locations, not fixed *people* - who's where reshuffles
+// every day (see assignDailyPlacement), so finding someone today means
+// actually walking the town rather than beelining a memorized spot. Also
+// unlike the old version, getting close enough is the whole interaction:
+// no button press, since "우연히 만나다" (running into someone by chance)
+// is the point - see updateField.
 
-const FIELD_W = 760
-const FIELD_H = 570
-const FIELD_SPOTS = {
-  daeun: { x: 150, y: 150, label: '전시 공간' },
-  seojun: { x: 610, y: 150, label: '서가' },
-  eunseo: { x: 150, y: 430, label: '독서 코너' },
-  ria: { x: 610, y: 430, label: '소형 무대' },
-  haram: { x: 380, y: 150, label: '스타일링 부스' },
-}
-const PLAYER_START = { x: 380, y: 290 }
+const FIELD_W = 1000
+const FIELD_H = 750
+const LOCATION_SPOTS = [
+  { id: 'gallery', x: 150, y: 150, label: '전시 공간' },
+  { id: 'square', x: 500, y: 110, label: '정문 광장' },
+  { id: 'library', x: 850, y: 150, label: '서가' },
+  { id: 'cafe', x: 150, y: 400, label: '카페' },
+  { id: 'park', x: 850, y: 400, label: '공원' },
+  { id: 'reading', x: 150, y: 640, label: '독서 코너' },
+  { id: 'styling', x: 500, y: 680, label: '스타일링 부스' },
+  { id: 'stage', x: 850, y: 640, label: '소형 무대' },
+]
+const PLAYER_START = { x: 500, y: 400 }
 const PLAYER_SPEED = 160
 const INTERACT_RANGE = 48
 const SPRITE_R = 26
@@ -42,34 +49,34 @@ for (const id of Object.keys(PORTRAIT_IMAGES)) {
   charImages[id] = img
 }
 
-const field = { playerX: PLAYER_START.x, playerY: PLAYER_START.y, lastTime: 0 }
+const field = { playerX: PLAYER_START.x, playerY: PLAYER_START.y, lastTime: 0, placement: {} }
 const heldKeys = new Set()
-window.addEventListener('keydown', (e) => {
-  const key = e.key.toLowerCase()
-  heldKeys.add(key)
-  if (state.screen === 'day' && (key === ' ' || key === 'enter')) {
-    e.preventDefault()
-    tryInteract()
-  }
-})
+window.addEventListener('keydown', (e) => heldKeys.add(e.key.toLowerCase()))
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
 function held(names) {
   return names.some((k) => heldKeys.has(k))
 }
 
-function nearbyCharId() {
-  for (const id of Object.keys(FIELD_SPOTS)) {
-    const spot = FIELD_SPOTS[id]
-    if (Math.hypot(field.playerX - spot.x, field.playerY - spot.y) < INTERACT_RANGE) return id
+// More location slots than characters (8 vs however many are left to
+// pursue), so some are simply empty on a given day - that miss is part of
+// the point, not a bug to fix.
+function assignDailyPlacement() {
+  const spots = [...LOCATION_SPOTS].sort(() => Math.random() - 0.5)
+  const charIds = state.chars.map((c) => c.id).sort(() => Math.random() - 0.5)
+  const placement = {}
+  charIds.forEach((id, i) => {
+    if (spots[i]) placement[spots[i].id] = id
+  })
+  field.placement = placement
+}
+
+function nearbyOccupiedSpot() {
+  for (const spot of LOCATION_SPOTS) {
+    const charId = field.placement[spot.id]
+    if (!charId) continue
+    if (Math.hypot(field.playerX - spot.x, field.playerY - spot.y) < INTERACT_RANGE) return { spot, charId }
   }
   return null
-}
-function tryInteract() {
-  const id = nearbyCharId()
-  if (!id) return
-  state.activeCharId = id
-  state.screen = 'scene'
-  render()
 }
 
 function updateField(dt) {
@@ -79,12 +86,20 @@ function updateField(dt) {
   if (held(['d', 'arrowright'])) dx += 1
   if (held(['w', 'arrowup'])) dy -= 1
   if (held(['s', 'arrowdown'])) dy += 1
-  if (dx === 0 && dy === 0) return
-  const len = Math.hypot(dx, dy)
-  dx /= len
-  dy /= len
-  field.playerX = Math.max(26, Math.min(FIELD_W - 26, field.playerX + dx * PLAYER_SPEED * dt))
-  field.playerY = Math.max(54, Math.min(FIELD_H - 26, field.playerY + dy * PLAYER_SPEED * dt))
+  if (dx !== 0 || dy !== 0) {
+    const len = Math.hypot(dx, dy)
+    dx /= len
+    dy /= len
+    field.playerX = Math.max(26, Math.min(FIELD_W - 26, field.playerX + dx * PLAYER_SPEED * dt))
+    field.playerY = Math.max(54, Math.min(FIELD_H - 26, field.playerY + dy * PLAYER_SPEED * dt))
+  }
+
+  const hit = nearbyOccupiedSpot()
+  if (hit) {
+    state.activeCharId = hit.charId
+    state.screen = 'scene'
+    render()
+  }
 }
 
 function drawCharSprite(ctx, id, spot) {
@@ -119,31 +134,43 @@ function drawField(ctx) {
   ctx.fillRect(0, 0, FIELD_W, FIELD_H)
   ctx.strokeStyle = 'rgba(255,255,255,0.04)'
   ctx.lineWidth = 4
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 9; i++) {
     ctx.beginPath()
     ctx.moveTo(0, 90 + i * 85)
     ctx.lineTo(FIELD_W, 90 + i * 85)
     ctx.stroke()
   }
 
-  for (const id of Object.keys(FIELD_SPOTS)) {
-    const spot = FIELD_SPOTS[id]
-    const ch = state.chars.find((c) => c.id === id)
+  for (const spot of LOCATION_SPOTS) {
+    const charId = field.placement[spot.id]
     ctx.fillStyle = 'rgba(255,255,255,0.05)'
     ctx.beginPath()
     ctx.arc(spot.x, spot.y, 58, 0, Math.PI * 2)
     ctx.fill()
-    drawCharSprite(ctx, id, spot)
     ctx.textAlign = 'center'
-    ctx.fillStyle = '#fff'
-    ctx.font = 'bold 12px sans-serif'
-    ctx.fillText(ch.name, spot.x, spot.y - 38)
     ctx.font = '10px sans-serif'
-    ctx.fillStyle = 'rgba(255,255,255,0.55)'
+    ctx.fillStyle = 'rgba(255,255,255,0.4)'
     ctx.fillText(spot.label, spot.x, spot.y + 48)
-    ctx.fillStyle = '#ff8fab'
-    ctx.font = '11px sans-serif'
-    ctx.fillText(heartsFor(ch.affection), spot.x, spot.y + 62)
+
+    if (charId) {
+      const ch = state.chars.find((c) => c.id === charId)
+      drawCharSprite(ctx, charId, spot)
+      ctx.fillStyle = '#fff'
+      ctx.font = 'bold 12px sans-serif'
+      ctx.fillText(ch.name, spot.x, spot.y - 38)
+      ctx.fillStyle = '#ff8fab'
+      ctx.font = '11px sans-serif'
+      ctx.fillText(heartsFor(ch.affection), spot.x, spot.y + 62)
+    } else {
+      // Still a place, just nobody there today - a dim empty ring rather
+      // than erasing the location entirely, so an empty spot still reads
+      // as "I checked here" rather than "this isn't a real location".
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(spot.x, spot.y, SPRITE_R, 0, Math.PI * 2)
+      ctx.stroke()
+    }
   }
 
   // player
@@ -162,21 +189,6 @@ function drawField(ctx) {
   ctx.fill()
   ctx.restore()
 
-  const nearId = nearbyCharId()
-  if (nearId) {
-    const ch = state.chars.find((c) => c.id === nearId)
-    const label = `[스페이스] ${ch.name}와(과) 대화하기`
-    ctx.font = 'bold 12px sans-serif'
-    ctx.textAlign = 'center'
-    const w = ctx.measureText(label).width + 18
-    ctx.fillStyle = 'rgba(0,0,0,0.72)'
-    ctx.beginPath()
-    ctx.roundRect(field.playerX - w / 2, field.playerY - 48, w, 22, 6)
-    ctx.fill()
-    ctx.fillStyle = '#fff'
-    ctx.fillText(label, field.playerX, field.playerY - 32)
-  }
-
   ctx.textAlign = 'left'
   ctx.fillStyle = 'rgba(0,0,0,0.4)'
   ctx.fillRect(0, 0, FIELD_W, 34)
@@ -186,7 +198,7 @@ function drawField(ctx) {
   ctx.textAlign = 'right'
   ctx.font = '11px sans-serif'
   ctx.fillStyle = 'rgba(255,255,255,0.75)'
-  ctx.fillText('WASD/방향키 이동 · 스페이스 또는 클릭으로 대화', FIELD_W - 12, 22)
+  ctx.fillText('WASD/방향키 이동 · 가까이 다가가면 우연히 마주쳐요', FIELD_W - 12, 22)
 }
 
 function fieldLoop(time) {
@@ -208,10 +220,11 @@ function setupFieldCanvas() {
     const scaleY = canvas.height / rect.height
     const mx = (e.clientX - rect.left) * scaleX
     const my = (e.clientY - rect.top) * scaleY
-    for (const id of Object.keys(FIELD_SPOTS)) {
-      const spot = FIELD_SPOTS[id]
+    for (const spot of LOCATION_SPOTS) {
+      const charId = field.placement[spot.id]
+      if (!charId) continue
       if (Math.hypot(mx - spot.x, my - spot.y) < SPRITE_R + 8) {
-        state.activeCharId = id
+        state.activeCharId = charId
         state.screen = 'scene'
         render()
         return
@@ -624,7 +637,7 @@ function render() {
         <h1>동아리 연애 시뮬레이션</h1>
         <div class="subtitle">6일간의 선택이 엔딩을 결정합니다</div>
         <button class="primary-btn" id="start-btn">시작하기</button>
-        <div class="hint">동아리방을 돌아다니며 만나고 싶은 사람에게 다가가세요. 선택에 따라 호감도가 달라집니다.</div>
+        <div class="hint">여러 장소를 돌아다니다 보면 우연히 누군가와 마주치게 됩니다. 매일 누가 어디 있을지는 달라져요. 선택에 따라 호감도가 달라집니다.</div>
       </div>
     `
     applyBackground(document.getElementById('bg'), 'title')
@@ -641,6 +654,7 @@ function render() {
     field.playerX = PLAYER_START.x
     field.playerY = PLAYER_START.y
     field.lastTime = 0
+    assignDailyPlacement()
     setupFieldCanvas()
     requestAnimationFrame(fieldLoop)
     return
