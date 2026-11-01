@@ -8,6 +8,7 @@ const PORTRAIT_IMAGES = {
   seojun: { soft: 'portraits/seojun_soft.webp' },
   ria: { soft: 'portraits/ria_soft.webp' },
   eunseo: { soft: 'portraits/eunseo_soft.webp' },
+  haram: { soft: 'portraits/haram_soft.webp' },
 }
 
 function renderPortrait(ch, mood) {
@@ -27,6 +28,7 @@ const FIELD_SPOTS = {
   seojun: { x: 610, y: 150, label: '서가' },
   eunseo: { x: 150, y: 430, label: '독서 코너' },
   ria: { x: 610, y: 430, label: '소형 무대' },
+  haram: { x: 380, y: 150, label: '스타일링 부스' },
 }
 const PLAYER_START = { x: 380, y: 290 }
 const PLAYER_SPEED = 160
@@ -340,6 +342,27 @@ const BACKGROUNDS = {
       <circle cx="250" cy="34" r="12" fill="#ffdf8a" opacity="0.32"/>
     </svg>`,
   },
+  studio: {
+    gradient: 'linear-gradient(160deg, #f3ddd0 0%, #d9b8a8 75%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      <ellipse cx="60" cy="90" rx="28" ry="50" fill="#fff" opacity="0.35"/>
+      <ellipse cx="60" cy="90" rx="28" ry="50" fill="none" stroke="#8a6a5a" stroke-width="3" opacity="0.5"/>
+      <rect x="160" y="20" width="4" height="90" fill="#8a6a5a" opacity="0.5"/>
+      ${Array.from({ length: 4 }, (_, i) => {
+        const x = 170 + i * 28
+        const c = ['#e89a9a', '#9ab8e8', '#e8d39a', '#b89ae8'][i % 4]
+        return `<path d="M${x} 24 q10 -10 20 0 l0 50 l-20 0 Z" fill="${c}" opacity="0.6"/>`
+      }).join('')}
+    </svg>`,
+  },
+  runway: {
+    gradient: 'linear-gradient(180deg, #140f1f 0%, #2a1f3a 100%)',
+    decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      <polygon points="110,0 190,0 230,180 70,180" fill="#fff" opacity="0.08"/>
+      <polygon points="130,0 170,0 190,180 110,180" fill="#fff" opacity="0.1"/>
+      ${starsDecor(10, 30)}
+    </svg>`,
+  },
 }
 
 function applyBackground(el, id) {
@@ -515,10 +538,51 @@ const CHARACTERS = [
     goodEnding:
       '은서: (책을 내밀며) 사실 이 책 맨 뒷장에 뭐 하나 적어뒀어요. 나중에 읽지 말고, 지금 봐요.\n...거기 적힌 거, 진심이에요. 저랑 다음 챕터도 같이 읽을래요?\n\n텅 빈 장터 자리에 둘만 남아, 은서는 대답을 기다리며 조용히 웃고 있었다.\n\n— ENDING: 은서와의 다음 챕터 —',
   },
+  {
+    id: 'haram',
+    name: '하람',
+    color: '#ffb37a',
+    desc: '패션 유튜브 하는 신비주의 후배, 알고 보면 반전 매력',
+    stages: [
+      {
+        bg: 'studio',
+        text: '하람이 거울 앞에서 한 바퀴 빙글 돌더니 선배를 보고 눈을 반짝였다.',
+        speaker: '하람',
+        line: '선배! 저 오늘 입은 코디, 어때요? 어제 밤새 고민해서 맞춘 건데. 솔직하게 봐주세요, 저 눈치 되게 빨라요.',
+        choices: [
+          { label: '색 배합이랑 핏 밸런스가 진짜 좋아, 특히 이 포인트가', delta: 3, response: '오... 그 포인트를 캐치하다니, 선배 보는 눈 있으시네요! 저 지금 완전 기분 좋아요.' },
+          { label: '어, 예쁘네 (대충)', delta: 1, response: '음... 그거 좀 성의 없이 들리는데요? 그래도 봐준 건 고마워요, 선배.' },
+        ],
+      },
+      {
+        bg: 'study',
+        text: '시험 기간인데도 하람이 영상 편집에 매달려 있었다. 평소와 달리 표정이 조금 어두워 보였다.',
+        speaker: '하람',
+        line: '요즘 애들이 저 보고 자꾸 수군대요. "쟤 여자야 남자야" 이러면서. ...선배는, 그런 거 신경 안 쓰여요?',
+        choices: [
+          { label: '네가 좋아하는 스타일이잖아, 남이 뭐라든 무슨 상관이야', delta: 3, response: '...그 말, 생각보다 되게 크게 와닿네요. 고마워요, 선배. 사실 그 말이 듣고 싶었어요.' },
+          { label: '신경 쓰지 마, 다 지나가는 말이야', delta: 1, response: '말은 쉽죠... 그래도 신경 써준 건 알겠어요.' },
+        ],
+      },
+      {
+        bg: 'runway',
+        text: '축제 패션쇼 백스테이지, 하람이 평소보다 긴장한 얼굴로 선배를 불러 세웠다.',
+        speaker: '하람',
+        line: '선배, 저 사실 수군거리는 거 알면서도 못 들은 척했어요. 근데 선배한테는 그냥... 솔직히 말하고 싶어서요. 저 남자예요. 근데 이 스타일이 진짜 제 모습이에요. 그래도 저, 괜찮아요?',
+        choices: [
+          { label: '당연하지, 애초에 네가 남자든 아니든 내가 보는 건 너 자체야', delta: 3, response: '(눈이 살짝 붉어지며) ...선배, 그 말 진짜 반칙이에요. 저 지금 울 것 같은데 무대는 올라가야 하고.' },
+          { label: '어... 그렇구나, 좀 놀랐다', delta: 1, response: '...그렇겠죠. 그래도 솔직하게 들어준 건 고마워요.' },
+        ],
+      },
+    ],
+    endingBg: 'runway',
+    goodEnding:
+      '하람: (무대 조명 아래, 직접 코디한 옷을 입고 활짝 웃으며) 선배, 저 오늘 완전 제 모습으로 여기 섰어요.\n이 무대 끝나면... 저랑 데이트 할래요? 저 남자인 거 알면서도 좋다고 해준 거, 진심이죠?\n\n관객의 박수 속에서, 하람은 그 어느 때보다 자신 있는 미소로 선배에게 손을 내밀었다.\n\n— ENDING: 하람과의 진짜 나 —',
+  },
 ]
 
 const FRIEND_ENDING =
-  '여섯 번째 날, 네 사람이 동시에 동아리방으로 몰려와 선배를 둘러쌌다.\n\n다은: "선배는 저한테도 잘해주고."\n서준: "나한테도 그랬지."\n리아: "나한테도!"\n은서: "...저한테도요. 책까지 사 갔잖아요."\n\n넷이 동시에 선배를 쳐다보며 한숨을 쉰다.\n\n다은: "그러니까 결론은..."\n넷이 입을 모아: "너무 다정해서 아무도 못 고르는 타입이라는 거지."\n\n선배는 그저 웃을 수밖에 없었다. 동아리의 평화는 지켜졌다.\n\n— ENDING: 모두의 좋은 선배(?) —'
+  '여섯 번째 날, 다섯 사람이 동시에 동아리방으로 몰려와 선배를 둘러쌌다.\n\n다은: "선배는 저한테도 잘해주고."\n서준: "나한테도 그랬지."\n리아: "나한테도!"\n은서: "...저한테도요. 책까지 사 갔잖아요."\n하람: "저한테도 그랬잖아요! 코디 칭찬도 해주고."\n\n다섯이 동시에 선배를 쳐다보며 한숨을 쉰다.\n\n다은: "그러니까 결론은..."\n다섯이 입을 모아: "너무 다정해서 아무도 못 고르는 타입이라는 거지."\n\n선배는 그저 웃을 수밖에 없었다. 동아리의 평화는 지켜졌다.\n\n— ENDING: 모두의 좋은 선배(?) —'
 
 function makeInitialState() {
   return {
