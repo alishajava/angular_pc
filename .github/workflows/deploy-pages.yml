@@ -72,6 +72,11 @@ jobs:
       - run: npm run build -- --base=/angular_pc/learn3d/
         working-directory: learn-3d
       - run: mkdir -p dist/learn3d && cp -r learn-3d/dist/. dist/learn3d/
+      - run: npm ci
+        working-directory: job-sim
+      - run: npm run build -- --base=/angular_pc/job/
+        working-directory: job-sim
+      - run: mkdir -p dist/job && cp -r job-sim/dist/. dist/job/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
