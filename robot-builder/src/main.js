@@ -1,45 +1,45 @@
 const app = document.getElementById('app')
 
-const STAT_KEYS = ['power', 'speed', 'durability', 'precision', 'efficiency']
-const STAT_LABELS = { power: '파워', speed: '속도', durability: '내구성', precision: '정밀도', efficiency: '효율' }
+const STAT_KEYS = ['chore', 'speed', 'durability', 'precision', 'charm']
+const STAT_LABELS = { chore: '가사력', speed: '속도', durability: '내구성', precision: '정밀도', charm: '친화력' }
 
 // --- Part catalog -----------------------------------------------------------
 const CHASSIS_OPTIONS = [
-  { key: 'light', label: '경량형 프레임', desc: '가볍고 민첩하지만 장갑이 얇다', wFrac: 0.34, stats: { power: 4, speed: 18, durability: 4, precision: 10, efficiency: 12 } },
-  { key: 'standard', label: '표준형 프레임', desc: '모든 면에서 무난한 균형형', wFrac: 0.4, stats: { power: 10, speed: 10, durability: 10, precision: 10, efficiency: 10 } },
-  { key: 'heavy', label: '중장갑형 프레임', desc: '느리지만 압도적인 내구성', wFrac: 0.5, stats: { power: 16, speed: 2, durability: 20, precision: 4, efficiency: 4 } },
+  { key: 'slim', label: '슬림형 바디', desc: '가볍고 날렵한 몸체', wFrac: 0.3, flare: 1.3, stats: { chore: 6, speed: 16, durability: 4, precision: 10, charm: 8 } },
+  { key: 'standard', label: '스탠다드형 바디', desc: '균형 잡힌 기본형 몸체', wFrac: 0.36, flare: 1.5, stats: { chore: 10, speed: 10, durability: 10, precision: 10, charm: 10 } },
+  { key: 'round', label: '볼륨형 바디', desc: '통통하고 안정적인 몸체', wFrac: 0.42, flare: 1.85, stats: { chore: 8, speed: 2, durability: 16, precision: 4, charm: 18 } },
 ]
 const HEAD_OPTIONS = [
-  { key: 'scout', label: '정찰형 카메라 헤드', desc: '단일 렌즈로 정밀 관측에 특화', stats: { precision: 14, efficiency: 6, power: 0, speed: 0, durability: 0 } },
-  { key: 'visor', label: '휴머노이드 바이저 헤드', desc: '균형 잡힌 범용 센서 구조', stats: { precision: 8, power: 4, speed: 4, durability: 0, efficiency: 0 } },
-  { key: 'sensorarray', label: '다중 센서 헤드', desc: '폭넓은 인식 범위, 정밀도 특화', stats: { precision: 18, power: 2, speed: 0, durability: 0, efficiency: 0 } },
+  { key: 'ribbon', label: '리본 헤드', desc: '큼직한 리본이 포인트', stats: { charm: 16, precision: 4, chore: 0, speed: 0, durability: 0 } },
+  { key: 'headband', label: '메이드 헤어밴드 헤드', desc: '단정한 클래식 메이드 룩', stats: { chore: 12, precision: 8, charm: 0, speed: 0, durability: 0 } },
+  { key: 'catear', label: '캣이어 안테나 헤드', desc: '장난기 가득한 고양이 귀 안테나', stats: { speed: 8, charm: 10, chore: 0, precision: 0, durability: 0 } },
 ]
 const ARM_OPTIONS = [
-  { key: 'gripper', label: '그리퍼 암', desc: '정교한 작업에 적합한 집게형', stats: { precision: 10, power: 4, speed: 0, durability: 0, efficiency: 0 } },
-  { key: 'blade', label: '블레이드 암', desc: '강력한 공격력의 블레이드형', stats: { power: 16, precision: 2, durability: 4, speed: 0, efficiency: 0 } },
-  { key: 'multitool', label: '다용도 암', desc: '다양한 작업 도구가 결합된 형태', stats: { efficiency: 12, precision: 6, power: 0, speed: 0, durability: 0 } },
+  { key: 'glove', label: '그리퍼 장갑 암', desc: '동글동글 귀여운 장갑형 손', stats: { precision: 10, chore: 6, charm: 0, speed: 0, durability: 0 } },
+  { key: 'tray', label: '서빙 트레이 암', desc: '차 한 잔 내올 수 있는 쟁반형', stats: { chore: 16, precision: 2, charm: 0, speed: 0, durability: 0 } },
+  { key: 'ribboncuff', label: '리본 커프스 암', desc: '손목의 작은 리본이 매력 포인트', stats: { charm: 10, speed: 4, chore: 0, precision: 0, durability: 0 } },
 ]
 const LEG_OPTIONS = [
-  { key: 'wheels', label: '바퀴형 하체', desc: '빠른 기동력, 험지에는 약함', stats: { speed: 18, efficiency: 8, durability: 2, power: 0, precision: 0 } },
-  { key: 'biped', label: '이족보행형 다리', desc: '다양한 지형에 대응하는 범용 보행', stats: { speed: 8, precision: 8, durability: 6, power: 0, efficiency: 0 } },
-  { key: 'treads', label: '트랙형 하체', desc: '험지에서도 안정적인 강인한 주행', stats: { durability: 16, power: 6, speed: 2, precision: 0, efficiency: 0 } },
+  { key: 'apronskirt', label: '에이프런 스커트형', desc: '치마처럼 펼쳐진 사랑스러운 하체', stats: { charm: 14, chore: 6, speed: 0, precision: 0, durability: 0 } },
+  { key: 'bipedboots', label: '이족보행 부츠형', desc: '앙증맞은 부츠를 신은 두 다리', stats: { speed: 10, precision: 8, durability: 4, chore: 0, charm: 0 } },
+  { key: 'hoverbase', label: '호버링 베이스', desc: '사뿐히 떠다니는 우아한 베이스', stats: { speed: 14, durability: 2, charm: 6, chore: 0, precision: 0 } },
 ]
 const CORE_OPTIONS = [
-  { key: 'standard', label: '표준 배터리 코어', desc: '안정적이고 무난한 기본 동력원', color: '#3fd0c9', stats: { efficiency: 14, power: 4, speed: 0, durability: 0, precision: 0 } },
-  { key: 'highpower', label: '고출력 코어', desc: '강력한 파워, 효율은 다소 낮음', color: '#ff8a3f', stats: { power: 18, efficiency: 2, speed: 0, durability: 0, precision: 0 } },
-  { key: 'eco', label: '친환경 코어', desc: '뛰어난 효율과 지속 가동력', color: '#5fe07a', stats: { efficiency: 20, durability: 4, power: 0, speed: 0, precision: 0 } },
+  { key: 'heart', label: '하트 코어', desc: '사랑스럽게 두근거리는 하트형 동력원', color: '#ff7fa0', shape: 'heart', stats: { charm: 18, chore: 4, speed: 0, precision: 0, durability: 0 } },
+  { key: 'star', label: '별 코어', desc: '반짝반짝 빛나는 별형 동력원', color: '#ffd76a', shape: 'star', stats: { precision: 10, speed: 8, chore: 0, charm: 0, durability: 0 } },
+  { key: 'ribbonbow', label: '리본 코어', desc: '매듭 모양으로 빛나는 동력원', color: '#c9a6ff', shape: 'bow', stats: { chore: 10, charm: 8, speed: 0, precision: 0, durability: 0 } },
 ]
 const COLOR_OPTIONS = [
-  { key: 'steel', label: '스틸 그레이', hex: '#8a94a0' },
-  { key: 'crimson', label: '크림슨 레드', hex: '#d9503f' },
-  { key: 'azure', label: '아주어 블루', hex: '#3f7fd9' },
-  { key: 'amber', label: '앰버 오렌지', hex: '#e8822a' },
-  { key: 'onyx', label: '오닉스 블랙', hex: '#2b2f35' },
-  { key: 'ivory', label: '아이보리 화이트', hex: '#d8dde3' },
+  { key: 'pink', label: '페일 핑크', hex: '#f7b8c6' },
+  { key: 'mint', label: '민트 그린', hex: '#a8e0cb' },
+  { key: 'lavender', label: '라벤더', hex: '#c9b8e8' },
+  { key: 'cream', label: '아이보리 크림', hex: '#f3ead9' },
+  { key: 'sky', label: '스카이 블루', hex: '#a9d4f0' },
+  { key: 'lemon', label: '레몬 옐로우', hex: '#f5e59a' },
 ]
 
 const STEPS = [
-  { key: 'chassis', title: '프레임 선택', options: CHASSIS_OPTIONS, kind: 'card' },
+  { key: 'chassis', title: '바디 선택', options: CHASSIS_OPTIONS, kind: 'card' },
   { key: 'head', title: '헤드 선택', options: HEAD_OPTIONS, kind: 'card' },
   { key: 'arm', title: '암 유닛 선택', options: ARM_OPTIONS, kind: 'card' },
   { key: 'leg', title: '하체 선택', options: LEG_OPTIONS, kind: 'card' },
@@ -77,28 +77,60 @@ function roundRectPath(ctx, x, y, w, h, r) {
 function metalFill(ctx, x, y, w, h, r, baseColor) {
   roundRectPath(ctx, x, y, w, h, r)
   const grad = ctx.createLinearGradient(x, y, x, y + h)
-  grad.addColorStop(0, shade(baseColor, 0.42))
-  grad.addColorStop(0.45, shade(baseColor, 0.04))
-  grad.addColorStop(1, shade(baseColor, -0.3))
+  grad.addColorStop(0, shade(baseColor, 0.45))
+  grad.addColorStop(0.45, shade(baseColor, 0.08))
+  grad.addColorStop(1, shade(baseColor, -0.2))
   ctx.fillStyle = grad
   ctx.fill()
-  ctx.strokeStyle = 'rgba(0,0,0,0.4)'
-  ctx.lineWidth = 1.4
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)'
+  ctx.lineWidth = 1.3
   ctx.stroke()
 }
 
-function rivet(ctx, x, y, baseColor, r = 2.1) {
-  ctx.fillStyle = shade(baseColor, -0.45)
-  ctx.beginPath()
-  ctx.arc(x, y, r, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = shade(baseColor, 0.35)
-  ctx.beginPath()
-  ctx.arc(x - 0.5, y - 0.5, r * 0.4, 0, Math.PI * 2)
-  ctx.fill()
+function placeholderSlot(ctx, x, y, w, h) {
+  ctx.save()
+  ctx.strokeStyle = 'rgba(255,255,255,0.16)'
+  ctx.setLineDash([4, 4])
+  ctx.lineWidth = 1.5
+  roundRectPath(ctx, x, y, w, h, 8)
+  ctx.stroke()
+  ctx.restore()
 }
 
-function glow(ctx, x, y, radius, color, intensity = 1) {
+function heartPath(ctx, cx, cy, s) {
+  ctx.beginPath()
+  ctx.moveTo(cx, cy + s * 0.35)
+  ctx.bezierCurveTo(cx - s * 1.1, cy - s * 0.4, cx - s * 0.5, cy - s * 1.05, cx, cy - s * 0.3)
+  ctx.bezierCurveTo(cx + s * 0.5, cy - s * 1.05, cx + s * 1.1, cy - s * 0.4, cx, cy + s * 0.35)
+  ctx.closePath()
+}
+
+function starPath(ctx, cx, cy, outerR, innerR) {
+  ctx.beginPath()
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outerR : innerR
+    const angle = -Math.PI / 2 + (i * Math.PI) / 5
+    const x = cx + Math.cos(angle) * r
+    const y = cy + Math.sin(angle) * r
+    if (i === 0) ctx.moveTo(x, y)
+    else ctx.lineTo(x, y)
+  }
+  ctx.closePath()
+}
+
+function bowPath(ctx, cx, cy, s) {
+  ctx.beginPath()
+  ctx.moveTo(cx, cy)
+  ctx.lineTo(cx - s, cy - s * 0.6)
+  ctx.lineTo(cx - s, cy + s * 0.6)
+  ctx.closePath()
+  ctx.moveTo(cx, cy)
+  ctx.lineTo(cx + s, cy - s * 0.6)
+  ctx.lineTo(cx + s, cy + s * 0.6)
+  ctx.closePath()
+}
+
+function glowCircle(ctx, x, y, radius, color, intensity = 1) {
   for (let i = 3; i >= 1; i--) {
     ctx.globalAlpha = 0.13 * i * intensity
     ctx.fillStyle = color
@@ -114,156 +146,298 @@ function glow(ctx, x, y, radius, color, intensity = 1) {
   ctx.globalAlpha = 1
 }
 
-function placeholderSlot(ctx, x, y, w, h) {
-  ctx.save()
-  ctx.strokeStyle = 'rgba(255,255,255,0.16)'
-  ctx.setLineDash([4, 4])
-  ctx.lineWidth = 1.5
-  roundRectPath(ctx, x, y, w, h, 8)
-  ctx.stroke()
-  ctx.restore()
-}
-
-function bodyHalfWidth(chassisKey, W) {
-  const spec = CHASSIS_OPTIONS.find((c) => c.key === chassisKey)
-  return (W * (spec ? spec.wFrac : 0.4)) / 2
-}
-
-function drawChassis(ctx, key, cx, topY, bottomY, paint, W) {
-  const spec = CHASSIS_OPTIONS.find((c) => c.key === key)
-  const w = W * spec.wFrac
-  const h = bottomY - topY
-  const x = cx - w / 2
-  metalFill(ctx, x, topY, w, h, 10, paint)
-  ctx.strokeStyle = 'rgba(0,0,0,0.25)'
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(x + 6, topY + h * 0.42)
-  ctx.lineTo(x + w - 6, topY + h * 0.42)
-  ctx.stroke()
-  rivet(ctx, x + 7, topY + 7, paint)
-  rivet(ctx, x + w - 7, topY + 7, paint)
-  rivet(ctx, x + 7, bottomY - 7, paint)
-  rivet(ctx, x + w - 7, bottomY - 7, paint)
-  if (key === 'heavy') {
-    metalFill(ctx, x - 10, topY + 2, 12, h * 0.4, 4, shade(paint, -0.08))
-    metalFill(ctx, x + w - 2, topY + 2, 12, h * 0.4, 4, shade(paint, -0.08))
+function glowShape(ctx, pathFn, cx, cy, size, color, intensity = 1) {
+  for (let i = 3; i >= 1; i--) {
+    ctx.save()
+    ctx.globalAlpha = 0.12 * i * intensity
+    ctx.translate(cx, cy)
+    ctx.scale(1 + i * 0.35, 1 + i * 0.35)
+    ctx.translate(-cx, -cy)
+    ctx.fillStyle = color
+    pathFn(ctx, cx, cy, size)
+    ctx.fill()
+    ctx.restore()
   }
-  return { x, w, h }
+  ctx.save()
+  ctx.globalAlpha = Math.min(1, intensity)
+  ctx.fillStyle = color
+  pathFn(ctx, cx, cy, size)
+  ctx.fill()
+  ctx.restore()
+  if (pathFn === bowPath) {
+    ctx.save()
+    ctx.globalAlpha = Math.min(1, intensity)
+    ctx.fillStyle = shade(color, -0.2)
+    ctx.beginPath()
+    ctx.arc(cx, cy, size * 0.32, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+  }
 }
 
-function drawHead(ctx, key, cx, centerY, paint) {
-  const baseW = 56, baseH = 44
-  const x = cx - baseW / 2, y = centerY - baseH / 2
-  metalFill(ctx, x, y, baseW, baseH, 10, paint)
-  if (key === 'scout') {
-    ctx.strokeStyle = shade(paint, -0.2)
-    ctx.lineWidth = 2.2
+function bodyHalfWidth(chassisKey, W, atBottom) {
+  const spec = CHASSIS_OPTIONS.find((c) => c.key === chassisKey) || CHASSIS_OPTIONS[1]
+  const topW = W * spec.wFrac
+  return ((atBottom ? topW * spec.flare : topW) / 2)
+}
+
+// --- Part drawing ---------------------------------------------------------
+function drawDressBody(ctx, key, cx, topY, bottomY, paint, W) {
+  const spec = CHASSIS_OPTIONS.find((c) => c.key === key)
+  const topW = W * spec.wFrac
+  const bottomW = topW * spec.flare
+  const x1t = cx - topW / 2, x2t = cx + topW / 2
+  const x1b = cx - bottomW / 2, x2b = cx + bottomW / 2
+
+  ctx.beginPath()
+  ctx.moveTo(x1t + 8, topY)
+  ctx.lineTo(x2t - 8, topY)
+  ctx.quadraticCurveTo(x2t, topY, x2t + 3, topY + 10)
+  ctx.lineTo(x2b, bottomY - 8)
+  ctx.quadraticCurveTo(x2b, bottomY, x2b - 8, bottomY)
+  ctx.lineTo(x1b + 8, bottomY)
+  ctx.quadraticCurveTo(x1b, bottomY, x1b, bottomY - 8)
+  ctx.lineTo(x1t - 3, topY + 10)
+  ctx.quadraticCurveTo(x1t, topY, x1t + 8, topY)
+  ctx.closePath()
+
+  const grad = ctx.createLinearGradient(cx, topY, cx, bottomY)
+  grad.addColorStop(0, shade(paint, 0.45))
+  grad.addColorStop(0.5, shade(paint, 0.06))
+  grad.addColorStop(1, shade(paint, -0.18))
+  ctx.fillStyle = grad
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)'
+  ctx.lineWidth = 1.2
+  ctx.stroke()
+
+  // waist seam
+  const waistY = topY + (bottomY - topY) * 0.42
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)'
+  ctx.lineWidth = 1.6
+  ctx.beginPath()
+  const waistHalfW = (topW + (bottomW - topW) * 0.42) / 2
+  ctx.moveTo(cx - waistHalfW, waistY)
+  ctx.lineTo(cx + waistHalfW, waistY)
+  ctx.stroke()
+
+  // collar
+  ctx.fillStyle = '#fbfbfb'
+  ctx.beginPath()
+  ctx.moveTo(cx - 11, topY)
+  ctx.lineTo(cx, topY + 11)
+  ctx.lineTo(cx + 11, topY)
+  ctx.lineTo(cx + 15, topY + 4)
+  ctx.lineTo(cx, topY + 19)
+  ctx.lineTo(cx - 15, topY + 4)
+  ctx.closePath()
+  ctx.fill()
+
+  // apron bib
+  ctx.fillStyle = '#fbfbfb'
+  roundRectPath(ctx, cx - topW * 0.22, topY + 20, topW * 0.44, (waistY - topY) * 0.7, 4)
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(0,0,0,0.06)'
+  ctx.lineWidth = 1
+  ctx.stroke()
+
+  // skirt frill hem stitches
+  ctx.fillStyle = 'rgba(255,255,255,0.55)'
+  const dots = 6
+  for (let i = 0; i <= dots; i++) {
+    const t = i / dots
+    const hx = x1b + 10 + (x2b - x1b - 20) * t
     ctx.beginPath()
-    ctx.moveTo(cx, y)
-    ctx.lineTo(cx, y - 9)
+    ctx.arc(hx, bottomY - 6, 1.6, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  return { topW, bottomW, x1t, x2t, x1b, x2b, waistY }
+}
+
+function drawHead(ctx, key, cx, cy, paint) {
+  const r = 27
+  const grad = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.15, cx, cy, r)
+  grad.addColorStop(0, shade(paint, 0.55))
+  grad.addColorStop(1, shade(paint, -0.12))
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.fillStyle = grad
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)'
+  ctx.lineWidth = 1.2
+  ctx.stroke()
+
+  // ears/antenna behind-head accents drawn first for catear
+  if (key === 'catear') {
+    ctx.fillStyle = shade(paint, 0.15)
+    for (const sign of [-1, 1]) {
+      ctx.beginPath()
+      ctx.moveTo(cx + sign * r * 0.55, cy - r * 0.7)
+      ctx.lineTo(cx + sign * r * 0.95, cy - r * 1.55)
+      ctx.lineTo(cx + sign * r * 0.2, cy - r * 0.95)
+      ctx.closePath()
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)'
+      ctx.lineWidth = 1
+      ctx.stroke()
+      ctx.fillStyle = shade('#ff9fb6', 0)
+      ctx.beginPath()
+      ctx.moveTo(cx + sign * r * 0.58, cy - r * 0.82)
+      ctx.lineTo(cx + sign * r * 0.78, cy - r * 1.3)
+      ctx.lineTo(cx + sign * r * 0.35, cy - r * 0.95)
+      ctx.closePath()
+      ctx.fill()
+      ctx.fillStyle = shade(paint, 0.15)
+    }
+  }
+
+  // eyes
+  const eyeDX = r * 0.4, eyeY = cy + r * 0.04, eyeR = r * 0.24
+  for (const sx of [-1, 1]) {
+    ctx.fillStyle = '#33373f'
+    ctx.beginPath()
+    ctx.ellipse(cx + sx * eyeDX, eyeY, eyeR * 0.82, eyeR, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'
+    ctx.beginPath()
+    ctx.arc(cx + sx * eyeDX - eyeR * 0.25, eyeY - eyeR * 0.35, eyeR * 0.3, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // mouth
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)'
+  ctx.lineWidth = 1.6
+  ctx.beginPath()
+  ctx.arc(cx, eyeY + r * 0.4, r * 0.18, 0.15 * Math.PI, 0.85 * Math.PI)
+  ctx.stroke()
+
+  // blush
+  ctx.fillStyle = 'rgba(255,150,172,0.4)'
+  for (const sx of [-1, 1]) {
+    ctx.beginPath()
+    ctx.ellipse(cx + sx * r * 0.56, cy + r * 0.26, r * 0.15, r * 0.1, 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  if (key === 'ribbon') {
+    ctx.fillStyle = '#ff7fa0'
+    bowPath(ctx, cx, cy - r * 1.08, r * 0.32)
+    ctx.fill()
+    ctx.fillStyle = shade('#ff7fa0', -0.2)
+    ctx.beginPath()
+    ctx.arc(cx, cy - r * 1.08, r * 0.12, 0, Math.PI * 2)
+    ctx.fill()
+  } else if (key === 'headband') {
+    ctx.strokeStyle = '#fbfbfb'
+    ctx.lineWidth = r * 0.3
+    ctx.beginPath()
+    ctx.arc(cx, cy - r * 0.1, r * 1.02, Math.PI * 1.08, Math.PI * 1.92)
     ctx.stroke()
-    ctx.fillStyle = '#ff5a4d'
-    ctx.beginPath()
-    ctx.arc(cx, y - 11, 2.4, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.strokeStyle = 'rgba(0,0,0,0.35)'
-    ctx.lineWidth = 1.5
-    ctx.beginPath()
-    ctx.arc(cx, centerY + 2, 10, 0, Math.PI * 2)
-    ctx.stroke()
-    glow(ctx, cx, centerY + 2, 7.5, '#5fd0ff', 1)
-  } else if (key === 'visor') {
-    ctx.fillStyle = '#0d1114'
-    roundRectPath(ctx, x + 6, centerY - 8, baseW - 12, 13, 4)
-    ctx.fill()
-    const grad = ctx.createLinearGradient(x + 6, 0, x + baseW - 6, 0)
-    grad.addColorStop(0, 'rgba(95,208,255,0)')
-    grad.addColorStop(0.5, 'rgba(95,208,255,0.95)')
-    grad.addColorStop(1, 'rgba(95,208,255,0)')
-    ctx.fillStyle = grad
-    roundRectPath(ctx, x + 9, centerY - 4, baseW - 18, 6, 3)
-    ctx.fill()
-  } else if (key === 'sensorarray') {
-    for (const dx of [-14, 0, 14]) glow(ctx, cx + dx, centerY + 2, 3.6, '#5fd0ff', 0.95)
   }
 }
 
 function drawArms(ctx, key, cx, shoulderY, bodyHalfW, paint) {
   for (const sign of [-1, 1]) {
-    const ax = cx + sign * (bodyHalfW + 9)
-    metalFill(ctx, ax - 8, shoulderY, 16, 32, 5, paint)
-    const handY = shoulderY + 32
-    if (key === 'gripper') {
-      ctx.strokeStyle = shade(paint, -0.25)
-      ctx.lineWidth = 4
-      ctx.lineCap = 'round'
+    const ax = cx + sign * (bodyHalfW + 7)
+    roundRectPath(ctx, ax - 7, shoulderY, 14, 24, 6)
+    const grad = ctx.createLinearGradient(ax - 7, shoulderY, ax - 7, shoulderY + 24)
+    grad.addColorStop(0, shade(paint, 0.45))
+    grad.addColorStop(1, shade(paint, -0.15))
+    ctx.fillStyle = grad
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)'
+    ctx.lineWidth = 1
+    ctx.stroke()
+    const handY = shoulderY + 24
+    if (key === 'glove') {
+      ctx.fillStyle = '#fbfbfb'
       ctx.beginPath()
-      ctx.moveTo(ax - 6, handY)
-      ctx.lineTo(ax - 10, handY + 9)
-      ctx.stroke()
-      ctx.beginPath()
-      ctx.moveTo(ax + 6, handY)
-      ctx.lineTo(ax + 10, handY + 9)
-      ctx.stroke()
-    } else if (key === 'blade') {
-      ctx.fillStyle = '#c7ccd1'
-      ctx.beginPath()
-      ctx.moveTo(ax - 5, handY)
-      ctx.lineTo(ax + 5, handY)
-      ctx.lineTo(ax + sign * 3, handY + 22)
-      ctx.closePath()
+      ctx.arc(ax, handY + 5, 6, 0, Math.PI * 2)
       ctx.fill()
-      ctx.strokeStyle = 'rgba(0,0,0,0.3)'
+      ctx.strokeStyle = 'rgba(0,0,0,0.12)'
       ctx.lineWidth = 1
       ctx.stroke()
-    } else if (key === 'multitool') {
-      for (const dx of [-5, 0, 5]) {
-        ctx.fillStyle = shade(paint, -0.2)
-        ctx.fillRect(ax + dx - 1.4, handY, 2.8, 9)
-      }
+    } else if (key === 'tray') {
+      ctx.fillStyle = '#fbfbfb'
+      ctx.beginPath()
+      ctx.ellipse(ax, handY + 4, 9, 3, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(0,0,0,0.18)'
+      ctx.lineWidth = 1
+      ctx.stroke()
+    } else if (key === 'ribboncuff') {
+      ctx.fillStyle = shade(paint, -0.05)
+      ctx.beginPath()
+      ctx.arc(ax, handY + 6, 5, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#ff7fa0'
+      bowPath(ctx, ax, handY - 2, 4.5)
+      ctx.fill()
     }
   }
 }
 
-function drawLegs(ctx, key, cx, bodyHalfW, topY, bottomY, paint) {
-  if (key === 'wheels') {
+function drawLegs(ctx, key, cx, bodyHalfBottomW, topY, bottomY, paint) {
+  if (key === 'apronskirt') {
+    const w = bodyHalfBottomW * 2 * 0.82
+    ctx.beginPath()
+    ctx.moveTo(cx - w / 2 + 6, topY - 4)
+    ctx.lineTo(cx + w / 2 - 6, topY - 4)
+    ctx.quadraticCurveTo(cx + w / 2, topY - 4, cx + w / 2 - 2, topY + (bottomY - topY) * 0.5 - 6)
+    ctx.quadraticCurveTo(cx + w / 2 - 2, topY + (bottomY - topY) * 0.5, cx + w / 2 - 10, topY + (bottomY - topY) * 0.5)
+    ctx.lineTo(cx - w / 2 + 10, topY + (bottomY - topY) * 0.5)
+    ctx.quadraticCurveTo(cx - w / 2 + 2, topY + (bottomY - topY) * 0.5, cx - w / 2 + 2, topY + (bottomY - topY) * 0.5 - 6)
+    ctx.quadraticCurveTo(cx - w / 2, topY - 4, cx - w / 2 + 6, topY - 4)
+    ctx.closePath()
+    const grad = ctx.createLinearGradient(cx, topY, cx, topY + (bottomY - topY) * 0.5)
+    grad.addColorStop(0, shade(paint, 0.1))
+    grad.addColorStop(1, shade(paint, -0.2))
+    ctx.fillStyle = grad
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)'
+    ctx.lineWidth = 1
+    ctx.stroke()
     for (const sign of [-1, 1]) {
-      const wx = cx + sign * bodyHalfW * 0.5
-      const wy = (topY + bottomY) / 2
-      const r = ((bottomY - topY) / 2) * 0.9
-      ctx.fillStyle = '#1b1f24'
+      ctx.fillStyle = '#33373f'
       ctx.beginPath()
-      ctx.arc(wx, wy, r, 0, Math.PI * 2)
+      ctx.ellipse(cx + sign * w * 0.2, bottomY - 4, 7, 4, 0, 0, Math.PI * 2)
       ctx.fill()
-      ctx.strokeStyle = 'rgba(0,0,0,0.4)'
+    }
+  } else if (key === 'bipedboots') {
+    for (const sign of [-1, 1]) {
+      const lx = cx + sign * bodyHalfBottomW * 0.4
+      roundRectPath(ctx, lx - 5, topY, 10, bottomY - topY - 10, 4)
+      ctx.fillStyle = shade(paint, 0.12)
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)'
       ctx.lineWidth = 1
       ctx.stroke()
-      ctx.strokeStyle = paint
-      ctx.lineWidth = 3
+      ctx.fillStyle = '#33373f'
       ctx.beginPath()
-      ctx.arc(wx, wy, r * 0.55, 0, Math.PI * 2)
-      ctx.stroke()
+      ctx.ellipse(lx, bottomY - 5, 9, 6, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = shade('#ff7fa0', 0)
+      ctx.beginPath()
+      ctx.arc(lx, bottomY - 10, 2, 0, Math.PI * 2)
+      ctx.fill()
     }
-  } else if (key === 'biped') {
-    for (const sign of [-1, 1]) {
-      const lx = cx + sign * bodyHalfW * 0.45
-      metalFill(ctx, lx - 6, topY, 12, bottomY - topY - 8, 4, paint)
-      metalFill(ctx, lx - 9, bottomY - 8, 18, 8, 3, shade(paint, -0.15))
-    }
-  } else if (key === 'treads') {
-    const w = bodyHalfW * 2 + 14
-    metalFill(ctx, cx - w / 2, topY + 4, w, bottomY - topY - 4, 8, '#1b1f24')
-    ctx.fillStyle = 'rgba(0,0,0,0.4)'
-    for (let i = 0; i < 7; i++) {
-      ctx.fillRect(cx - w / 2 + 6 + i * ((w - 12) / 6), topY + 7, 3.5, bottomY - topY - 10)
-    }
+  } else if (key === 'hoverbase') {
+    const ringY = topY + 16
+    glowCircle(ctx, cx, ringY, 16, shade(paint, 0.25), 0.75)
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)'
+    ctx.lineWidth = 1.4
+    ctx.beginPath()
+    ctx.ellipse(cx, ringY, 20, 6, 0, 0, Math.PI * 2)
+    ctx.stroke()
   }
 }
 
 function drawCore(ctx, key, cx, coreY, intensity = 1) {
   const spec = CORE_OPTIONS.find((c) => c.key === key)
-  glow(ctx, cx, coreY, 7 + (spec.key === 'highpower' ? 2 : 0), spec.color, intensity)
+  if (spec.shape === 'heart') glowShape(ctx, heartPath, cx, coreY, 7, spec.color, intensity)
+  else if (spec.shape === 'star') glowShape(ctx, (c, x, y, s) => starPath(c, x, y, s, s * 0.45), cx, coreY, 8, spec.color, intensity)
+  else glowShape(ctx, bowPath, cx, coreY, 7, spec.color, intensity)
 }
 
 function drawRobot(canvas, build) {
@@ -272,43 +446,44 @@ function drawRobot(canvas, build) {
   ctx.clearRect(0, 0, W, H)
   const cx = W / 2
   const headCenterY = H * 0.17
-  const bodyTopY = H * 0.3
+  const bodyTopY = H * 0.32
   const bodyBottomY = H * 0.64
   const legTopY = bodyBottomY
   const legBottomY = H * 0.92
 
-  const paint = COLOR_OPTIONS.find((c) => c.key === build.colorKey)?.hex || '#8a94a0'
+  const paint = COLOR_OPTIONS.find((c) => c.key === build.colorKey)?.hex || '#f0c7d2'
 
-  ctx.fillStyle = 'rgba(0,0,0,0.32)'
+  ctx.fillStyle = 'rgba(0,0,0,0.28)'
   ctx.beginPath()
-  ctx.ellipse(cx, H * 0.95, W * 0.3, H * 0.022, 0, 0, Math.PI * 2)
+  ctx.ellipse(cx, H * 0.95, W * 0.3, H * 0.02, 0, 0, Math.PI * 2)
   ctx.fill()
 
-  const bodyHalfW = bodyHalfWidth(build.chassisKey, W)
+  const bodyHalfTopW = bodyHalfWidth(build.chassisKey, W, false)
+  const bodyHalfBottomW = bodyHalfWidth(build.chassisKey, W, true)
 
-  if (build.legKey) drawLegs(ctx, build.legKey, cx, bodyHalfW, legTopY, legBottomY, paint)
+  if (build.legKey) drawLegs(ctx, build.legKey, cx, bodyHalfBottomW, legTopY, legBottomY, paint)
   else placeholderSlot(ctx, cx - 30, legTopY, 60, legBottomY - legTopY)
 
-  if (build.chassisKey) drawChassis(ctx, build.chassisKey, cx, bodyTopY, bodyBottomY, paint, W)
+  if (build.chassisKey) drawDressBody(ctx, build.chassisKey, cx, bodyTopY, bodyBottomY, paint, W)
   else placeholderSlot(ctx, cx - 36, bodyTopY, 72, bodyBottomY - bodyTopY)
 
   if (build.coreKey && build.chassisKey) {
-    drawCore(ctx, build.coreKey, cx, bodyTopY + (bodyBottomY - bodyTopY) * 0.45, build.poweredOn ? build.pulse ?? 1 : 1)
+    drawCore(ctx, build.coreKey, cx, bodyTopY + (bodyBottomY - bodyTopY) * 0.6, build.poweredOn ? build.pulse ?? 1 : 1)
   }
 
-  if (build.armKey) drawArms(ctx, build.armKey, cx, bodyTopY + 4, bodyHalfW, paint)
+  if (build.armKey) drawArms(ctx, build.armKey, cx, bodyTopY + 6, bodyHalfTopW, paint)
   else {
-    placeholderSlot(ctx, cx - bodyHalfW - 26, bodyTopY, 18, 38)
-    placeholderSlot(ctx, cx + bodyHalfW + 8, bodyTopY, 18, 38)
+    placeholderSlot(ctx, cx - bodyHalfTopW - 24, bodyTopY + 2, 16, 30)
+    placeholderSlot(ctx, cx + bodyHalfTopW + 8, bodyTopY + 2, 16, 30)
   }
 
   if (build.headKey) drawHead(ctx, build.headKey, cx, headCenterY, paint)
-  else placeholderSlot(ctx, cx - 28, headCenterY - 22, 56, 44)
+  else placeholderSlot(ctx, cx - 27, headCenterY - 27, 54, 54)
 }
 
 // --- Stats --------------------------------------------------------------------
 function computeStats(build) {
-  const totals = { power: 0, speed: 0, durability: 0, precision: 0, efficiency: 0 }
+  const totals = { chore: 0, speed: 0, durability: 0, precision: 0, charm: 0 }
   const parts = [
     CHASSIS_OPTIONS.find((o) => o.key === build.chassisKey),
     HEAD_OPTIONS.find((o) => o.key === build.headKey),
@@ -329,14 +504,14 @@ function computeVerdict(stats) {
   const min = Math.min(...entries.map((e) => e[1]))
   const top = entries.filter(([, v]) => v === max)
   if (top.length >= 3 || max - min < 8) {
-    return '모든 능력이 고르게 균형 잡힌 다목적 로봇이 완성되었습니다.'
+    return '모든 면에서 사랑스럽고 다재다능한 메이드로봇이 완성되었습니다.'
   }
   const texts = {
-    power: '압도적인 화력을 갖춘 전투형 로봇이 완성되었습니다.',
-    speed: '누구보다 빠르게 움직이는 정찰·기동형 로봇이 완성되었습니다.',
-    durability: '무엇에도 쉽게 쓰러지지 않는 견고한 로봇이 완성되었습니다.',
-    precision: '정밀한 작업에 특화된 섬세한 로봇이 완성되었습니다.',
-    efficiency: '오래도록 안정적으로 가동되는 효율적인 로봇이 완성되었습니다.',
+    chore: '어떤 집안일도 완벽하게 해내는 살림꾼 메이드로봇이 완성되었습니다.',
+    speed: '누구보다 빠릿빠릿하게 움직이는 메이드로봇이 완성되었습니다.',
+    durability: '오래도록 튼튼하게 곁을 지켜줄 메이드로봇이 완성되었습니다.',
+    precision: '세심하고 꼼꼼한 손길이 돋보이는 메이드로봇이 완성되었습니다.',
+    charm: '보고만 있어도 사랑스러운, 누구에게나 사랑받을 메이드로봇이 완성되었습니다.',
   }
   return texts[top[0][0]]
 }
@@ -347,7 +522,7 @@ function freshState() {
     phase: 'title',
     name: '',
     stepIndex: 0,
-    build: { chassisKey: null, headKey: null, armKey: null, legKey: null, coreKey: null, colorKey: 'steel' },
+    build: { chassisKey: null, headKey: null, armKey: null, legKey: null, coreKey: null, colorKey: 'pink' },
   }
 }
 let state = freshState()
@@ -369,19 +544,19 @@ function renderTitle() {
   stopResultAnimation()
   app.innerHTML = `
     <div class="title-wrap">
-      <h1>로봇 만들기 시뮬레이터</h1>
-      <div class="subtitle">프레임부터 코어까지, 단계별로 부품을 골라 나만의 로봇을 직접 조립해 보세요.<br/>고른 부품은 그 자리에서 바로 로봇에 장착됩니다.</div>
+      <h1>메이드로봇 만들기 시뮬레이터</h1>
+      <div class="subtitle">바디부터 코어까지, 단계별로 부품을 골라 나만의 귀여운 메이드로봇을 직접 조립해 보세요.<br/>고른 부품은 그 자리에서 바로 장착됩니다.</div>
       <div class="field-row">
         <label>로봇 이름</label>
-        <input id="name-input" type="text" maxlength="12" placeholder="예: RX-01" value="RX-01" />
+        <input id="name-input" type="text" maxlength="12" placeholder="예: 리본" value="리본" />
       </div>
       <button class="primary-btn" id="start-btn">조립 시작</button>
-      <div class="hint">프레임 → 헤드 → 암 → 하체 → 코어 → 도색 순서로 6단계를 거쳐 로봇을 완성합니다. 각 부품은 파워/속도/내구성/정밀도/효율 능력치에 영향을 줍니다.</div>
+      <div class="hint">바디 → 헤드 → 암 → 하체 → 코어 → 도색 순서로 6단계를 거쳐 로봇을 완성합니다. 각 부품은 가사력/속도/내구성/정밀도/친화력 능력치에 영향을 줍니다.</div>
     </div>
   `
   document.getElementById('start-btn').onclick = () => {
     const nameInput = document.getElementById('name-input')
-    state.name = nameInput.value.trim() || 'RX-01'
+    state.name = nameInput.value.trim() || '리본'
     state.phase = 'build'
     state.stepIndex = 0
     render()
