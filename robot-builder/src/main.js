@@ -47,8 +47,12 @@ const STEPS = [
   { key: 'color', title: '도색 선택', options: COLOR_OPTIONS, kind: 'swatch' },
 ]
 
-// --- Canvas art helpers -------------------------------------------------------
-function shade(hex, amt) {
+// --- Canvas art helpers (flat sticker style: bold outline, flat fills, no gradients) ---
+const OUTLINE = '#352c24'
+const STROKE_W = 3.4
+const DETAIL_W = 2
+
+function tint(hex, amt) {
   const v = parseInt(hex.slice(1), 16)
   let r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255
   if (amt >= 0) {
@@ -74,24 +78,35 @@ function roundRectPath(ctx, x, y, w, h, r) {
   ctx.closePath()
 }
 
-function metalFill(ctx, x, y, w, h, r, baseColor) {
-  roundRectPath(ctx, x, y, w, h, r)
-  const grad = ctx.createLinearGradient(x, y, x, y + h)
-  grad.addColorStop(0, shade(baseColor, 0.45))
-  grad.addColorStop(0.45, shade(baseColor, 0.08))
-  grad.addColorStop(1, shade(baseColor, -0.2))
-  ctx.fillStyle = grad
+function flatPath(ctx, color, { outline = true, width = STROKE_W } = {}) {
+  ctx.fillStyle = color
   ctx.fill()
-  ctx.strokeStyle = 'rgba(0,0,0,0.3)'
-  ctx.lineWidth = 1.3
-  ctx.stroke()
+  if (outline) {
+    ctx.lineJoin = 'round'
+    ctx.lineCap = 'round'
+    ctx.strokeStyle = OUTLINE
+    ctx.lineWidth = width
+    ctx.stroke()
+  }
+}
+
+function flatRect(ctx, x, y, w, h, r, color, opts) {
+  roundRectPath(ctx, x, y, w, h, r)
+  flatPath(ctx, color, opts)
+}
+
+function shineDot(ctx, x, y, r) {
+  ctx.fillStyle = 'rgba(255,255,255,0.8)'
+  ctx.beginPath()
+  ctx.arc(x, y, r, 0, Math.PI * 2)
+  ctx.fill()
 }
 
 function placeholderSlot(ctx, x, y, w, h) {
   ctx.save()
-  ctx.strokeStyle = 'rgba(255,255,255,0.16)'
+  ctx.strokeStyle = 'rgba(0,0,0,0.22)'
   ctx.setLineDash([4, 4])
-  ctx.lineWidth = 1.5
+  ctx.lineWidth = 2
   roundRectPath(ctx, x, y, w, h, 8)
   ctx.stroke()
   ctx.restore()
@@ -130,49 +145,18 @@ function bowPath(ctx, cx, cy, s) {
   ctx.closePath()
 }
 
-function glowCircle(ctx, x, y, radius, color, intensity = 1) {
-  for (let i = 3; i >= 1; i--) {
-    ctx.globalAlpha = 0.13 * i * intensity
-    ctx.fillStyle = color
-    ctx.beginPath()
-    ctx.arc(x, y, radius * (1 + i * 0.5), 0, Math.PI * 2)
-    ctx.fill()
-  }
-  ctx.globalAlpha = Math.min(1, intensity)
-  ctx.fillStyle = color
+function outlinedBand(ctx, cx, cy, r, w, startA, endA, color) {
+  ctx.lineCap = 'round'
+  ctx.strokeStyle = OUTLINE
+  ctx.lineWidth = w + DETAIL_W * 1.4
   ctx.beginPath()
-  ctx.arc(x, y, radius, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.globalAlpha = 1
-}
-
-function glowShape(ctx, pathFn, cx, cy, size, color, intensity = 1) {
-  for (let i = 3; i >= 1; i--) {
-    ctx.save()
-    ctx.globalAlpha = 0.12 * i * intensity
-    ctx.translate(cx, cy)
-    ctx.scale(1 + i * 0.35, 1 + i * 0.35)
-    ctx.translate(-cx, -cy)
-    ctx.fillStyle = color
-    pathFn(ctx, cx, cy, size)
-    ctx.fill()
-    ctx.restore()
-  }
-  ctx.save()
-  ctx.globalAlpha = Math.min(1, intensity)
-  ctx.fillStyle = color
-  pathFn(ctx, cx, cy, size)
-  ctx.fill()
-  ctx.restore()
-  if (pathFn === bowPath) {
-    ctx.save()
-    ctx.globalAlpha = Math.min(1, intensity)
-    ctx.fillStyle = shade(color, -0.2)
-    ctx.beginPath()
-    ctx.arc(cx, cy, size * 0.32, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.restore()
-  }
+  ctx.arc(cx, cy, r, startA, endA)
+  ctx.stroke()
+  ctx.strokeStyle = color
+  ctx.lineWidth = w
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, startA, endA)
+  ctx.stroke()
 }
 
 function bodyHalfWidth(chassisKey, W, atBottom) {
@@ -200,55 +184,41 @@ function drawDressBody(ctx, key, cx, topY, bottomY, paint, W) {
   ctx.lineTo(x1t - 3, topY + 10)
   ctx.quadraticCurveTo(x1t, topY, x1t + 8, topY)
   ctx.closePath()
-
-  const grad = ctx.createLinearGradient(cx, topY, cx, bottomY)
-  grad.addColorStop(0, shade(paint, 0.45))
-  grad.addColorStop(0.5, shade(paint, 0.06))
-  grad.addColorStop(1, shade(paint, -0.18))
-  ctx.fillStyle = grad
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(0,0,0,0.25)'
-  ctx.lineWidth = 1.2
-  ctx.stroke()
+  flatPath(ctx, paint)
 
   // waist seam
   const waistY = topY + (bottomY - topY) * 0.42
-  ctx.strokeStyle = 'rgba(255,255,255,0.5)'
-  ctx.lineWidth = 1.6
-  ctx.beginPath()
   const waistHalfW = (topW + (bottomW - topW) * 0.42) / 2
+  ctx.strokeStyle = OUTLINE
+  ctx.lineCap = 'round'
+  ctx.lineWidth = DETAIL_W
+  ctx.beginPath()
   ctx.moveTo(cx - waistHalfW, waistY)
   ctx.lineTo(cx + waistHalfW, waistY)
   ctx.stroke()
 
   // collar
-  ctx.fillStyle = '#fbfbfb'
   ctx.beginPath()
-  ctx.moveTo(cx - 11, topY)
-  ctx.lineTo(cx, topY + 11)
-  ctx.lineTo(cx + 11, topY)
-  ctx.lineTo(cx + 15, topY + 4)
-  ctx.lineTo(cx, topY + 19)
-  ctx.lineTo(cx - 15, topY + 4)
+  ctx.moveTo(cx - 12, topY)
+  ctx.lineTo(cx, topY + 12)
+  ctx.lineTo(cx + 12, topY)
+  ctx.lineTo(cx + 16, topY + 3)
+  ctx.lineTo(cx, topY + 20)
+  ctx.lineTo(cx - 16, topY + 3)
   ctx.closePath()
-  ctx.fill()
+  flatPath(ctx, '#fbfbfb', { width: DETAIL_W })
 
   // apron bib
-  ctx.fillStyle = '#fbfbfb'
-  roundRectPath(ctx, cx - topW * 0.22, topY + 20, topW * 0.44, (waistY - topY) * 0.7, 4)
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(0,0,0,0.06)'
-  ctx.lineWidth = 1
-  ctx.stroke()
+  flatRect(ctx, cx - topW * 0.22, topY + 22, topW * 0.44, (waistY - topY) * 0.65, 4, '#fbfbfb', { width: DETAIL_W })
 
   // skirt frill hem stitches
-  ctx.fillStyle = 'rgba(255,255,255,0.55)'
+  ctx.fillStyle = OUTLINE
   const dots = 6
   for (let i = 0; i <= dots; i++) {
     const t = i / dots
     const hx = x1b + 10 + (x2b - x1b - 20) * t
     ctx.beginPath()
-    ctx.arc(hx, bottomY - 6, 1.6, 0, Math.PI * 2)
+    ctx.arc(hx, bottomY - 7, 1.8, 0, Math.PI * 2)
     ctx.fill()
   }
 
@@ -256,124 +226,88 @@ function drawDressBody(ctx, key, cx, topY, bottomY, paint, W) {
 }
 
 function drawHead(ctx, key, cx, cy, paint) {
-  const r = 27
-  const grad = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.15, cx, cy, r)
-  grad.addColorStop(0, shade(paint, 0.55))
-  grad.addColorStop(1, shade(paint, -0.12))
-  ctx.beginPath()
-  ctx.arc(cx, cy, r, 0, Math.PI * 2)
-  ctx.fillStyle = grad
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(0,0,0,0.25)'
-  ctx.lineWidth = 1.2
-  ctx.stroke()
+  const r = 32
 
   // ears/antenna behind-head accents drawn first for catear
   if (key === 'catear') {
-    ctx.fillStyle = shade(paint, 0.15)
     for (const sign of [-1, 1]) {
       ctx.beginPath()
-      ctx.moveTo(cx + sign * r * 0.55, cy - r * 0.7)
-      ctx.lineTo(cx + sign * r * 0.95, cy - r * 1.55)
-      ctx.lineTo(cx + sign * r * 0.2, cy - r * 0.95)
+      ctx.moveTo(cx + sign * r * 0.55, cy - r * 0.65)
+      ctx.lineTo(cx + sign * r * 0.95, cy - r * 1.5)
+      ctx.lineTo(cx + sign * r * 0.2, cy - r * 0.9)
       ctx.closePath()
-      ctx.fill()
-      ctx.strokeStyle = 'rgba(0,0,0,0.2)'
-      ctx.lineWidth = 1
-      ctx.stroke()
-      ctx.fillStyle = shade('#ff9fb6', 0)
+      flatPath(ctx, tint(paint, 0.12), { width: DETAIL_W })
       ctx.beginPath()
-      ctx.moveTo(cx + sign * r * 0.58, cy - r * 0.82)
-      ctx.lineTo(cx + sign * r * 0.78, cy - r * 1.3)
-      ctx.lineTo(cx + sign * r * 0.35, cy - r * 0.95)
+      ctx.moveTo(cx + sign * r * 0.56, cy - r * 0.78)
+      ctx.lineTo(cx + sign * r * 0.76, cy - r * 1.24)
+      ctx.lineTo(cx + sign * r * 0.34, cy - r * 0.9)
       ctx.closePath()
+      ctx.fillStyle = '#ffb3c4'
       ctx.fill()
-      ctx.fillStyle = shade(paint, 0.15)
     }
   }
 
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  flatPath(ctx, paint)
+
   // eyes
-  const eyeDX = r * 0.4, eyeY = cy + r * 0.04, eyeR = r * 0.24
+  const eyeDX = r * 0.4, eyeY = cy + r * 0.06, eyeR = r * 0.25
   for (const sx of [-1, 1]) {
-    ctx.fillStyle = '#33373f'
+    ctx.fillStyle = OUTLINE
     ctx.beginPath()
-    ctx.ellipse(cx + sx * eyeDX, eyeY, eyeR * 0.82, eyeR, 0, 0, Math.PI * 2)
+    ctx.ellipse(cx + sx * eyeDX, eyeY, eyeR * 0.78, eyeR, 0, 0, Math.PI * 2)
     ctx.fill()
-    ctx.fillStyle = 'rgba(255,255,255,0.9)'
-    ctx.beginPath()
-    ctx.arc(cx + sx * eyeDX - eyeR * 0.25, eyeY - eyeR * 0.35, eyeR * 0.3, 0, Math.PI * 2)
-    ctx.fill()
+    shineDot(ctx, cx + sx * eyeDX - eyeR * 0.3, eyeY - eyeR * 0.4, eyeR * 0.32)
   }
 
   // mouth
-  ctx.strokeStyle = 'rgba(0,0,0,0.35)'
-  ctx.lineWidth = 1.6
+  ctx.strokeStyle = OUTLINE
+  ctx.lineCap = 'round'
+  ctx.lineWidth = DETAIL_W
   ctx.beginPath()
-  ctx.arc(cx, eyeY + r * 0.4, r * 0.18, 0.15 * Math.PI, 0.85 * Math.PI)
+  ctx.arc(cx, eyeY + r * 0.42, r * 0.2, 0.15 * Math.PI, 0.85 * Math.PI)
   ctx.stroke()
 
   // blush
-  ctx.fillStyle = 'rgba(255,150,172,0.4)'
+  ctx.fillStyle = 'rgba(255,130,155,0.55)'
   for (const sx of [-1, 1]) {
     ctx.beginPath()
-    ctx.ellipse(cx + sx * r * 0.56, cy + r * 0.26, r * 0.15, r * 0.1, 0, 0, Math.PI * 2)
+    ctx.ellipse(cx + sx * r * 0.58, cy + r * 0.28, r * 0.16, r * 0.1, 0, 0, Math.PI * 2)
     ctx.fill()
   }
 
   if (key === 'ribbon') {
-    ctx.fillStyle = '#ff7fa0'
-    bowPath(ctx, cx, cy - r * 1.08, r * 0.32)
-    ctx.fill()
-    ctx.fillStyle = shade('#ff7fa0', -0.2)
+    bowPath(ctx, cx, cy - r * 1.08, r * 0.34)
+    flatPath(ctx, '#ff7fa0', { width: DETAIL_W })
+    ctx.fillStyle = OUTLINE
     ctx.beginPath()
-    ctx.arc(cx, cy - r * 1.08, r * 0.12, 0, Math.PI * 2)
+    ctx.arc(cx, cy - r * 1.08, r * 0.1, 0, Math.PI * 2)
     ctx.fill()
   } else if (key === 'headband') {
-    ctx.strokeStyle = '#fbfbfb'
-    ctx.lineWidth = r * 0.3
-    ctx.beginPath()
-    ctx.arc(cx, cy - r * 0.1, r * 1.02, Math.PI * 1.08, Math.PI * 1.92)
-    ctx.stroke()
+    outlinedBand(ctx, cx, cy - r * 0.1, r * 1.02, r * 0.3, Math.PI * 1.08, Math.PI * 1.92, '#fbfbfb')
   }
 }
 
 function drawArms(ctx, key, cx, shoulderY, bodyHalfW, paint) {
   for (const sign of [-1, 1]) {
     const ax = cx + sign * (bodyHalfW + 7)
-    roundRectPath(ctx, ax - 7, shoulderY, 14, 24, 6)
-    const grad = ctx.createLinearGradient(ax - 7, shoulderY, ax - 7, shoulderY + 24)
-    grad.addColorStop(0, shade(paint, 0.45))
-    grad.addColorStop(1, shade(paint, -0.15))
-    ctx.fillStyle = grad
-    ctx.fill()
-    ctx.strokeStyle = 'rgba(0,0,0,0.25)'
-    ctx.lineWidth = 1
-    ctx.stroke()
+    flatRect(ctx, ax - 7, shoulderY, 14, 24, 6, paint)
     const handY = shoulderY + 24
     if (key === 'glove') {
-      ctx.fillStyle = '#fbfbfb'
       ctx.beginPath()
-      ctx.arc(ax, handY + 5, 6, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.strokeStyle = 'rgba(0,0,0,0.12)'
-      ctx.lineWidth = 1
-      ctx.stroke()
+      ctx.arc(ax, handY + 5, 6.5, 0, Math.PI * 2)
+      flatPath(ctx, '#fbfbfb', { width: DETAIL_W })
     } else if (key === 'tray') {
-      ctx.fillStyle = '#fbfbfb'
       ctx.beginPath()
-      ctx.ellipse(ax, handY + 4, 9, 3, 0, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.strokeStyle = 'rgba(0,0,0,0.18)'
-      ctx.lineWidth = 1
-      ctx.stroke()
+      ctx.ellipse(ax, handY + 4, 9, 3.2, 0, 0, Math.PI * 2)
+      flatPath(ctx, '#fbfbfb', { width: DETAIL_W })
     } else if (key === 'ribboncuff') {
-      ctx.fillStyle = shade(paint, -0.05)
       ctx.beginPath()
-      ctx.arc(ax, handY + 6, 5, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = '#ff7fa0'
+      ctx.arc(ax, handY + 6, 5.5, 0, Math.PI * 2)
+      flatPath(ctx, tint(paint, -0.08), { width: DETAIL_W })
       bowPath(ctx, ax, handY - 2, 4.5)
-      ctx.fill()
+      flatPath(ctx, '#ff7fa0', { width: DETAIL_W })
     }
   }
 }
@@ -381,63 +315,64 @@ function drawArms(ctx, key, cx, shoulderY, bodyHalfW, paint) {
 function drawLegs(ctx, key, cx, bodyHalfBottomW, topY, bottomY, paint) {
   if (key === 'apronskirt') {
     const w = bodyHalfBottomW * 2 * 0.82
+    const midY = topY + (bottomY - topY) * 0.5
     ctx.beginPath()
     ctx.moveTo(cx - w / 2 + 6, topY - 4)
     ctx.lineTo(cx + w / 2 - 6, topY - 4)
-    ctx.quadraticCurveTo(cx + w / 2, topY - 4, cx + w / 2 - 2, topY + (bottomY - topY) * 0.5 - 6)
-    ctx.quadraticCurveTo(cx + w / 2 - 2, topY + (bottomY - topY) * 0.5, cx + w / 2 - 10, topY + (bottomY - topY) * 0.5)
-    ctx.lineTo(cx - w / 2 + 10, topY + (bottomY - topY) * 0.5)
-    ctx.quadraticCurveTo(cx - w / 2 + 2, topY + (bottomY - topY) * 0.5, cx - w / 2 + 2, topY + (bottomY - topY) * 0.5 - 6)
+    ctx.quadraticCurveTo(cx + w / 2, topY - 4, cx + w / 2 - 2, midY - 6)
+    ctx.quadraticCurveTo(cx + w / 2 - 2, midY, cx + w / 2 - 10, midY)
+    ctx.lineTo(cx - w / 2 + 10, midY)
+    ctx.quadraticCurveTo(cx - w / 2 + 2, midY, cx - w / 2 + 2, midY - 6)
     ctx.quadraticCurveTo(cx - w / 2, topY - 4, cx - w / 2 + 6, topY - 4)
     ctx.closePath()
-    const grad = ctx.createLinearGradient(cx, topY, cx, topY + (bottomY - topY) * 0.5)
-    grad.addColorStop(0, shade(paint, 0.1))
-    grad.addColorStop(1, shade(paint, -0.2))
-    ctx.fillStyle = grad
-    ctx.fill()
-    ctx.strokeStyle = 'rgba(0,0,0,0.2)'
-    ctx.lineWidth = 1
-    ctx.stroke()
+    flatPath(ctx, paint)
     for (const sign of [-1, 1]) {
-      ctx.fillStyle = '#33373f'
       ctx.beginPath()
-      ctx.ellipse(cx + sign * w * 0.2, bottomY - 4, 7, 4, 0, 0, Math.PI * 2)
-      ctx.fill()
+      ctx.ellipse(cx + sign * w * 0.2, bottomY - 4, 7.5, 4.5, 0, 0, Math.PI * 2)
+      flatPath(ctx, OUTLINE, { outline: false })
     }
   } else if (key === 'bipedboots') {
     for (const sign of [-1, 1]) {
       const lx = cx + sign * bodyHalfBottomW * 0.4
-      roundRectPath(ctx, lx - 5, topY, 10, bottomY - topY - 10, 4)
-      ctx.fillStyle = shade(paint, 0.12)
-      ctx.fill()
-      ctx.strokeStyle = 'rgba(0,0,0,0.2)'
-      ctx.lineWidth = 1
-      ctx.stroke()
-      ctx.fillStyle = '#33373f'
+      flatRect(ctx, lx - 5.5, topY, 11, bottomY - topY - 11, 4, paint)
       ctx.beginPath()
-      ctx.ellipse(lx, bottomY - 5, 9, 6, 0, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = shade('#ff7fa0', 0)
+      ctx.ellipse(lx, bottomY - 5, 9.5, 6.5, 0, 0, Math.PI * 2)
+      flatPath(ctx, OUTLINE, { outline: false })
+      ctx.fillStyle = '#ff9fb6'
       ctx.beginPath()
       ctx.arc(lx, bottomY - 10, 2, 0, Math.PI * 2)
       ctx.fill()
     }
   } else if (key === 'hoverbase') {
     const ringY = topY + 16
-    glowCircle(ctx, cx, ringY, 16, shade(paint, 0.25), 0.75)
-    ctx.strokeStyle = 'rgba(255,255,255,0.4)'
-    ctx.lineWidth = 1.4
     ctx.beginPath()
-    ctx.ellipse(cx, ringY, 20, 6, 0, 0, Math.PI * 2)
-    ctx.stroke()
+    ctx.ellipse(cx, ringY, 18, 9, 0, 0, Math.PI * 2)
+    flatPath(ctx, tint(paint, 0.1), { width: DETAIL_W })
+    ctx.beginPath()
+    ctx.ellipse(cx, ringY, 9, 4, 0, 0, Math.PI * 2)
+    ctx.fillStyle = tint(paint, -0.15)
+    ctx.fill()
   }
 }
 
-function drawCore(ctx, key, cx, coreY, intensity = 1) {
+function drawCore(ctx, key, cx, coreY, scale = 1) {
   const spec = CORE_OPTIONS.find((c) => c.key === key)
-  if (spec.shape === 'heart') glowShape(ctx, heartPath, cx, coreY, 7, spec.color, intensity)
-  else if (spec.shape === 'star') glowShape(ctx, (c, x, y, s) => starPath(c, x, y, s, s * 0.45), cx, coreY, 8, spec.color, intensity)
-  else glowShape(ctx, bowPath, cx, coreY, 7, spec.color, intensity)
+  ctx.save()
+  ctx.translate(cx, coreY)
+  ctx.scale(scale, scale)
+  ctx.translate(-cx, -coreY)
+  if (spec.shape === 'heart') heartPath(ctx, cx, coreY, 8)
+  else if (spec.shape === 'star') starPath(ctx, cx, coreY, 9.5, 4.2)
+  else bowPath(ctx, cx, coreY, 8)
+  flatPath(ctx, spec.color, { width: DETAIL_W })
+  if (spec.shape === 'bow') {
+    ctx.fillStyle = OUTLINE
+    ctx.beginPath()
+    ctx.arc(cx, coreY, 2.4, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  shineDot(ctx, cx - 2.6, coreY - 2.6, 1.8)
+  ctx.restore()
 }
 
 function drawRobot(canvas, build) {
@@ -445,15 +380,15 @@ function drawRobot(canvas, build) {
   const W = canvas.width, H = canvas.height
   ctx.clearRect(0, 0, W, H)
   const cx = W / 2
-  const headCenterY = H * 0.17
-  const bodyTopY = H * 0.32
-  const bodyBottomY = H * 0.64
+  const headCenterY = H * 0.18
+  const bodyTopY = H * 0.36
+  const bodyBottomY = H * 0.66
   const legTopY = bodyBottomY
   const legBottomY = H * 0.92
 
   const paint = COLOR_OPTIONS.find((c) => c.key === build.colorKey)?.hex || '#f0c7d2'
 
-  ctx.fillStyle = 'rgba(0,0,0,0.28)'
+  ctx.fillStyle = 'rgba(0,0,0,0.18)'
   ctx.beginPath()
   ctx.ellipse(cx, H * 0.95, W * 0.3, H * 0.02, 0, 0, Math.PI * 2)
   ctx.fill()
@@ -478,7 +413,7 @@ function drawRobot(canvas, build) {
   }
 
   if (build.headKey) drawHead(ctx, build.headKey, cx, headCenterY, paint)
-  else placeholderSlot(ctx, cx - 27, headCenterY - 27, 54, 54)
+  else placeholderSlot(ctx, cx - 32, headCenterY - 32, 64, 64)
 }
 
 // --- Stats --------------------------------------------------------------------
