@@ -82,11 +82,6 @@ jobs:
       - run: npm run build -- --base=/angular_pc/robot/
         working-directory: robot-sim
       - run: mkdir -p dist/robot && cp -r robot-sim/dist/. dist/robot/
-      - run: npm ci
-        working-directory: robot-builder
-      - run: npm run build -- --base=/angular_pc/builder/
-        working-directory: robot-builder
-      - run: mkdir -p dist/builder && cp -r robot-builder/dist/. dist/builder/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
