@@ -225,6 +225,98 @@ function getAimDirection(yaw, pitch) {
   return dir
 }
 
+// --- Audio (Web Audio synthesis, no asset files) -----------------------------
+let audioCtx = null
+let masterGain = null
+function ensureAudio() {
+  if (audioCtx) return audioCtx
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+  masterGain = audioCtx.createGain()
+  masterGain.gain.value = 0.4
+  masterGain.connect(audioCtx.destination)
+  return audioCtx
+}
+
+function noiseBuffer(ctx, duration) {
+  const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * duration), ctx.sampleRate)
+  const data = buffer.getChannelData(0)
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
+  return buffer
+}
+
+function playTone({ freqFrom, freqTo, duration, type = 'sawtooth', gain = 0.3, delay = 0 }) {
+  if (!audioCtx) return
+  const ctx = audioCtx
+  const t0 = ctx.currentTime + delay
+  const osc = ctx.createOscillator()
+  osc.type = type
+  osc.frequency.setValueAtTime(Math.max(20, freqFrom), t0)
+  osc.frequency.exponentialRampToValueAtTime(Math.max(20, freqTo), t0 + duration)
+  const g = ctx.createGain()
+  g.gain.setValueAtTime(gain, t0)
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + duration)
+  osc.connect(g)
+  g.connect(masterGain)
+  osc.start(t0)
+  osc.stop(t0 + duration + 0.02)
+}
+
+function playNoiseBurst({ duration, filterFreqFrom, filterFreqTo, gain = 0.3, type = 'lowpass', delay = 0 }) {
+  if (!audioCtx) return
+  const ctx = audioCtx
+  const t0 = ctx.currentTime + delay
+  const src = ctx.createBufferSource()
+  src.buffer = noiseBuffer(ctx, duration)
+  const filter = ctx.createBiquadFilter()
+  filter.type = type
+  filter.frequency.setValueAtTime(filterFreqFrom, t0)
+  filter.frequency.exponentialRampToValueAtTime(Math.max(40, filterFreqTo), t0 + duration)
+  const g = ctx.createGain()
+  g.gain.setValueAtTime(gain, t0)
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + duration)
+  src.connect(filter)
+  filter.connect(g)
+  g.connect(masterGain)
+  src.start(t0)
+  src.stop(t0 + duration + 0.02)
+}
+
+function playBlasterSound() {
+  playTone({ freqFrom: 1100, freqTo: 280, duration: 0.09, type: 'sawtooth', gain: 0.16 })
+}
+function playEnemyBlasterSound() {
+  playTone({ freqFrom: 700, freqTo: 160, duration: 0.1, type: 'sawtooth', gain: 0.12 })
+}
+function playMissileLaunchSound() {
+  playTone({ freqFrom: 140, freqTo: 480, duration: 0.3, type: 'sawtooth', gain: 0.2 })
+  playNoiseBurst({ duration: 0.25, filterFreqFrom: 1800, filterFreqTo: 300, gain: 0.1 })
+}
+function playExplosionSound() {
+  playNoiseBurst({ duration: 0.45, filterFreqFrom: 2200, filterFreqTo: 80, gain: 0.32 })
+  playTone({ freqFrom: 90, freqTo: 40, duration: 0.35, type: 'sine', gain: 0.28 })
+}
+function playHitSound() {
+  playTone({ freqFrom: 220, freqTo: 90, duration: 0.14, type: 'square', gain: 0.2 })
+}
+function playOverheatSound() {
+  playTone({ freqFrom: 500, freqTo: 500, duration: 0.09, type: 'square', gain: 0.14 })
+  playTone({ freqFrom: 750, freqTo: 750, duration: 0.09, type: 'square', gain: 0.14, delay: 0.11 })
+}
+function playWaveClearSound() {
+  playTone({ freqFrom: 520, freqTo: 520, duration: 0.12, type: 'sine', gain: 0.18 })
+  playTone({ freqFrom: 660, freqTo: 660, duration: 0.12, type: 'sine', gain: 0.18, delay: 0.12 })
+  playTone({ freqFrom: 880, freqTo: 880, duration: 0.18, type: 'sine', gain: 0.2, delay: 0.24 })
+}
+function playVictorySound() {
+  playTone({ freqFrom: 523, freqTo: 523, duration: 0.14, type: 'sine', gain: 0.2 })
+  playTone({ freqFrom: 659, freqTo: 659, duration: 0.14, type: 'sine', gain: 0.2, delay: 0.14 })
+  playTone({ freqFrom: 784, freqTo: 784, duration: 0.14, type: 'sine', gain: 0.2, delay: 0.28 })
+  playTone({ freqFrom: 1047, freqTo: 1047, duration: 0.32, type: 'sine', gain: 0.22, delay: 0.42 })
+}
+function playDefeatSound() {
+  playTone({ freqFrom: 300, freqTo: 70, duration: 0.6, type: 'sawtooth', gain: 0.2 })
+}
+
 // --- Effects (beams / flashes / explosions) ---------------------------------
 const effects = []
 function spawnEffect(mesh, { duration, fromOpacity, toOpacity, fromScale = 1, toScale = 1 }) {
@@ -254,6 +346,7 @@ function spawnExplosion(pos) {
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.6, 10, 10), new THREE.MeshBasicMaterial({ color: 0xffa94d }))
   mesh.position.copy(pos)
   spawnEffect(mesh, { duration: 0.5, fromOpacity: 0.9, toOpacity: 0, fromScale: 0.3, toScale: 2.4 })
+  playExplosionSound()
 }
 function updateEffects() {
   const t = clock.elapsedTime
@@ -345,6 +438,7 @@ function enemyFire(en) {
     life: 4,
     damage: rand(8, 14),
   })
+  playEnemyBlasterSound()
 }
 
 function damageEnemy(enemy, dmg) {
@@ -468,7 +562,11 @@ function resolveCircleObstacles(pos, radius) {
 function fireBlaster() {
   player.blasterCooldown = BLASTER_INTERVAL
   player.heat = Math.min(HEAT_MAX, player.heat + BLASTER_HEAT_PER_SHOT)
-  if (player.heat >= HEAT_MAX) player.overheatUntil = clock.elapsedTime + OVERHEAT_LOCK
+  if (player.heat >= HEAT_MAX) {
+    player.overheatUntil = clock.elapsedTime + OVERHEAT_LOCK
+    playOverheatSound()
+  }
+  playBlasterSound()
 
   const aimDir = getAimDirection(player.yaw, player.pitch)
   const headPos = new THREE.Vector3(player.pos.x, player.pos.y + 1.9, player.pos.z)
@@ -518,6 +616,7 @@ function fireMissile() {
   mesh.position.copy(startPos)
   scene.add(mesh)
   missiles.push({ mesh, pos: startPos.clone(), vel: aimDir.clone().multiplyScalar(MISSILE_SPEED), life: MISSILE_LIFETIME, target: null })
+  playMissileLaunchSound()
 }
 
 function findMissileTarget(pos, vel) {
@@ -584,6 +683,7 @@ function damagePlayer(dmg) {
   if (state.phase !== 'playing') return
   player.hp = Math.max(0, player.hp - dmg)
   flashHit()
+  playHitSound()
   if (player.hp <= 0) triggerEnd(false)
 }
 function flashHit() {
@@ -751,12 +851,15 @@ function checkWaveClear() {
       showWaveBanner('WAVE CLEAR')
       state.nextWaveTime = clock.elapsedTime + 2.4
       state.victoryPending = false
+      playWaveClearSound()
     }
   }
 }
 
 function triggerEnd(victory) {
   state.phase = 'ended'
+  if (victory) playVictorySound()
+  else playDefeatSound()
   blasterHeld = false
   document.exitPointerLock()
   hud.style.display = 'none'
@@ -879,6 +982,7 @@ function resetGame() {
 }
 
 startBtn.addEventListener('click', () => {
+  ensureAudio()
   titleScreen.style.display = 'none'
   hud.style.display = 'block'
   endScreen.style.display = 'none'
@@ -887,6 +991,7 @@ startBtn.addEventListener('click', () => {
 })
 
 retryBtn.addEventListener('click', () => {
+  ensureAudio()
   endScreen.style.display = 'none'
   hud.style.display = 'block'
   resetGame()
