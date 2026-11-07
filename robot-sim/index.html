@@ -82,9 +82,14 @@
       #hp-fill { background: linear-gradient(90deg, #ff5a5a, #ff9a5a); }
       #heat-fill { background: linear-gradient(90deg, #ffcf4d, #ff6b4d); }
       #energy-fill { background: linear-gradient(90deg, #4dd2ff, #4d8bff); }
+      #shield-fill { background: linear-gradient(90deg, #7fe0ff, #5fd0ff); }
       #overheat-tag {
         font-size: 0.7rem; color: #ff6b6b; text-align: center; margin-top: 2px; opacity: 0;
         text-shadow: 0 0 6px rgba(255,80,80,0.8);
+      }
+      #shield-tag {
+        font-size: 0.7rem; color: #7fe0ff; text-align: center; margin-top: 2px; opacity: 0;
+        text-shadow: 0 0 6px rgba(95,208,255,0.8);
       }
 
       #top-panel {
@@ -146,7 +151,8 @@
       <button class="mech-btn" id="start-btn">출격</button>
       <div class="hint">
         WASD 이동 · 마우스로 기체 조준/선회 (클릭해서 시점 고정) · 좌클릭 블래스터 발사 · 우클릭 유도 미사일 발사<br/>
-        Shift 부스트 대시 · 블래스터는 과열되면 잠시 발사가 멈춰요 · 모든 적을 격파하면 다음 웨이브로 진행합니다
+        Shift 부스트 대시 · E 방어막 생성(짧은 시간 모든 피해 무효화, 쿨타임 있음) · 블래스터는 과열되면 잠시 발사가 멈춰요<br/>
+        모든 적을 격파하면 다음 웨이브로 진행합니다
       </div>
     </div>
 
@@ -163,7 +169,9 @@
         <div class="bar-row"><span class="bar-label">HP</span><div class="bar-bg"><div class="bar-fill" id="hp-fill" style="width:100%"></div></div></div>
         <div class="bar-row"><span class="bar-label">HEAT</span><div class="bar-bg"><div class="bar-fill" id="heat-fill" style="width:0%"></div></div></div>
         <div class="bar-row"><span class="bar-label">BOOST</span><div class="bar-bg"><div class="bar-fill" id="energy-fill" style="width:100%"></div></div></div>
+        <div class="bar-row"><span class="bar-label">SHIELD</span><div class="bar-bg"><div class="bar-fill" id="shield-fill" style="width:100%"></div></div></div>
         <div id="overheat-tag">⚠ OVERHEAT</div>
+        <div id="shield-tag">🛡 SHIELD ACTIVE</div>
       </div>
       <div id="ammo-panel">
         <div>MISSILE</div>

@@ -13,6 +13,8 @@ const hpFill = document.getElementById('hp-fill')
 const heatFill = document.getElementById('heat-fill')
 const energyFill = document.getElementById('energy-fill')
 const overheatTag = document.getElementById('overheat-tag')
+const shieldFill = document.getElementById('shield-fill')
+const shieldTag = document.getElementById('shield-tag')
 const waveNumEl = document.getElementById('wave-num')
 const waveTotalEl = document.getElementById('wave-total')
 const killCountEl = document.getElementById('kill-count')
@@ -60,6 +62,9 @@ const MISSILE_LIFETIME = 4
 
 const PLAYER_HP_MAX = 100
 const PLAYER_RADIUS = 1.6
+
+const SHIELD_DURATION = 2.5
+const SHIELD_COOLDOWN = 10
 
 const ENEMY_HP_BASE = 36
 const ENEMY_SPEED = 4.2
@@ -298,6 +303,14 @@ function playExplosionSound() {
 function playHitSound() {
   playTone({ freqFrom: 220, freqTo: 90, duration: 0.14, type: 'square', gain: 0.2 })
 }
+function playShieldActivateSound() {
+  playTone({ freqFrom: 280, freqTo: 950, duration: 0.25, type: 'sine', gain: 0.18 })
+  playNoiseBurst({ duration: 0.2, filterFreqFrom: 500, filterFreqTo: 2200, gain: 0.07 })
+}
+function playShieldBlockSound() {
+  playTone({ freqFrom: 1300, freqTo: 1300, duration: 0.07, type: 'sine', gain: 0.16 })
+  playNoiseBurst({ duration: 0.09, filterFreqFrom: 3200, filterFreqTo: 1400, gain: 0.08 })
+}
 function playOverheatSound() {
   playTone({ freqFrom: 500, freqTo: 500, duration: 0.09, type: 'square', gain: 0.14 })
   playTone({ freqFrom: 750, freqTo: 750, duration: 0.09, type: 'square', gain: 0.14, delay: 0.11 })
@@ -382,8 +395,17 @@ const player = {
   blasterCooldown: 0,
   walkCycle: 0,
   moving: false,
+  shieldActiveUntil: 0,
+  shieldCooldownStartedAt: -SHIELD_COOLDOWN,
   parts: playerBuild,
 }
+
+const shieldMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(2.1, 20, 14),
+  new THREE.MeshBasicMaterial({ color: 0x5fd0ff, transparent: true, opacity: 0.2, side: THREE.DoubleSide, depthWrite: false }),
+)
+shieldMesh.visible = false
+scene.add(shieldMesh)
 
 const raycaster = new THREE.Raycaster()
 let lastGun = 'R'
@@ -681,6 +703,11 @@ function updateMissiles(dt) {
 // --- Player damage / state ---------------------------------------------------
 function damagePlayer(dmg) {
   if (state.phase !== 'playing') return
+  if (clock.elapsedTime < player.shieldActiveUntil) {
+    spawnShieldHitEffect()
+    playShieldBlockSound()
+    return
+  }
   player.hp = Math.max(0, player.hp - dmg)
   flashHit()
   playHitSound()
@@ -695,6 +722,30 @@ function flashHit() {
   })
 }
 
+function activateShield() {
+  if (state.phase !== 'playing') return
+  const now = clock.elapsedTime
+  if (now - player.shieldCooldownStartedAt < SHIELD_COOLDOWN) return
+  player.shieldCooldownStartedAt = now
+  player.shieldActiveUntil = now + SHIELD_DURATION
+  playShieldActivateSound()
+}
+
+function spawnShieldHitEffect() {
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.4, 10, 10), new THREE.MeshBasicMaterial({ color: 0x9fe8ff }))
+  mesh.position.set(player.pos.x, player.pos.y + 1.6, player.pos.z)
+  spawnEffect(mesh, { duration: 0.25, fromOpacity: 0.85, toOpacity: 0, fromScale: 0.8, toScale: 2.4 })
+}
+
+function updateShield() {
+  const active = clock.elapsedTime < player.shieldActiveUntil
+  shieldMesh.visible = active
+  if (active) {
+    shieldMesh.position.set(player.pos.x, player.pos.y + 1.6, player.pos.z)
+    shieldMesh.material.opacity = 0.16 + Math.sin(clock.elapsedTime * 10) * 0.05
+  }
+}
+
 // --- Movement / camera ---------------------------------------------------------
 const keys = new Set()
 let boosting = false
@@ -704,6 +755,7 @@ let pausedForPointer = false
 window.addEventListener('keydown', (e) => {
   keys.add(e.code)
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') boosting = true
+  if (e.code === 'KeyE') activateShield()
 })
 window.addEventListener('keyup', (e) => {
   keys.delete(e.code)
@@ -876,6 +928,9 @@ function updateHud() {
   heatFill.style.width = `${clamp(player.heat, 0, HEAT_MAX)}%`
   energyFill.style.width = `${clamp(player.energy, 0, ENERGY_MAX)}%`
   overheatTag.style.opacity = clock.elapsedTime < player.overheatUntil ? '1' : '0'
+  const shieldCharge = clamp(((clock.elapsedTime - player.shieldCooldownStartedAt) / SHIELD_COOLDOWN) * 100, 0, 100)
+  shieldFill.style.width = `${shieldCharge}%`
+  shieldTag.style.opacity = clock.elapsedTime < player.shieldActiveUntil ? '1' : '0'
   waveNumEl.textContent = String(state.wave)
   killCountEl.textContent = String(state.kills)
   missileCountEl.textContent = String(player.missiles)
@@ -928,6 +983,7 @@ function updateGame(dt) {
   updateEnemyProjectiles(dt)
   updateMissiles(dt)
   updateEffects()
+  updateShield()
   updateCamera()
   updateHud()
   drawRadar()
@@ -971,6 +1027,8 @@ function resetGame() {
   player.missileRegenTimer = MISSILE_REGEN_TIME
   player.blasterCooldown = 0
   player.walkCycle = 0
+  player.shieldActiveUntil = 0
+  player.shieldCooldownStartedAt = clock.elapsedTime - SHIELD_COOLDOWN
 
   state.wave = 0
   state.kills = 0
