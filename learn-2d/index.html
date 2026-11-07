@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>게임 개발 1단계: 캐릭터 이동</title>
+    <style>
+      /* 화면 전체를 어두운 색으로 채우고, 캔버스를 가운데 놓는다 */
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #222;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      canvas {
+        background: #8fbc5a; /* 맵(잔디) 배경색 */
+        border: 4px solid #444;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 게임이 그려질 캔버스. 가로 640, 세로 480 크기의 "맵" -->
+    <canvas id="game" width="640" height="480"></canvas>
+
+    <script>
+      // ----------------------------------------------------------------
+      // 1. 캔버스 준비
+      // ----------------------------------------------------------------
+      // getElementById로 위의 <canvas> 태그를 JS에서 조작할 수 있게 가져온다.
+      const canvas = document.getElementById('game')
+      // getContext('2d')는 "이 캔버스에 2D 그림을 그릴 도구"를 꺼내는 것.
+      // 이 ctx(context) 객체의 함수들로 사각형, 원, 글자 등을 그린다.
+      const ctx = canvas.getContext('2d')
+
+      // ----------------------------------------------------------------
+      // 2. 캐릭터 상태(데이터)
+      // ----------------------------------------------------------------
+      // "캐릭터"는 사실 그림 파일이 아니라, 그냥 숫자 몇 개로 이루어진 객체다.
+      // x, y: 캐릭터의 현재 위치 (캔버스 왼쪽 위가 0,0)
+      // size: 사각형 한 변의 길이
+      // speed: 한 번에 몇 픽셀씩 움직일지
+      const player = {
+        x: 320,
+        y: 240,
+        size: 32,
+        speed: 4,
+        color: '#2b6cff',
+      }
+
+      // ----------------------------------------------------------------
+      // 3. 키보드 입력 받기
+      // ----------------------------------------------------------------
+      // 사용자가 어떤 키를 누르고 있는지 기록하는 Set(중복 없는 목록).
+      // "누르는 순간"과 "떼는 순간" 두 이벤트로 Set에 추가/제거한다.
+      // 이렇게 하면 여러 키를 동시에 눌러도(예: 위+오른쪽 대각선) 자연스럽다.
+      const keysDown = new Set()
+
+      window.addEventListener('keydown', (e) => {
+        keysDown.add(e.key.toLowerCase())
+      })
+      window.addEventListener('keyup', (e) => {
+        keysDown.delete(e.key.toLowerCase())
+      })
+
+      // ----------------------------------------------------------------
+      // 4. 매 프레임 상태 업데이트 (이동 로직)
+      // ----------------------------------------------------------------
+      function update() {
+        // 눌려있는 키에 따라 x, y를 더하거나 뺀다.
+        // 캔버스 좌표는 "아래로 갈수록 y가 커진다"는 점에 주의.
+        if (keysDown.has('w') || keysDown.has('arrowup')) player.y -= player.speed
+        if (keysDown.has('s') || keysDown.has('arrowdown')) player.y += player.speed
+        if (keysDown.has('a') || keysDown.has('arrowleft')) player.x -= player.speed
+        if (keysDown.has('d') || keysDown.has('arrowright')) player.x += player.speed
+
+        // 캐릭터가 맵(캔버스) 밖으로 나가지 않도록 위치를 제한한다.
+        // Math.max/Math.min을 같이 쓰면 "최솟값~최댓값 사이로 가둔다"는 뜻이 된다.
+        const half = player.size / 2
+        player.x = Math.max(half, Math.min(canvas.width - half, player.x))
+        player.y = Math.max(half, Math.min(canvas.height - half, player.y))
+      }
+
+      // ----------------------------------------------------------------
+      // 5. 매 프레임 화면 그리기
+      // ----------------------------------------------------------------
+      function draw() {
+        // 지난 프레임에 그렸던 그림을 지우고, 맵 배경을 다시 깐다.
+        // (지우지 않으면 캐릭터가 움직인 자리마다 흔적이 계속 남는다)
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+        // 맵 위에 격자(grid)를 살짝 그려서 "타일 맵" 느낌을 준다. 없어도 게임은 똑같이 동작한다.
+        ctx.strokeStyle = 'rgba(0,0,0,0.08)'
+        for (let x = 0; x < canvas.width; x += 32) {
+          ctx.beginPath()
+          ctx.moveTo(x, 0)
+          ctx.lineTo(x, canvas.height)
+          ctx.stroke()
+        }
+        for (let y = 0; y < canvas.height; y += 32) {
+          ctx.beginPath()
+          ctx.moveTo(0, y)
+          ctx.lineTo(canvas.width, y)
+          ctx.stroke()
+        }
+
+        // 캐릭터를 사각형으로 그린다. (x,y가 "중심"이 되도록 절반만큼 왼쪽/위로 옮겨서 그림)
+        ctx.fillStyle = player.color
+        ctx.fillRect(player.x - player.size / 2, player.y - player.size / 2, player.size, player.size)
+      }
+
+      // ----------------------------------------------------------------
+      // 6. 게임 루프
+      // ----------------------------------------------------------------
+      // 게임은 "상태를 업데이트하고 → 화면을 그리고 → 또 업데이트하고 → 또 그리고"를
+      // 1초에 수십 번(보통 60번) 반복하는 것뿐이다. 이게 거의 모든 게임의 기본 구조다.
+      function loop() {
+        update()
+        draw()
+        // requestAnimationFrame은 "다음 화면 갱신 타이밍에 이 함수를 다시 불러줘"라는 뜻.
+        // 브라우저가 알아서 적절한 속도(보통 초당 60번)로 호출해준다.
+        requestAnimationFrame(loop)
+      }
+
+      loop() // 최초 1회 실행 -> 이후로는 스스로 계속 반복된다.
+    </script>
+  </body>
+</html>

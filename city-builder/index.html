@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>미니시티 빌더</title>
+    <style>
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        background: #1b2420;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: sans-serif;
+        color: #eee;
+        gap: 0.75rem;
+        padding: 1rem;
+        box-sizing: border-box;
+      }
+      canvas {
+        border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        max-width: 100%;
+        cursor: crosshair;
+      }
+      #hint {
+        font-size: 0.85rem;
+        opacity: 0.8;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="hint">
+      방향키/WASD 카메라 이동 · 숫자 1-7 또는 하단 버튼으로 도구 선택 · 클릭/드래그로 배치 · [-]/[=] 세율 조절 · 스페이스 일시정지
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
