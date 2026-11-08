@@ -82,13 +82,12 @@ function playNoiseBurst({ duration, filterFreqFrom, filterFreqTo, gain = 0.3, ty
   src.start(t0)
   src.stop(t0 + duration + 0.02)
 }
-function playClashSound(tactic) {
+function playClashSound(ranged) {
   playNoiseBurst({ duration: 0.22, filterFreqFrom: 2600, filterFreqTo: 300, gain: 0.22 })
-  playTone({ freqFrom: tactic === 'charge' ? 180 : 260, freqTo: 70, duration: 0.18, type: 'square', gain: 0.16 })
+  playTone({ freqFrom: ranged ? 520 : 220, freqTo: 70, duration: 0.18, type: 'square', gain: 0.16 })
 }
-function playAmbushSound(success) {
-  if (success) playTone({ freqFrom: 900, freqTo: 180, duration: 0.3, type: 'sawtooth', gain: 0.22 })
-  else playTone({ freqFrom: 160, freqTo: 90, duration: 0.3, type: 'square', gain: 0.18 })
+function playMoveSound() {
+  playTone({ freqFrom: 300, freqTo: 420, duration: 0.08, type: 'sine', gain: 0.08 })
 }
 function playVictorySound() {
   playTone({ freqFrom: 523, freqTo: 523, duration: 0.14, type: 'sine', gain: 0.2 })
@@ -101,20 +100,6 @@ function playDefeatSound() {
 }
 
 // ---------- Battle FX ----------
-const BATTLE_LEFT_X = MAP_X0 + 150
-const BATTLE_RIGHT_X = MAP_X0 + MAP_W - 150
-const BATTLE_FORM_Y = MAP_Y0 + 150
-
-let shakeTimer = 0
-let shakeMag = 0
-function triggerShake(mag, duration = 0.22) {
-  shakeTimer = duration
-  shakeMag = mag
-}
-function updateShake() {
-  if (shakeTimer > 0) shakeTimer = Math.max(0, shakeTimer - 1 / 60)
-}
-
 let floatingTexts = []
 function spawnFloatingText(text, x, y, color) {
   floatingTexts.push({ text, x, y, life: 1.0, maxLife: 1.0, color })
@@ -382,8 +367,239 @@ function breakPactPenalty(attackerId, defenderId) {
 }
 
 // ---------- Combat ----------
-const TACTICS = ['charge', 'volley', 'defend', 'ambush']
-const TACTIC_LABEL = { charge: '돌격', volley: '사격', defend: '수비', ambush: '매복' }
+// ---------- Tactical battle grid ----------
+const GRID_COLS = 8
+const GRID_ROWS = 5
+const TILE_W = 80
+const TILE_H = 54
+const GRID_X0 = MAP_X0 + (MAP_W - GRID_COLS * TILE_W) / 2
+const GRID_Y0 = MAP_Y0 + 70
+const MOVE_RANGE = { spear: 2, bow: 2, cavalry: 3 }
+const ATTACK_RANGE = { spear: 1, bow: 2, cavalry: 1 }
+const UNIT_ICON_LABEL = { spear: '창', bow: '궁', cavalry: '기' }
+
+function gridDistance(a, b) {
+  return Math.max(Math.abs(a.gx - b.gx), Math.abs(a.gy - b.gy))
+}
+
+function squadStartRows(n) {
+  if (n <= 1) return [2]
+  if (n === 2) return [1, 3]
+  return [1, 2, 3]
+}
+
+function buildSquads(side, troops, gx) {
+  const types = ['spear', 'bow', 'cavalry'].filter((t) => troops[t] > 0)
+  const rows = squadStartRows(types.length)
+  return types.map((t, i) => ({
+    id: `${side}_${t}`,
+    side,
+    type: t,
+    count: troops[t],
+    gx,
+    gy: rows[i],
+    acted: false,
+  }))
+}
+
+function squadAt(b, gx, gy) {
+  return b.squads.find((s) => s.count > 0 && s.gx === gx && s.gy === gy)
+}
+
+function computeMoveRange(b, squad) {
+  const range = MOVE_RANGE[squad.type]
+  const tiles = []
+  for (let x = 0; x < GRID_COLS; x++) {
+    for (let y = 0; y < GRID_ROWS; y++) {
+      const d = Math.max(Math.abs(x - squad.gx), Math.abs(y - squad.gy))
+      if (d > range) continue
+      const occupied = b.squads.some((s) => s.count > 0 && s.id !== squad.id && s.gx === x && s.gy === y)
+      if (occupied) continue
+      tiles.push({ x, y })
+    }
+  }
+  return tiles
+}
+
+function computeAttackable(b, squad) {
+  const range = ATTACK_RANGE[squad.type]
+  const enemySide = squad.side === 'attacker' ? 'defender' : 'attacker'
+  return b.squads.filter((s) => s.side === enemySide && s.count > 0 && gridDistance(s, squad) <= range)
+}
+
+function selectSquad(b, squad) {
+  b.selectedSquadId = squad.id
+  b.mode = 'moving'
+  b.moveRangeTiles = computeMoveRange(b, squad)
+}
+
+function deselectBattle(b) {
+  b.selectedSquadId = null
+  b.mode = 'select'
+  b.moveRangeTiles = []
+  b.attackableIds = []
+}
+
+function moveSelectedSquadTo(b, x, y) {
+  const squad = b.squads.find((s) => s.id === b.selectedSquadId)
+  if (!squad) return
+  if (x !== squad.gx || y !== squad.gy) playMoveSound()
+  squad.gx = x
+  squad.gy = y
+  const targets = computeAttackable(b, squad)
+  if (targets.length > 0) {
+    b.mode = 'targeting'
+    b.attackableIds = targets.map((t) => t.id)
+  } else {
+    squad.acted = true
+    deselectBattle(b)
+  }
+}
+
+function tileCenter(gx, gy) {
+  return { x: GRID_X0 + gx * TILE_W + TILE_W / 2, y: GRID_Y0 + gy * TILE_H + TILE_H / 2 }
+}
+
+function resolveSquadAttack(b, attackerSquad, defenderSquad) {
+  const attGeneral = region(attackerSquad.side === 'attacker' ? b.fromId : b.toId).general
+  const defGeneral = region(defenderSquad.side === 'attacker' ? b.fromId : b.toId).general
+  const terrainMult = TERRAIN_DEFENSE_MULT[region(b.toId).terrain]
+  const atkTerrainMult = attackerSquad.side === 'defender' ? terrainMult : 1
+  const defTerrainMult = defenderSquad.side === 'defender' ? terrainMult : 1
+
+  const ranged = attackerSquad.type === 'bow' && gridDistance(attackerSquad, defenderSquad) >= 2
+  const counterBonus = UNIT_COUNTER[attackerSquad.type] === defenderSquad.type ? 1.35 : 1
+  const counterBonusBack = UNIT_COUNTER[defenderSquad.type] === attackerSquad.type ? 1.35 : 1
+
+  const atkPower =
+    attackerSquad.count * UNIT_BASE_POWER[attackerSquad.type] * (1 + attGeneral.lead / 220) * atkTerrainMult * counterBonus
+  const defPower =
+    defenderSquad.count * UNIT_BASE_POWER[defenderSquad.type] * (1 + defGeneral.lead / 220) * defTerrainMult * counterBonusBack
+
+  const K = 0.1
+  const lossToDefender = Math.min(defenderSquad.count, Math.round(atkPower * K))
+  const lossToAttacker = ranged ? 0 : Math.min(attackerSquad.count, Math.round(defPower * K * 0.55))
+
+  defenderSquad.count -= lossToDefender
+  attackerSquad.count -= lossToAttacker
+
+  const defPos = tileCenter(defenderSquad.gx, defenderSquad.gy)
+  spawnFloatingText(`-${lossToDefender}`, defPos.x, defPos.y, '#ff6b6b')
+  if (lossToAttacker > 0) {
+    const atkPos = tileCenter(attackerSquad.gx, attackerSquad.gy)
+    spawnFloatingText(`-${lossToAttacker}`, atkPos.x, atkPos.y, '#ffcf6b')
+  }
+  playClashSound(ranged)
+}
+
+function attackTarget(b, targetId) {
+  const squad = b.squads.find((s) => s.id === b.selectedSquadId)
+  const target = b.squads.find((s) => s.id === targetId)
+  if (!squad || !target) return
+  resolveSquadAttack(b, squad, target)
+  squad.acted = true
+  deselectBattle(b)
+  checkBattleOutcome(b)
+}
+
+function checkBattleOutcome(b) {
+  if (b.resolved) return
+  const attackerAlive = b.squads.some((s) => s.side === 'attacker' && s.count > 0)
+  const defenderAlive = b.squads.some((s) => s.side === 'defender' && s.count > 0)
+  if (!defenderAlive) {
+    b.resolved = true
+    b.outcome = 'attacker'
+  } else if (!attackerAlive) {
+    b.resolved = true
+    b.outcome = 'defender'
+  }
+}
+
+function handleBattleGridClick(b, gx, gy) {
+  if (b.mode === 'select') {
+    const squad = squadAt(b, gx, gy)
+    if (squad && squad.side === 'attacker' && !squad.acted) selectSquad(b, squad)
+    return
+  }
+  if (b.mode === 'moving') {
+    const inRange = b.moveRangeTiles.some((t) => t.x === gx && t.y === gy)
+    if (inRange) {
+      moveSelectedSquadTo(b, gx, gy)
+      return
+    }
+    const squad = squadAt(b, gx, gy)
+    if (squad && squad.side === 'attacker' && !squad.acted) selectSquad(b, squad)
+    else deselectBattle(b)
+    return
+  }
+  if (b.mode === 'targeting') {
+    const target = squadAt(b, gx, gy)
+    if (target && b.attackableIds.includes(target.id)) attackTarget(b, target.id)
+    else deselectBattle(b)
+  }
+}
+
+function endPlayerBattleTurn(b) {
+  if (b.resolved || b.side !== 'player') return
+  deselectBattle(b)
+  b.side = 'enemy'
+  runEnemyBattleTurn(b)
+}
+
+function runEnemyBattleTurn(b) {
+  const enemySquads = b.squads.filter((s) => s.side === 'defender' && s.count > 0)
+  for (const squad of enemySquads) {
+    if (b.resolved) break
+    const targets = b.squads.filter((s) => s.side === 'attacker' && s.count > 0)
+    if (targets.length === 0) break
+
+    let nearest = targets[0]
+    let nearestDist = gridDistance(squad, nearest)
+    for (const t of targets) {
+      const d = gridDistance(squad, t)
+      if (d < nearestDist) {
+        nearest = t
+        nearestDist = d
+      }
+    }
+
+    const range = MOVE_RANGE[squad.type]
+    let bestTile = { x: squad.gx, y: squad.gy }
+    let bestDist = nearestDist
+    for (let x = 0; x < GRID_COLS; x++) {
+      for (let y = 0; y < GRID_ROWS; y++) {
+        const d = Math.max(Math.abs(x - squad.gx), Math.abs(y - squad.gy))
+        if (d === 0 || d > range) continue
+        if (squadAt(b, x, y)) continue
+        const dist = Math.max(Math.abs(x - nearest.gx), Math.abs(y - nearest.gy))
+        if (dist < bestDist) {
+          bestDist = dist
+          bestTile = { x, y }
+        }
+      }
+    }
+    squad.gx = bestTile.x
+    squad.gy = bestTile.y
+
+    if (gridDistance(squad, nearest) <= ATTACK_RANGE[squad.type]) {
+      resolveSquadAttack(b, squad, nearest)
+      checkBattleOutcome(b)
+    }
+    squad.acted = true
+  }
+
+  if (!b.resolved) {
+    b.squads.forEach((s) => {
+      s.acted = false
+    })
+    b.turn += 1
+    b.side = 'player'
+    if (b.turn > b.maxTurns) {
+      b.resolved = true
+      b.outcome = 'defender'
+    }
+  }
+}
 
 function sidePower(troops, general, terrainMult, tacticId, isAmbushSuccess) {
   let power = 0
@@ -418,103 +634,28 @@ function startBattle(fromId, toId, sentTroops) {
   const attackerOwner = from.owner
   const defenderOwner = to.owner
 
+  const squads = [
+    ...buildSquads('attacker', sentTroops, 0),
+    ...buildSquads('defender', { spear: to.spear, bow: to.bow, cavalry: to.cavalry }, GRID_COLS - 1),
+  ]
+
   state.battle = {
     fromId,
     toId,
     attackerOwner,
     defenderOwner,
-    round: 1,
-    maxRounds: 5,
-    attacker: { ...sentTroops },
-    defender: { spear: to.spear, bow: to.bow, cavalry: to.cavalry },
-    log: [],
+    turn: 1,
+    maxTurns: 8,
+    side: 'player',
+    squads,
+    selectedSquadId: null,
+    mode: 'select',
+    moveRangeTiles: [],
+    attackableIds: [],
     resolved: false,
     outcome: null, // 'attacker' | 'defender'
-    pendingTactic: null,
-    usedAmbush: false,
   }
   state.phase = 'battle'
-}
-
-function pickAiDefenseTactic(battle) {
-  const d = battle.defender
-  if (totalTroops(d) === 0) return 'defend'
-  if (d.cavalry >= d.spear && d.cavalry >= d.bow) return 'charge'
-  if (d.bow >= d.spear) return 'volley'
-  return 'defend'
-}
-
-function resolveBattleRound(attackerTactic) {
-  const b = state.battle
-  if (!b || b.resolved) return
-  const to = region(b.toId)
-  const terrainMult = TERRAIN_DEFENSE_MULT[to.terrain]
-  const attGeneral = region(b.fromId).general
-  const defGeneral = to.general
-
-  let ambushSuccess = false
-  let ambushFail = false
-  if (attackerTactic === 'ambush') {
-    b.usedAmbush = true
-    const chance = clamp(30 + attGeneral.int - defGeneral.int * 0.5, 8, 80)
-    ambushSuccess = Math.random() * 100 < chance
-    ambushFail = !ambushSuccess
-  }
-
-  const defenderTactic = pickAiDefenseTactic(b)
-
-  const counterMult = counterMultiplier(b.attacker, b.defender)
-  let attPower = sidePower(b.attacker, attGeneral, 1, attackerTactic, ambushSuccess) * counterMult
-  let defPower = ambushSuccess
-    ? 0
-    : sidePower(b.defender, defGeneral, terrainMult, defenderTactic, false) *
-      counterMultiplier(b.defender, b.attacker)
-
-  if (ambushFail) attPower *= 0.6 // the gambit failed - attacker was caught flat-footed
-
-  const K = 0.045
-  let lossToDefender = attPower * K
-  let lossToAttacker = defPower * K
-  if (attackerTactic === 'defend') lossToAttacker *= 0.6
-  if (attackerTactic === 'charge') lossToAttacker *= 1.15
-  if (ambushFail) lossToAttacker *= 1.4
-
-  lossToDefender = Math.min(lossToDefender, totalTroops(b.defender))
-  lossToAttacker = Math.min(lossToAttacker, totalTroops(b.attacker))
-
-  applyProportionalLoss(b.defender, lossToDefender)
-  applyProportionalLoss(b.attacker, lossToAttacker)
-
-  b.log.push({
-    round: b.round,
-    attackerTactic,
-    defenderTactic,
-    ambushSuccess,
-    ambushFail,
-    lossToDefender: Math.round(lossToDefender),
-    lossToAttacker: Math.round(lossToAttacker),
-    attackerRemaining: totalTroops(b.attacker),
-    defenderRemaining: totalTroops(b.defender),
-  })
-
-  spawnFloatingText(`-${Math.round(lossToDefender)}`, BATTLE_RIGHT_X, BATTLE_FORM_Y - 10, '#ff6b6b')
-  spawnFloatingText(`-${Math.round(lossToAttacker)}`, BATTLE_LEFT_X, BATTLE_FORM_Y - 10, '#ffcf6b')
-  triggerShake(ambushSuccess ? 7 : attackerTactic === 'charge' ? 4 : 3)
-  if (ambushSuccess || ambushFail) playAmbushSound(ambushSuccess)
-  else playClashSound(attackerTactic)
-
-  if (totalTroops(b.defender) <= 0) {
-    b.resolved = true
-    b.outcome = 'attacker'
-  } else if (totalTroops(b.attacker) <= 0) {
-    b.resolved = true
-    b.outcome = 'defender'
-  } else if (b.round >= b.maxRounds) {
-    b.resolved = true
-    b.outcome = 'defender' // attacker failed to break the defense in time
-  } else {
-    b.round += 1
-  }
 }
 
 function applyProportionalLoss(troops, loss) {
@@ -533,11 +674,19 @@ function finishBattle() {
   const defenderWasOwner = to.owner
   const defenderFactionAlive = defenderWasOwner ? faction(defenderWasOwner) : null
 
+  const attackerTroops = { spear: 0, bow: 0, cavalry: 0 }
+  const defenderTroops = { spear: 0, bow: 0, cavalry: 0 }
+  for (const s of b.squads) {
+    if (s.count <= 0) continue
+    if (s.side === 'attacker') attackerTroops[s.type] += s.count
+    else defenderTroops[s.type] += s.count
+  }
+
   if (b.outcome === 'attacker') {
     to.owner = from.owner
-    to.spear = b.attacker.spear
-    to.bow = b.attacker.bow
-    to.cavalry = b.attacker.cavalry
+    to.spear = attackerTroops.spear
+    to.bow = attackerTroops.bow
+    to.cavalry = attackerTroops.cavalry
     to.security = 20
     const joinRoll = Math.random() < 0.3
     if (!(joinRoll && defenderWasOwner)) {
@@ -548,12 +697,12 @@ function finishBattle() {
     checkFactionSurvival(defenderWasOwner)
     playVictorySound()
   } else {
-    to.spear = b.defender.spear
-    to.bow = b.defender.bow
-    to.cavalry = b.defender.cavalry
-    from.spear += b.attacker.spear
-    from.bow += b.attacker.bow
-    from.cavalry += b.attacker.cavalry
+    to.spear = defenderTroops.spear
+    to.bow = defenderTroops.bow
+    to.cavalry = defenderTroops.cavalry
+    from.spear += attackerTroops.spear
+    from.bow += attackerTroops.bow
+    from.cavalry += attackerTroops.cavalry
     say(`${region(b.toId).name} 공략에 실패했습니다. 살아남은 병력을 물렸습니다.`)
     playDefeatSound()
   }
@@ -924,13 +1073,8 @@ function bottomButtons() {
     list.push({ id: 'send_100', label: '전군 출진 (100%)', x: 336, y: y0, w: 150, h: 30 })
     list.push({ id: 'cancel_force', label: '취소', x: 496, y: y0, w: 90, h: 30 })
   }
-  if (state.phase === 'battle' && state.battle && !state.battle.resolved) {
-    let x = 16
-    for (const t of TACTICS) {
-      if (t === 'ambush' && (state.battle.round !== 1 || state.battle.usedAmbush)) continue
-      list.push({ id: `tactic_${t}`, label: TACTIC_LABEL[t], x, y: y0 + 70, w: 110, h: 30 })
-      x += 118
-    }
+  if (state.phase === 'battle' && state.battle && !state.battle.resolved && state.battle.side === 'player') {
+    list.push({ id: 'end_battle_turn', label: '턴 종료', x: 16, y: y0 + 70, w: 110, h: 30 })
   }
   if (state.phase === 'battle' && state.battle && state.battle.resolved) {
     list.push({ id: 'close_battle', label: '계속 ▶', x: 16, y: y0 + 70, w: 110, h: 30 })
@@ -967,8 +1111,8 @@ function handleBottomClick(id) {
   else if (id === 'cancel_force') {
     state.pendingAttack = null
     state.phase = 'map'
-  } else if (id.startsWith('tactic_')) {
-    resolveBattleRound(id.slice(7))
+  } else if (id === 'end_battle_turn') {
+    endPlayerBattleTurn(state.battle)
   } else if (id === 'close_battle') {
     finishBattle()
   } else if (id === 'end_turn') endTurn()
@@ -1034,6 +1178,14 @@ canvas.addEventListener('click', (e) => {
     }
     const r = regionAt(mx, my)
     state.selectedRegionId = r ? r.id : null
+    return
+  }
+  if (state.phase === 'battle' && state.battle && !state.battle.resolved && state.battle.side === 'player') {
+    const gx = Math.floor((mx - GRID_X0) / TILE_W)
+    const gy = Math.floor((my - GRID_Y0) / TILE_H)
+    if (gx >= 0 && gx < GRID_COLS && gy >= 0 && gy < GRID_ROWS) {
+      handleBattleGridClick(state.battle, gx, gy)
+    }
     return
   }
   if (state.phase === 'targeting') {
@@ -1281,49 +1433,33 @@ function drawBottomPanel() {
   }
 }
 
-function drawFormation(troops, cx, cy, color) {
-  const UNITS_PER_PIP = 3
-  const MAX_PIPS = 24
-  const COLS = 6
-  let pips = []
-  for (const t of ['spear', 'bow', 'cavalry']) {
-    const n = Math.round(troops[t] / UNITS_PER_PIP)
-    for (let i = 0; i < n; i++) pips.push(t)
+function drawSquadToken(b, squad) {
+  const p = tileCenter(squad.gx, squad.gy)
+  const color = squad.side === 'attacker' ? factionColor(b.attackerOwner) : factionColor(b.defenderOwner)
+  const isSelected = squad.id === b.selectedSquadId
+  const isAttackable = b.attackableIds.includes(squad.id)
+
+  ctx.beginPath()
+  ctx.arc(p.x, p.y, 20, 0, Math.PI * 2)
+  ctx.fillStyle = color
+  ctx.fill()
+  ctx.lineWidth = isSelected ? 3.5 : isAttackable ? 3 : 2
+  ctx.strokeStyle = isAttackable ? '#ff5a5a' : isSelected ? '#fff' : '#2a2017'
+  ctx.stroke()
+
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 12px sans-serif'
+  ctx.fillText(UNIT_ICON_LABEL[squad.type], p.x, p.y - 2)
+  ctx.font = 'bold 10px sans-serif'
+  ctx.fillText(`${squad.count}`, p.x, p.y + 11)
+
+  if (squad.acted) {
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, 20, 0, Math.PI * 2)
+    ctx.fill()
   }
-  pips = pips.slice(0, MAX_PIPS)
-  const rows = Math.max(1, Math.ceil(pips.length / COLS))
-  const startX = cx - ((COLS - 1) * 16) / 2
-  const startY = cy - ((rows - 1) * 16) / 2
-  ctx.lineWidth = 1.2
-  ctx.strokeStyle = '#2a2017'
-  pips.forEach((t, i) => {
-    const px = startX + (i % COLS) * 16
-    const py = startY + Math.floor(i / COLS) * 16
-    ctx.fillStyle = color
-    if (t === 'spear') {
-      ctx.beginPath()
-      ctx.moveTo(px, py - 5)
-      ctx.lineTo(px + 5, py + 5)
-      ctx.lineTo(px - 5, py + 5)
-      ctx.closePath()
-      ctx.fill()
-      ctx.stroke()
-    } else if (t === 'bow') {
-      ctx.beginPath()
-      ctx.moveTo(px, py - 5)
-      ctx.lineTo(px + 5, py)
-      ctx.lineTo(px, py + 5)
-      ctx.lineTo(px - 5, py)
-      ctx.closePath()
-      ctx.fill()
-      ctx.stroke()
-    } else {
-      ctx.beginPath()
-      ctx.arc(px, py, 4.5, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.stroke()
-    }
-  })
 }
 
 function drawFloatingTexts() {
@@ -1353,24 +1489,45 @@ function drawBattleScene() {
 
   ctx.textAlign = 'center'
   ctx.fillStyle = '#ffe9b8'
-  ctx.font = 'bold 16px sans-serif'
-  ctx.fillText(`${from.name} vs ${to.name} (${TERRAIN_LABEL[to.terrain]})`, MAP_X0 + MAP_W / 2, MAP_Y0 + 30)
-  ctx.fillStyle = 'rgba(255,255,255,0.5)'
+  ctx.font = 'bold 15px sans-serif'
+  ctx.fillText(`${from.name} vs ${to.name} (${TERRAIN_LABEL[to.terrain]})`, MAP_X0 + MAP_W / 2, MAP_Y0 + 22)
+  ctx.fillStyle = 'rgba(255,255,255,0.55)'
   ctx.font = '12px sans-serif'
-  ctx.fillText(`${b.round} / ${b.maxRounds} 라운드`, MAP_X0 + MAP_W / 2, MAP_Y0 + 50)
+  ctx.fillText(`${b.turn} / ${b.maxTurns}턴 · ${b.side === 'player' ? '아군 턴' : '적군 턴'}`, MAP_X0 + MAP_W / 2, MAP_Y0 + 42)
 
-  ctx.fillStyle = '#ffd36b'
-  ctx.font = 'bold 26px sans-serif'
-  ctx.fillText('VS', MAP_X0 + MAP_W / 2, BATTLE_FORM_Y + 8)
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'
+  ctx.lineWidth = 1
+  for (let x = 0; x <= GRID_COLS; x++) {
+    ctx.beginPath()
+    ctx.moveTo(GRID_X0 + x * TILE_W, GRID_Y0)
+    ctx.lineTo(GRID_X0 + x * TILE_W, GRID_Y0 + GRID_ROWS * TILE_H)
+    ctx.stroke()
+  }
+  for (let y = 0; y <= GRID_ROWS; y++) {
+    ctx.beginPath()
+    ctx.moveTo(GRID_X0, GRID_Y0 + y * TILE_H)
+    ctx.lineTo(GRID_X0 + GRID_COLS * TILE_W, GRID_Y0 + y * TILE_H)
+    ctx.stroke()
+  }
 
-  drawFormation(b.attacker, BATTLE_LEFT_X, BATTLE_FORM_Y, factionColor(b.attackerOwner))
-  drawFormation(b.defender, BATTLE_RIGHT_X, BATTLE_FORM_Y, factionColor(b.defenderOwner))
+  if (b.mode === 'moving') {
+    ctx.fillStyle = 'rgba(95, 170, 255, 0.28)'
+    for (const t of b.moveRangeTiles) {
+      ctx.fillRect(GRID_X0 + t.x * TILE_W + 2, GRID_Y0 + t.y * TILE_H + 2, TILE_W - 4, TILE_H - 4)
+    }
+  }
+  if (b.mode === 'targeting') {
+    ctx.fillStyle = 'rgba(255, 70, 70, 0.3)'
+    for (const sq of b.squads) {
+      if (!b.attackableIds.includes(sq.id)) continue
+      ctx.fillRect(GRID_X0 + sq.gx * TILE_W + 2, GRID_Y0 + sq.gy * TILE_H + 2, TILE_W - 4, TILE_H - 4)
+    }
+  }
 
-  ctx.font = 'bold 13px sans-serif'
-  ctx.fillStyle = '#9fe08a'
-  ctx.fillText(`${totalTroops(b.attacker)}`, BATTLE_LEFT_X, BATTLE_FORM_Y + 74)
-  ctx.fillStyle = '#ff9f9f'
-  ctx.fillText(`${totalTroops(b.defender)}`, BATTLE_RIGHT_X, BATTLE_FORM_Y + 74)
+  for (const sq of b.squads) {
+    if (sq.count <= 0) continue
+    drawSquadToken(b, sq)
+  }
 
   drawFloatingTexts()
 }
@@ -1381,35 +1538,25 @@ function drawBattlePanel() {
   ctx.font = 'bold 13px sans-serif'
   ctx.textAlign = 'left'
   ctx.fillText(
-    `${region(b.fromId).name} 공격군 vs ${region(b.toId).name} 수비군 - ${b.round}/${b.maxRounds}라운드`,
+    `${region(b.fromId).name} 공격군 vs ${region(b.toId).name} 수비군 - ${b.turn}/${b.maxTurns}턴`,
     16,
     BOTTOM_Y0 + 2,
   )
-  ctx.font = '11px sans-serif'
-  ctx.fillStyle = '#9fe08a'
-  ctx.fillText(`아군: 창${b.attacker.spear} 궁${b.attacker.bow} 기${b.attacker.cavalry}`, 16, BOTTOM_Y0 + 20)
-  ctx.fillStyle = '#ff9f9f'
-  ctx.fillText(`적군: 창${b.defender.spear} 궁${b.defender.bow} 기${b.defender.cavalry}`, 250, BOTTOM_Y0 + 20)
 
-  const last = b.log[b.log.length - 1]
-  if (last) {
-    ctx.fillStyle = '#ffe066'
-    const amb = last.ambushSuccess ? ' (매복 성공!)' : last.ambushFail ? ' (매복 실패...)' : ''
-    ctx.fillText(
-      `${last.round}R: 아군전술[${TACTIC_LABEL[last.attackerTactic]}] 적전술[${TACTIC_LABEL[last.defenderTactic]}]${amb} - 아군 ${last.lossToAttacker} 손실, 적 ${last.lossToDefender} 손실`,
-      16,
-      BOTTOM_Y0 + 38,
-    )
-  }
+  ctx.font = '11px sans-serif'
+  ctx.fillStyle = 'rgba(255,255,255,0.65)'
+  let hint = ''
+  if (b.resolved) hint = ''
+  else if (b.side !== 'player') hint = '적군이 행동 중입니다...'
+  else if (b.mode === 'select') hint = '병력을 클릭해 이동·공격하세요 (창은 기병에, 기병은 궁병에, 궁병은 창병에 강함)'
+  else if (b.mode === 'moving') hint = '이동할 칸을 클릭하세요. 궁병은 사거리 2, 나머지는 사거리 1'
+  else if (b.mode === 'targeting') hint = '공격할 적(빨간 칸)을 클릭하세요'
+  ctx.fillText(hint, 16, BOTTOM_Y0 + 20)
 
   if (b.resolved) {
     ctx.fillStyle = b.outcome === 'attacker' ? '#9fe08a' : '#ff9f9f'
     ctx.font = 'bold 13px sans-serif'
-    ctx.fillText(b.outcome === 'attacker' ? '승리! 영지를 점령했습니다.' : '패배... 병력을 물렸습니다.', 16, BOTTOM_Y0 + 58)
-  } else {
-    ctx.fillStyle = 'rgba(255,255,255,0.6)'
-    ctx.font = '11px sans-serif'
-    ctx.fillText('이번 라운드 전술을 선택하세요.', 16, BOTTOM_Y0 + 58)
+    ctx.fillText(b.outcome === 'attacker' ? '승리! 영지를 점령했습니다.' : '패배... 병력을 물렸습니다.', 16, BOTTOM_Y0 + 40)
   }
 
   for (const btn of bottomButtons()) {
@@ -1461,8 +1608,8 @@ function drawIntro() {
   const lines = [
     '목표: 7개 영지를 모두 통일하거나, 40계절(10년) 뒤 가장 강한 세력이 되면 승리입니다.',
     '매 계절(턴)마다 내정(농업/상업/축성), 외교(불가침/동맹/혼인동맹), 군사(모병/출진) 중 원하는 만큼 행동할 수 있습니다.',
-    '전투는 가위바위보가 아닙니다 - 창병은 기병에, 기병은 궁병에, 궁병은 창병에 강합니다.',
-    '병종 조합과 장수의 통솔/지략, 지형(산악은 수비에 유리), 라운드마다 고르는 전술(돌격/사격/수비/매복)이 승패를 가릅니다.',
+    '전투는 격자 위에서 병력을 이동시켜 벌입니다 - 창은 기병에, 기병은 궁병에, 궁병은 창병에 강합니다.',
+    '궁병은 사거리 2에서 반격 없이 공격할 수 있고, 장수의 통솔과 지형(산악은 수비에 유리)이 승패를 가릅니다.',
     '치안이 낮은 영지는 반란으로 독립할 수 있으니 점령 직후엔 내정을 신경 쓰세요.',
     '오른쪽 "천하 정세" 패널에서 항상 각 세력의 영지 수와 관계를 확인할 수 있습니다.',
     '매 턴이 시작되면 부관이 먼저 다음 행동을 묻습니다.',
@@ -1576,15 +1723,11 @@ function drawAdvisorScene() {
 
 function render() {
   if (toastTimer > 0) toastTimer -= 1 / 60
-  updateShake()
   updateFloatingTexts()
   ctx.clearRect(0, 0, CANVAS_W, CANVAS_H)
   if (state.phase === 'title') return drawTitle()
   if (state.phase === 'intro') return drawIntro()
   if (state.phase === 'ending') return drawEnding()
-
-  ctx.save()
-  if (shakeTimer > 0) ctx.translate(rand(-shakeMag, shakeMag), rand(-shakeMag, shakeMag))
 
   drawBackground()
   if (state.phase === 'battle' && state.battle) drawBattleScene()
@@ -1595,7 +1738,6 @@ function render() {
   drawToast()
 
   if (state.phase === 'turnStart') drawAdvisorScene()
-  ctx.restore()
 }
 
 function loop() {
