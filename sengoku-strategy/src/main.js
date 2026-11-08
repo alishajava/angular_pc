@@ -30,6 +30,104 @@ function choice(arr) {
   return arr[Math.floor(Math.random() * arr.length)]
 }
 
+// ---------- Audio ----------
+let audioCtx = null
+let masterGain = null
+function ensureAudio() {
+  if (audioCtx) return audioCtx
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+  masterGain = audioCtx.createGain()
+  masterGain.gain.value = 0.4
+  masterGain.connect(audioCtx.destination)
+  return audioCtx
+}
+function noiseBuffer(ac, duration) {
+  const buffer = ac.createBuffer(1, Math.ceil(ac.sampleRate * duration), ac.sampleRate)
+  const data = buffer.getChannelData(0)
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
+  return buffer
+}
+function playTone({ freqFrom, freqTo, duration, type = 'sawtooth', gain = 0.3, delay = 0 }) {
+  if (!audioCtx) return
+  const ac = audioCtx
+  const t0 = ac.currentTime + delay
+  const osc = ac.createOscillator()
+  osc.type = type
+  osc.frequency.setValueAtTime(Math.max(20, freqFrom), t0)
+  osc.frequency.exponentialRampToValueAtTime(Math.max(20, freqTo), t0 + duration)
+  const g = ac.createGain()
+  g.gain.setValueAtTime(gain, t0)
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + duration)
+  osc.connect(g)
+  g.connect(masterGain)
+  osc.start(t0)
+  osc.stop(t0 + duration + 0.02)
+}
+function playNoiseBurst({ duration, filterFreqFrom, filterFreqTo, gain = 0.3, type = 'lowpass', delay = 0 }) {
+  if (!audioCtx) return
+  const ac = audioCtx
+  const t0 = ac.currentTime + delay
+  const src = ac.createBufferSource()
+  src.buffer = noiseBuffer(ac, duration)
+  const filter = ac.createBiquadFilter()
+  filter.type = type
+  filter.frequency.setValueAtTime(filterFreqFrom, t0)
+  filter.frequency.exponentialRampToValueAtTime(Math.max(40, filterFreqTo), t0 + duration)
+  const g = ac.createGain()
+  g.gain.setValueAtTime(gain, t0)
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + duration)
+  src.connect(filter)
+  filter.connect(g)
+  g.connect(masterGain)
+  src.start(t0)
+  src.stop(t0 + duration + 0.02)
+}
+function playClashSound(tactic) {
+  playNoiseBurst({ duration: 0.22, filterFreqFrom: 2600, filterFreqTo: 300, gain: 0.22 })
+  playTone({ freqFrom: tactic === 'charge' ? 180 : 260, freqTo: 70, duration: 0.18, type: 'square', gain: 0.16 })
+}
+function playAmbushSound(success) {
+  if (success) playTone({ freqFrom: 900, freqTo: 180, duration: 0.3, type: 'sawtooth', gain: 0.22 })
+  else playTone({ freqFrom: 160, freqTo: 90, duration: 0.3, type: 'square', gain: 0.18 })
+}
+function playVictorySound() {
+  playTone({ freqFrom: 523, freqTo: 523, duration: 0.14, type: 'sine', gain: 0.2 })
+  playTone({ freqFrom: 659, freqTo: 659, duration: 0.14, type: 'sine', gain: 0.2, delay: 0.14 })
+  playTone({ freqFrom: 784, freqTo: 784, duration: 0.14, type: 'sine', gain: 0.2, delay: 0.28 })
+  playTone({ freqFrom: 1047, freqTo: 1047, duration: 0.3, type: 'sine', gain: 0.22, delay: 0.42 })
+}
+function playDefeatSound() {
+  playTone({ freqFrom: 300, freqTo: 70, duration: 0.6, type: 'sawtooth', gain: 0.2 })
+}
+
+// ---------- Battle FX ----------
+const BATTLE_LEFT_X = MAP_X0 + 150
+const BATTLE_RIGHT_X = MAP_X0 + MAP_W - 150
+const BATTLE_FORM_Y = MAP_Y0 + 150
+
+let shakeTimer = 0
+let shakeMag = 0
+function triggerShake(mag, duration = 0.22) {
+  shakeTimer = duration
+  shakeMag = mag
+}
+function updateShake() {
+  if (shakeTimer > 0) shakeTimer = Math.max(0, shakeTimer - 1 / 60)
+}
+
+let floatingTexts = []
+function spawnFloatingText(text, x, y, color) {
+  floatingTexts.push({ text, x, y, life: 1.0, maxLife: 1.0, color })
+}
+function updateFloatingTexts() {
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    const f = floatingTexts[i]
+    f.life -= 1 / 60
+    f.y -= 0.55
+    if (f.life <= 0) floatingTexts.splice(i, 1)
+  }
+}
+
 // ---------- Map data ----------
 const REGION_DEFS = [
   { id: 'heochang', name: '허창', x: 380, y: 190, terrain: 'plain' },
@@ -399,6 +497,12 @@ function resolveBattleRound(attackerTactic) {
     defenderRemaining: totalTroops(b.defender),
   })
 
+  spawnFloatingText(`-${Math.round(lossToDefender)}`, BATTLE_RIGHT_X, BATTLE_FORM_Y - 10, '#ff6b6b')
+  spawnFloatingText(`-${Math.round(lossToAttacker)}`, BATTLE_LEFT_X, BATTLE_FORM_Y - 10, '#ffcf6b')
+  triggerShake(ambushSuccess ? 7 : attackerTactic === 'charge' ? 4 : 3)
+  if (ambushSuccess || ambushFail) playAmbushSound(ambushSuccess)
+  else playClashSound(attackerTactic)
+
   if (totalTroops(b.defender) <= 0) {
     b.resolved = true
     b.outcome = 'attacker'
@@ -442,6 +546,7 @@ function finishBattle() {
     say(`${region(b.toId).name}을(를) 점령했습니다!`)
     if (defenderFactionAlive) adjustRelation(b.attackerOwner, defenderWasOwner, -25)
     checkFactionSurvival(defenderWasOwner)
+    playVictorySound()
   } else {
     to.spear = b.defender.spear
     to.bow = b.defender.bow
@@ -450,6 +555,7 @@ function finishBattle() {
     from.bow += b.attacker.bow
     from.cavalry += b.attacker.cavalry
     say(`${region(b.toId).name} 공략에 실패했습니다. 살아남은 병력을 물렸습니다.`)
+    playDefeatSound()
   }
   state.battle = null
   state.phase = 'map'
@@ -890,6 +996,7 @@ function rankingRowAt(mx, my) {
 }
 
 canvas.addEventListener('click', (e) => {
+  ensureAudio()
   const rect = canvas.getBoundingClientRect()
   const scaleX = canvas.width / rect.width
   const scaleY = canvas.height / rect.height
@@ -1174,6 +1281,100 @@ function drawBottomPanel() {
   }
 }
 
+function drawFormation(troops, cx, cy, color) {
+  const UNITS_PER_PIP = 3
+  const MAX_PIPS = 24
+  const COLS = 6
+  let pips = []
+  for (const t of ['spear', 'bow', 'cavalry']) {
+    const n = Math.round(troops[t] / UNITS_PER_PIP)
+    for (let i = 0; i < n; i++) pips.push(t)
+  }
+  pips = pips.slice(0, MAX_PIPS)
+  const rows = Math.max(1, Math.ceil(pips.length / COLS))
+  const startX = cx - ((COLS - 1) * 16) / 2
+  const startY = cy - ((rows - 1) * 16) / 2
+  ctx.lineWidth = 1.2
+  ctx.strokeStyle = '#2a2017'
+  pips.forEach((t, i) => {
+    const px = startX + (i % COLS) * 16
+    const py = startY + Math.floor(i / COLS) * 16
+    ctx.fillStyle = color
+    if (t === 'spear') {
+      ctx.beginPath()
+      ctx.moveTo(px, py - 5)
+      ctx.lineTo(px + 5, py + 5)
+      ctx.lineTo(px - 5, py + 5)
+      ctx.closePath()
+      ctx.fill()
+      ctx.stroke()
+    } else if (t === 'bow') {
+      ctx.beginPath()
+      ctx.moveTo(px, py - 5)
+      ctx.lineTo(px + 5, py)
+      ctx.lineTo(px, py + 5)
+      ctx.lineTo(px - 5, py)
+      ctx.closePath()
+      ctx.fill()
+      ctx.stroke()
+    } else {
+      ctx.beginPath()
+      ctx.arc(px, py, 4.5, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.stroke()
+    }
+  })
+}
+
+function drawFloatingTexts() {
+  ctx.textAlign = 'center'
+  for (const f of floatingTexts) {
+    ctx.globalAlpha = clamp(f.life / f.maxLife, 0, 1)
+    ctx.fillStyle = f.color
+    ctx.font = 'bold 18px sans-serif'
+    ctx.fillText(f.text, f.x, f.y)
+  }
+  ctx.globalAlpha = 1
+}
+
+function drawBattleScene() {
+  const b = state.battle
+  const from = region(b.fromId)
+  const to = region(b.toId)
+
+  const grad = ctx.createLinearGradient(MAP_X0, MAP_Y0, MAP_X0, MAP_Y0 + MAP_H)
+  grad.addColorStop(0, '#3a2a1c')
+  grad.addColorStop(1, '#1c140d')
+  ctx.fillStyle = grad
+  ctx.fillRect(MAP_X0, MAP_Y0, MAP_W, MAP_H)
+  ctx.strokeStyle = 'rgba(200,160,90,0.25)'
+  ctx.lineWidth = 2
+  ctx.strokeRect(MAP_X0, MAP_Y0, MAP_W, MAP_H)
+
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#ffe9b8'
+  ctx.font = 'bold 16px sans-serif'
+  ctx.fillText(`${from.name} vs ${to.name} (${TERRAIN_LABEL[to.terrain]})`, MAP_X0 + MAP_W / 2, MAP_Y0 + 30)
+  ctx.fillStyle = 'rgba(255,255,255,0.5)'
+  ctx.font = '12px sans-serif'
+  ctx.fillText(`${b.round} / ${b.maxRounds} 라운드`, MAP_X0 + MAP_W / 2, MAP_Y0 + 50)
+
+  ctx.fillStyle = '#ffd36b'
+  ctx.font = 'bold 26px sans-serif'
+  ctx.fillText('VS', MAP_X0 + MAP_W / 2, BATTLE_FORM_Y + 8)
+
+  drawFormation(b.attacker, BATTLE_LEFT_X, BATTLE_FORM_Y, factionColor(b.attackerOwner))
+  drawFormation(b.defender, BATTLE_RIGHT_X, BATTLE_FORM_Y, factionColor(b.defenderOwner))
+
+  ctx.font = 'bold 13px sans-serif'
+  ctx.fillStyle = '#9fe08a'
+  ctx.fillText(`${totalTroops(b.attacker)}`, BATTLE_LEFT_X, BATTLE_FORM_Y + 74)
+  ctx.fillStyle = '#ff9f9f'
+  ctx.fillText(`${totalTroops(b.defender)}`, BATTLE_RIGHT_X, BATTLE_FORM_Y + 74)
+
+  drawFloatingTexts()
+}
+
 function drawBattlePanel() {
   const b = state.battle
   ctx.fillStyle = '#fff'
@@ -1375,19 +1576,26 @@ function drawAdvisorScene() {
 
 function render() {
   if (toastTimer > 0) toastTimer -= 1 / 60
+  updateShake()
+  updateFloatingTexts()
   ctx.clearRect(0, 0, CANVAS_W, CANVAS_H)
   if (state.phase === 'title') return drawTitle()
   if (state.phase === 'intro') return drawIntro()
   if (state.phase === 'ending') return drawEnding()
 
+  ctx.save()
+  if (shakeTimer > 0) ctx.translate(rand(-shakeMag, shakeMag), rand(-shakeMag, shakeMag))
+
   drawBackground()
-  drawMap()
+  if (state.phase === 'battle' && state.battle) drawBattleScene()
+  else drawMap()
   drawHud()
   drawRankingPanel()
   drawBottomPanel()
   drawToast()
 
   if (state.phase === 'turnStart') drawAdvisorScene()
+  ctx.restore()
 }
 
 function loop() {
