@@ -712,6 +712,27 @@ function cancelTargeting() {
   state.phase = 'map'
 }
 
+// Reverse flow for the "이 영지로 출진" button: the player selected an
+// enemy/neutral region first, so pick the strongest adjacent owned region
+// to attack from instead of making them re-select it on the map.
+function attackFromNeighbor(targetId) {
+  const target = region(targetId)
+  if (!target || target.owner === 'player') return
+  if (target.owner && isProtected('player', target.owner)) {
+    say('불가침/동맹 관계라 공격할 수 없습니다. (파기하려면 먼저 외교에서 확인하세요)')
+    return
+  }
+  const ownedNeighborIds = NEIGHBORS[targetId].filter((id) => region(id).owner === 'player')
+  if (ownedNeighborIds.length === 0) return
+  const fromId = ownedNeighborIds.reduce((best, id) => (totalTroops(region(id)) > totalTroops(region(best)) ? id : best), ownedNeighborIds[0])
+  if (totalTroops(region(fromId)) < 10) {
+    say('출진할 병력이 부족합니다.')
+    return
+  }
+  state.pendingAttack = { fromId, toId: targetId }
+  state.phase = 'forceSelect'
+}
+
 function chooseAttackTarget(targetId) {
   const fromId = state.attackFromId
   if (!fromId) return
@@ -832,6 +853,7 @@ function handleBottomClick(id) {
   else if (id === 'recruit_bow') recruit(state.selectedRegionId, 'bow')
   else if (id === 'recruit_cav') recruit(state.selectedRegionId, 'cavalry')
   else if (id === 'attack') beginAttackTargeting(state.selectedRegionId)
+  else if (id === 'attack_from_neighbor') attackFromNeighbor(state.selectedRegionId)
   else if (id === 'cancel_target') cancelTargeting()
   else if (id === 'send_30') launchAttack(0.3)
   else if (id === 'send_60') launchAttack(0.6)
