@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>모순 탐정</title>
+    <style>
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        background: #14181f;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+        color: #eee;
+        gap: 0.75rem;
+        padding: 1rem;
+        box-sizing: border-box;
+      }
+      canvas {
+        border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+        max-width: 100%;
+        cursor: pointer;
+      }
+      #hint {
+        font-size: 0.85rem;
+        opacity: 0.8;
+        text-align: center;
+        max-width: 760px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="hint">증언을 끝까지 들은 뒤, 모순되는 증거를 제출하세요 · R 키로 재시작</div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

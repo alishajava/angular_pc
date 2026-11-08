@@ -82,6 +82,11 @@ jobs:
       - run: npm run build -- --base=/angular_pc/robot/
         working-directory: robot-sim
       - run: mkdir -p dist/robot && cp -r robot-sim/dist/. dist/robot/
+      - run: npm ci
+        working-directory: detective-game
+      - run: npm run build -- --base=/angular_pc/detective/
+        working-directory: detective-game
+      - run: mkdir -p dist/detective && cp -r detective-game/dist/. dist/detective/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
