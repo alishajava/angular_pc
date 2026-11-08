@@ -1,11 +1,11 @@
-// 천하제패: turn-based 4X in a fictional Sengoku-era island. Replaces the old
-// three-kingdoms prototype entirely - rebuilt around three complaints about
-// that version: combat felt like a coin flip, turns were repetitive, and
-// goals/rules weren't explained. This version gives combat real decision
-// depth (unit counters + composition + tactics + terrain + generals), gives
-// development a real budget to manage (shared treasury, per-region levels),
-// and always shows the player where they stand (턴하 정세 ranking) and what
-// winning means (explained up front, on the intro screen).
+// 천하제패: turn-based 4X set in the late Han / Three Kingdoms period of China.
+// Originally a Sengoku-Japan reskin; rebuilt back onto a Three Kingdoms theme
+// (184-280 CE, in the spirit of classic 삼국지-style strategy games) while
+// keeping the engine as-is: combat has real decision depth (unit counters +
+// composition + tactics + terrain + generals), development has a real budget
+// to manage (shared treasury, per-region levels), and the player always sees
+// where they stand (천하 정세 ranking) and what winning means (explained up
+// front, on the intro screen).
 
 const TILE = 1 // unused placeholder to keep lint happy; canvas uses explicit coords below
 const CANVAS_W = 980
@@ -37,24 +37,24 @@ function choice(arr) {
 
 // ---------- Map data ----------
 const REGION_DEFS = [
-  { id: 'gyomu', name: '교무성', x: 380, y: 190, terrain: 'plain' },
-  { id: 'bukak', name: '북악', x: 380, y: 80, terrain: 'mountain' },
-  { id: 'byeongyeong', name: '변경산', x: 250, y: 30, terrain: 'mountain' },
-  { id: 'seohang', name: '서항', x: 190, y: 190, terrain: 'coast' },
-  { id: 'baekya', name: '백야평', x: 250, y: 310, terrain: 'plain' },
-  { id: 'dongpyeong', name: '동평', x: 560, y: 130, terrain: 'plain' },
-  { id: 'namjin', name: '남진항', x: 560, y: 280, terrain: 'coast' },
+  { id: 'heochang', name: '허창', x: 380, y: 190, terrain: 'plain' },
+  { id: 'gijoo', name: '기주', x: 380, y: 80, terrain: 'mountain' },
+  { id: 'byeongjoo', name: '병주', x: 250, y: 30, terrain: 'mountain' },
+  { id: 'hyeongjoo', name: '형주', x: 190, y: 190, terrain: 'coast' },
+  { id: 'ikjoo', name: '익주', x: 250, y: 310, terrain: 'plain' },
+  { id: 'yejoo', name: '예주', x: 560, y: 130, terrain: 'plain' },
+  { id: 'yangjoo', name: '양주', x: 560, y: 280, terrain: 'coast' },
 ]
 const ADJACENCY_PAIRS = [
-  ['gyomu', 'bukak'],
-  ['gyomu', 'seohang'],
-  ['gyomu', 'dongpyeong'],
-  ['gyomu', 'namjin'],
-  ['bukak', 'byeongyeong'],
-  ['bukak', 'seohang'],
-  ['seohang', 'baekya'],
-  ['baekya', 'namjin'],
-  ['dongpyeong', 'namjin'],
+  ['heochang', 'gijoo'],
+  ['heochang', 'hyeongjoo'],
+  ['heochang', 'yejoo'],
+  ['heochang', 'yangjoo'],
+  ['gijoo', 'byeongjoo'],
+  ['gijoo', 'hyeongjoo'],
+  ['hyeongjoo', 'ikjoo'],
+  ['ikjoo', 'yangjoo'],
+  ['yejoo', 'yangjoo'],
 ]
 const TERRAIN_DEFENSE_MULT = { plain: 1.0, coast: 1.1, mountain: 1.3 }
 const TERRAIN_LABEL = { plain: '평야', coast: '해안', mountain: '산악' }
@@ -72,32 +72,36 @@ const NEIGHBORS = buildNeighborMap()
 
 // ---------- Factions ----------
 const FACTIONS = {
-  player: { id: 'player', name: '플레이어 가문', color: '#3f7fd1', isPlayer: true, personality: 'balanced' },
-  takeda: { id: 'takeda', name: '다케다가', color: '#9a5a2e', isPlayer: false, personality: 'cavalry' },
-  mori: { id: 'mori', name: '모리가', color: '#2e9a7a', isPlayer: false, personality: 'commerce' },
-  hojo: { id: 'hojo', name: '호조가', color: '#d1a23f', isPlayer: false, personality: 'agriculture' },
+  player: { id: 'player', name: '유비군', color: '#2e9a5a', isPlayer: true, personality: 'balanced' },
+  yuan: { id: 'yuan', name: '원소군', color: '#c9983f', isPlayer: false, personality: 'cavalry' },
+  sun: { id: 'sun', name: '손권군', color: '#d1483f', isPlayer: false, personality: 'commerce' },
+  cao: { id: 'cao', name: '조조군', color: '#3f6fd1', isPlayer: false, personality: 'agriculture' },
 }
-const FACTION_ORDER = ['player', 'takeda', 'mori', 'hojo']
+const FACTION_ORDER = ['player', 'yuan', 'sun', 'cao']
 const NEUTRAL_COLOR = '#777066'
 
 const START_OWNERS = {
-  baekya: 'player',
-  bukak: 'takeda',
-  byeongyeong: 'takeda',
-  namjin: 'mori',
-  dongpyeong: 'hojo',
-  gyomu: null,
-  seohang: null,
+  ikjoo: 'player',
+  gijoo: 'yuan',
+  byeongjoo: 'yuan',
+  yangjoo: 'sun',
+  yejoo: 'cao',
+  heochang: null,
+  hyeongjoo: null,
 }
 
-const GENERAL_NAME_POOL = [
-  '사카모토', '요시다', '다나베', '구로다', '아마노', '하야시', '미나미', '오가와', '시바타', '마에다',
-  '이와모토', '후지이', '다케우치', '모리야마', '나카지마',
-]
+// Historical Three Kingdoms officers, grouped by faction for flavor.
+const GENERAL_NAME_POOLS = {
+  player: ['관우', '장비', '조운', '제갈량', '마초', '황충', '위연', '방통', '강유', '법정'],
+  yuan: ['안량', '문추', '저수', '전풍', '고람', '순우경', '심배', '봉기'],
+  sun: ['주유', '노숙', '여몽', '감녕', '태사자', '정보', '황개', '육손'],
+  cao: ['하후돈', '하후연', '장료', '허저', '전위', '순욱', '곽가', '사마의'],
+}
 
-function makeGeneral() {
+function makeGeneral(factionId) {
+  const pool = GENERAL_NAME_POOLS[factionId] || GENERAL_NAME_POOLS.player
   return {
-    name: choice(GENERAL_NAME_POOL) + choice(['', '', '']),
+    name: choice(pool),
     lead: randInt(35, 90),
     pol: randInt(35, 90),
     int: randInt(35, 90),
@@ -134,7 +138,7 @@ function devCost(level, base) {
   return base + level * 24
 }
 function goldIncome(region) {
-  const base = region.id === 'gyomu' ? 24 : 14
+  const base = region.id === 'heochang' ? 24 : 14
   return base + region.commerce * 11
 }
 function riceIncome(region) {
@@ -156,7 +160,7 @@ function makeInitialState() {
       spear: neutral ? 22 : 16,
       bow: neutral ? 0 : 6,
       cavalry: neutral ? 0 : 0,
-      general: neutral ? makeWeakGarrisonGeneral() : makeGeneral(),
+      general: neutral ? makeWeakGarrisonGeneral() : makeGeneral(owner),
     }
   })
 
@@ -485,7 +489,7 @@ function checkVictoryConditions() {
       state.phase = 'ending'
       state.gameOverText =
         id === 'player'
-          ? '천하통일! 당신의 가문이 섬 전체를 평정했습니다.\n\n— 승리 —'
+          ? '천하통일! 당신의 세력이 천하를 평정했습니다.\n\n— 승리 —'
           : `${faction(id).name}이(가) 천하를 통일했습니다.\n\n— 패배 —`
       return
     }
@@ -501,7 +505,7 @@ function checkVictoryConditions() {
     state.phase = 'ending'
     state.gameOverText =
       top.id === 'player'
-        ? `${MAX_SEASONS}계절이 지났습니다. 당신의 가문이 가장 많은 영지를 지배하며 당대 최강으로 남았습니다.\n\n— 승리 —`
+        ? `${MAX_SEASONS}계절이 지났습니다. 당신의 세력이 가장 많은 영지를 지배하며 당대 최강으로 남았습니다.\n\n— 승리 —`
         : `${MAX_SEASONS}계절이 지났습니다. ${faction(top.id).name}이(가) 당대 최강으로 남았습니다.\n\n— 패배 —`
   }
 }
@@ -1219,7 +1223,7 @@ function drawIntro() {
   ctx.textAlign = 'center'
   ctx.fillStyle = '#ffe066'
   ctx.font = 'bold 22px sans-serif'
-  ctx.fillText('가상의 섬나라, 센고쿠 시대', CANVAS_W / 2, 60)
+  ctx.fillText('후한 말, 군웅할거의 시대', CANVAS_W / 2, 60)
   ctx.font = '13px sans-serif'
   ctx.fillStyle = '#fff'
   const lines = [
