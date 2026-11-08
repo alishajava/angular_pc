@@ -66,6 +66,13 @@ const PLAYER_RADIUS = 1.6
 const SHIELD_DURATION = 2.5
 const SHIELD_COOLDOWN = 10
 
+const THRUST_ACCEL = 18
+const MAX_ASCEND_SPEED = 9
+const DESCENT_ACCEL = 7
+const MAX_DESCEND_SPEED = 3.2
+const MAX_ALTITUDE = 24
+const FLIGHT_OBSTACLE_CLEAR_HEIGHT = 1.6
+
 const ENEMY_HP_BASE = 36
 const ENEMY_SPEED = 4.2
 const ENEMY_ENGAGE_RANGE = 24
@@ -212,9 +219,37 @@ function createMechMesh({ bodyColor, accentColor, visorColor, scale = 1 }) {
   missileMuzzle.position.set(0.95, 1.55, 0.25)
   upperBody.add(missileMuzzle)
 
+  // back-mounted rocket launcher: twin thruster tubes used for flight
+  function buildThruster(xOffset) {
+    const tg = new THREE.Group()
+    tg.position.set(xOffset, 0, 0)
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.18, 0.85, 8), darkMat)
+    tg.add(tube)
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.185, 0.185, 0.1, 8), accentMat)
+    band.position.y = 0.15
+    tg.add(band)
+    const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.13, 0.16, 8), darkMat)
+    nozzle.position.y = -0.5
+    tg.add(nozzle)
+    const flame = new THREE.Mesh(
+      new THREE.ConeGeometry(0.16, 0.6, 8),
+      new THREE.MeshBasicMaterial({ color: 0xff9a3c, transparent: true, opacity: 0 }),
+    )
+    flame.position.y = -0.9
+    flame.rotation.x = Math.PI
+    tg.add(flame)
+    return { group: tg, flame }
+  }
+  const backpack = new THREE.Group()
+  backpack.position.set(0, 0.85, -0.58)
+  const thrusterL = buildThruster(-0.3)
+  const thrusterR = buildThruster(0.3)
+  backpack.add(thrusterL.group, thrusterR.group)
+  upperBody.add(backpack)
+
   group.scale.setScalar(scale)
 
-  return { group, legPivotL, legPivotR, upperBody, armL, armR, missileMuzzle, visor }
+  return { group, legPivotL, legPivotR, upperBody, armL, armR, missileMuzzle, visor, thrusterL, thrusterR }
 }
 
 function worldPos(obj3d) {
@@ -330,6 +365,32 @@ function playDefeatSound() {
   playTone({ freqFrom: 300, freqTo: 70, duration: 0.6, type: 'sawtooth', gain: 0.2 })
 }
 
+// continuous thruster hum - started/stopped rather than one-shot
+let thrusterAudio = null
+function startThrusterSound() {
+  if (!audioCtx || thrusterAudio) return
+  const osc = audioCtx.createOscillator()
+  osc.type = 'sawtooth'
+  osc.frequency.setValueAtTime(85, audioCtx.currentTime)
+  const g = audioCtx.createGain()
+  g.gain.value = 0
+  osc.connect(g)
+  g.connect(masterGain)
+  osc.start()
+  g.gain.linearRampToValueAtTime(0.11, audioCtx.currentTime + 0.12)
+  thrusterAudio = { osc, g }
+}
+function stopThrusterSound() {
+  if (!thrusterAudio) return
+  const { osc, g } = thrusterAudio
+  const t = audioCtx.currentTime
+  g.gain.cancelScheduledValues(t)
+  g.gain.setValueAtTime(g.gain.value, t)
+  g.gain.linearRampToValueAtTime(0, t + 0.18)
+  osc.stop(t + 0.2)
+  thrusterAudio = null
+}
+
 // --- Effects (beams / flashes / explosions) ---------------------------------
 const effects = []
 function spawnEffect(mesh, { duration, fromOpacity, toOpacity, fromScale = 1, toScale = 1 }) {
@@ -397,6 +458,8 @@ const player = {
   moving: false,
   shieldActiveUntil: 0,
   shieldCooldownStartedAt: -SHIELD_COOLDOWN,
+  vy: 0,
+  thrusting: false,
   parts: playerBuild,
 }
 
@@ -751,15 +814,21 @@ const keys = new Set()
 let boosting = false
 let blasterHeld = false
 let pausedForPointer = false
+let thrustHeld = false
 
 window.addEventListener('keydown', (e) => {
   keys.add(e.code)
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') boosting = true
   if (e.code === 'KeyE') activateShield()
+  if (e.code === 'Space') {
+    e.preventDefault()
+    thrustHeld = true
+  }
 })
 window.addEventListener('keyup', (e) => {
   keys.delete(e.code)
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') boosting = false
+  if (e.code === 'Space') thrustHeld = false
 })
 
 canvas.addEventListener('mousedown', (e) => {
@@ -785,6 +854,8 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('pointerlockchange', () => {
   if (document.pointerLockElement !== canvas) {
     blasterHeld = false
+    thrustHeld = false
+    stopThrusterSound()
     if (state.phase === 'playing') {
       pausedForPointer = true
       pauseOverlay.style.display = 'flex'
@@ -824,8 +895,13 @@ function updateMovement(dt) {
   }
   player.moving = moving
 
-  resolveCircleObstacles(player.pos, PLAYER_RADIUS)
-  if (player.pos.length() > ARENA_RADIUS - 1) player.pos.setLength(ARENA_RADIUS - 1)
+  if (player.pos.y < FLIGHT_OBSTACLE_CLEAR_HEIGHT) resolveCircleObstacles(player.pos, PLAYER_RADIUS)
+  const flatPos = new THREE.Vector2(player.pos.x, player.pos.z)
+  if (flatPos.length() > ARENA_RADIUS - 1) {
+    flatPos.setLength(ARENA_RADIUS - 1)
+    player.pos.x = flatPos.x
+    player.pos.z = flatPos.y
+  }
 
   playerBuild.group.position.copy(player.pos)
   playerBuild.group.rotation.y = player.yaw
@@ -838,6 +914,35 @@ function updateMovement(dt) {
     playerBuild.legPivotL.rotation.x = THREE.MathUtils.lerp(playerBuild.legPivotL.rotation.x, 0, 0.2)
     playerBuild.legPivotR.rotation.x = THREE.MathUtils.lerp(playerBuild.legPivotR.rotation.x, 0, 0.2)
   }
+}
+
+// --- Flight (back-mounted thruster) -------------------------------------------
+function updateThrusterVisuals(thrusting) {
+  const flicker = thrusting ? 0.65 + Math.sin(clock.elapsedTime * 42) * 0.35 : 0
+  const scaleY = thrusting ? 1 + Math.sin(clock.elapsedTime * 55) * 0.25 : 1
+  for (const t of [playerBuild.thrusterL, playerBuild.thrusterR]) {
+    t.flame.material.opacity = Math.max(0, flicker)
+    t.flame.scale.y = scaleY
+  }
+}
+
+function updateFlight(dt) {
+  const thrusting = thrustHeld && state.phase === 'playing'
+  if (thrusting && !player.thrusting) startThrusterSound()
+  if (!thrusting && player.thrusting) stopThrusterSound()
+  player.thrusting = thrusting
+
+  if (thrusting) {
+    player.vy = Math.min(player.vy + THRUST_ACCEL * dt, MAX_ASCEND_SPEED)
+  } else {
+    player.vy = Math.max(player.vy - DESCENT_ACCEL * dt, -MAX_DESCEND_SPEED)
+  }
+  player.pos.y = clamp(player.pos.y + player.vy * dt, 0, MAX_ALTITUDE)
+  if (player.pos.y <= 0) {
+    player.pos.y = 0
+    if (player.vy < 0) player.vy = 0
+  }
+  updateThrusterVisuals(thrusting)
 }
 
 function updateCamera() {
@@ -978,6 +1083,7 @@ const clock = new THREE.Clock()
 
 function updateGame(dt) {
   updateMovement(dt)
+  updateFlight(dt)
   updateWeapons(dt)
   updateEnemies(dt)
   updateEnemyProjectiles(dt)
@@ -1029,6 +1135,10 @@ function resetGame() {
   player.walkCycle = 0
   player.shieldActiveUntil = 0
   player.shieldCooldownStartedAt = clock.elapsedTime - SHIELD_COOLDOWN
+  player.vy = 0
+  player.thrusting = false
+  thrustHeld = false
+  stopThrusterSound()
 
   state.wave = 0
   state.kills = 0
