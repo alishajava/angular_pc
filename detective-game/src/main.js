@@ -82,6 +82,13 @@ const HOTSPOTS = [
     examined: false,
     givesEvidence: true,
   },
+  {
+    id: 'umbrella',
+    label: '우산',
+    rect: { x: 300, y: 310, w: 70, h: 130 },
+    text: '문 옆에 젖은 우산이 세워져 있다. 편의점 가격표가 아직 붙어 있다. 사건 당일 밤에 산 것일까?',
+    examined: false,
+  },
 ]
 
 const WITNESS_NAME = '목격자 김수한'
@@ -396,6 +403,29 @@ function drawHotspots() {
       ctx.strokeRect(x, y, w, hh)
       ctx.fillStyle = h.examined ? '#2a5a3a' : '#3fae5c'
       ctx.fillRect(x + 8, y + 8, w - 16, hh - 16)
+    } else if (h.id === 'umbrella') {
+      const ux = x + w / 2
+      ctx.beginPath()
+      ctx.moveTo(ux, y + 6)
+      ctx.lineTo(ux + 16, y + 34)
+      ctx.lineTo(ux + 6, y + hh - 22)
+      ctx.lineTo(ux - 6, y + hh - 22)
+      ctx.lineTo(ux - 16, y + 34)
+      ctx.closePath()
+      ctx.fillStyle = h.examined ? '#7a2e2e' : '#c0453f'
+      ctx.fill()
+      ctx.strokeStyle = '#2a1c10'
+      ctx.lineWidth = 3
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(ux, y + hh - 22)
+      ctx.lineTo(ux, y + hh - 8)
+      ctx.arc(ux + 7, y + hh - 8, 7, Math.PI, 0, true)
+      ctx.stroke()
+      ctx.fillStyle = '#e8dcbb'
+      ctx.fillRect(ux + 8, y + 44, 14, 10)
+      ctx.lineWidth = 1.5
+      ctx.strokeRect(ux + 8, y + 44, 14, 10)
     }
 
     if (!h.examined) {
