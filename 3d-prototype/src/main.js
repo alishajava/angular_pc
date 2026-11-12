@@ -12,6 +12,8 @@ const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerH
 const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+renderer.shadowMap.enabled = true
+renderer.shadowMap.type = THREE.PCFSoftShadowMap
 document.body.appendChild(renderer.domElement)
 
 const hemiLight = new THREE.HemisphereLight(0xffffff, 0x6b8caf, 1.4)
@@ -19,6 +21,27 @@ scene.add(hemiLight)
 const sun = new THREE.DirectionalLight(0xffffff, 1.8)
 sun.position.set(10, 20, 10)
 scene.add(sun)
+// The shadow frustum only covers SHADOW_RANGE around whoever the camera is
+// following (see updateDayNight, which moves the light and its target along
+// with them) - covering the whole 100-unit map at once would spread the
+// shadow map too thin to read as anything but blur.
+const SHADOW_RANGE = 32
+sun.castShadow = true
+sun.shadow.mapSize.set(2048, 2048)
+Object.assign(sun.shadow.camera, { left: -SHADOW_RANGE, right: SHADOW_RANGE, top: SHADOW_RANGE, bottom: -SHADOW_RANGE, near: 1, far: 160 })
+sun.shadow.camera.updateProjectionMatrix()
+sun.shadow.bias = -0.0004
+sun.shadow.normalBias = 0.04
+scene.add(sun.target)
+
+function enableShadows(obj) {
+  obj.traverse((o) => {
+    if (o.isMesh) {
+      o.castShadow = true
+      o.receiveShadow = true
+    }
+  })
+}
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.4)
 scene.add(ambientLight)
 
@@ -46,11 +69,15 @@ scene.add(moonMesh)
 // and dawn warm the whole scene's shadows instead of just the direct light.
 const DAY_LENGTH = 180
 let dayTime = 0.28
+// 0 in full daylight, 1 in full night - what the stars, lamps, windows and
+// headlights all key off (see updateSkyDecor / updateNightLights).
+let nightFactor = 0
+let currentSkyHex = SKY_COLOR
 const SKY_KEYFRAMES = [
   { t: 0.0, sky: 0x0a1020, sun: 0x8ea9ff, sunI: 0.1, hemiI: 0.35, hemiGround: 0x0c1830, ambI: 0.08 },
-  { t: 0.22, sky: 0xffb37a, sun: 0xffd9a0, sunI: 1.1, hemiI: 0.9, hemiGround: 0x5a4030, ambI: 0.25 },
-  { t: 0.5, sky: 0x9fd4f0, sun: 0xffffff, sunI: 1.8, hemiI: 1.4, hemiGround: 0x6b8caf, ambI: 0.4 },
-  { t: 0.78, sky: 0xff7e4d, sun: 0xffb37a, sunI: 1.0, hemiI: 0.9, hemiGround: 0x5a3020, ambI: 0.25 },
+  { t: 0.22, sky: 0xffb37a, sun: 0xffd9a0, sunI: 1.5, hemiI: 0.7, hemiGround: 0x5a4030, ambI: 0.2 },
+  { t: 0.5, sky: 0x9fd4f0, sun: 0xffffff, sunI: 2.3, hemiI: 1.05, hemiGround: 0x6b8caf, ambI: 0.3 },
+  { t: 0.78, sky: 0xff7e4d, sun: 0xffb37a, sunI: 1.4, hemiI: 0.7, hemiGround: 0x5a3020, ambI: 0.2 },
   { t: 1.0, sky: 0x0a1020, sun: 0x8ea9ff, sunI: 0.1, hemiI: 0.35, hemiGround: 0x0c1830, ambI: 0.08 },
 ]
 // THREE.Color.lerp() interpolates in the renderer's linear working color
@@ -98,7 +125,16 @@ function updateDayNight(dt) {
 
   const angle = dayTime * Math.PI * 2 - Math.PI / 2
   const sunDist = 60
-  sun.position.set(Math.cos(angle) * sunDist, Math.max(4, Math.sin(angle) * sunDist), 15)
+  const sunHeight = Math.sin(angle)
+  const focus = driving ? car.group.position : player.position
+  sun.position.set(focus.x + Math.cos(angle) * sunDist, Math.max(4, sunHeight * sunDist), focus.z + 15)
+  sun.target.position.set(focus.x, 0, focus.z)
+  // Shadows fade out as the sun nears the horizon rather than stretching to
+  // infinity, and stay off all night - the light is clamped just above the
+  // ground there, so anything it cast would be a smear across the whole map.
+  sun.shadow.intensity = THREE.MathUtils.smoothstep(sunHeight, 0.02, 0.3)
+  nightFactor = 1 - THREE.MathUtils.smoothstep(sunHeight, -0.12, 0.18)
+  currentSkyHex = skyHex
 
   const skyDist = 150
   sunMesh.position.set(Math.cos(angle) * skyDist, Math.sin(angle) * skyDist, 40)
@@ -109,20 +145,89 @@ function updateDayNight(dt) {
   moonMesh.visible = Math.sin(moonAngle) > -0.15
 }
 
-// Ground: a big flat plane plus a grid overlay so movement has a visual reference.
+// Seeded so the scenery (grass speckle, tree layout, clouds, stars) comes out
+// identical on every load instead of reshuffling under the player.
+function seededRandom(seed) {
+  return () => {
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+// A flat base color with small random flecks of a few nearby shades, tiled.
+// The flecks are what give movement a visual reference now that the debug
+// grid is gone - a single flat color makes walking look like standing still.
+function makeSpeckleTexture(base, flecks, count, seed) {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 256
+  const g = canvas.getContext('2d')
+  g.fillStyle = base
+  g.fillRect(0, 0, 256, 256)
+  const rnd = seededRandom(seed)
+  for (let i = 0; i < count; i++) {
+    g.fillStyle = flecks[Math.floor(rnd() * flecks.length)]
+    const size = 1.5 + rnd() * 3.5
+    g.beginPath()
+    g.ellipse(rnd() * 256, rnd() * 256, size, size * (0.4 + rnd() * 0.5), rnd() * Math.PI, 0, Math.PI * 2)
+    g.fill()
+  }
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy())
+  return tex
+}
+
+// The walkable area is GROUND_SIZE across, but the grass itself runs well
+// past that into the fog (and the tree line below hides the boundary), so
+// the map no longer ends in a visible edge with sky underneath.
 const GROUND_SIZE = 100
+const GROUND_VISUAL_SIZE = 400
+const TEXTURE_TILE = 5
+const grassTexture = makeSpeckleTexture('#5fa85f', ['#5aa35a', '#65ad63', '#56a057', '#6ab167'], 1800, 11)
+grassTexture.repeat.set(GROUND_VISUAL_SIZE / TEXTURE_TILE, GROUND_VISUAL_SIZE / TEXTURE_TILE)
 const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE),
-  new THREE.MeshStandardMaterial({ color: 0x5fa85f }),
+  new THREE.PlaneGeometry(GROUND_VISUAL_SIZE, GROUND_VISUAL_SIZE),
+  new THREE.MeshStandardMaterial({ map: grassTexture }),
 )
 ground.rotation.x = -Math.PI / 2
+ground.receiveShadow = true
 scene.add(ground)
-scene.add(new THREE.GridHelper(GROUND_SIZE, 40, 0x3f7a3f, 0x3f7a3f))
+
+function makeCrateTexture() {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 128
+  const g = canvas.getContext('2d')
+  g.fillStyle = '#b9773d'
+  g.fillRect(0, 0, 128, 128)
+  g.strokeStyle = '#8f5a2b'
+  g.lineWidth = 3
+  for (let x = 32; x < 128; x += 32) {
+    g.beginPath()
+    g.moveTo(x, 0)
+    g.lineTo(x, 128)
+    g.stroke()
+  }
+  g.strokeStyle = '#7a4a22'
+  g.lineWidth = 14
+  g.strokeRect(7, 7, 114, 114)
+  g.lineWidth = 12
+  g.beginPath()
+  g.moveTo(12, 12)
+  g.lineTo(116, 116)
+  g.stroke()
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
 
 // A few scattered landmark boxes so walking around actually feels like going somewhere.
 // Each one is also solid: `landmarkBoxes` holds the collision data `boxBlocks()` checks
 // against, including its height so a high enough jump can clear a short box.
-const landmarkMat = new THREE.MeshStandardMaterial({ color: 0xcc6633 })
+const landmarkMat = new THREE.MeshStandardMaterial({ map: makeCrateTexture() })
 const LANDMARKS = [
   [8, 1, 4],
   [-10, 1.5, -6],
@@ -137,8 +242,17 @@ const landmarkBoxes = []
 // so it never ends up outside a wall looking back through it.
 const cameraBlockers = []
 for (const [x, halfHeight, z] of LANDMARKS) {
-  const box = new THREE.Mesh(new THREE.BoxGeometry(2, halfHeight * 2, 2), landmarkMat)
+  const geometry = new THREE.BoxGeometry(2, halfHeight * 2, 2)
+  // Stretch the crate texture's V on the four side faces (BoxGeometry lays
+  // its faces out as +x, -x, +y, -y, +z, -z, four vertices each) so a tall
+  // box reads as crates stacked up rather than one crate pulled like taffy.
+  const uv = geometry.attributes.uv
+  for (let i = 0; i < uv.count; i++) {
+    if (i < 8 || i >= 16) uv.setY(i, uv.getY(i) * halfHeight)
+  }
+  const box = new THREE.Mesh(geometry, landmarkMat)
   box.position.set(x, halfHeight, z)
+  enableShadows(box)
   scene.add(box)
   landmarkBoxes.push({ x, z, height: halfHeight * 2 })
   cameraBlockers.push(box)
@@ -162,10 +276,16 @@ const walls = []
 function addWall(cx, cz, halfX, halfZ) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(halfX * 2, WALL_HEIGHT, halfZ * 2), wallMat)
   mesh.position.set(cx, WALL_HEIGHT / 2, cz)
+  enableShadows(mesh)
   scene.add(mesh)
   walls.push({ x: cx, z: cz, halfX, halfZ })
   cameraBlockers.push(mesh)
 }
+
+// Window panes and the lamp inside only light up at night (see
+// updateNightLights) - by day the glass is just a dark pane.
+const windowMat = new THREE.MeshStandardMaterial({ color: 0x27323f, emissive: 0xffc46b, emissiveIntensity: 0 })
+const houseLight = new THREE.PointLight(0xffc98a, 0, 12, 1.6)
 
 {
   const { x: hx, z: hz } = HOUSE_CENTER
@@ -185,7 +305,27 @@ function addWall(cx, cz, halfX, halfZ) {
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(S * 2, S * 2), floorMat)
   floor.rotation.x = -Math.PI / 2
   floor.position.set(hx, 0.02, hz)
+  floor.receiveShadow = true
   scene.add(floor)
+
+  // Purely visual: the doorway was a floor-to-roof slot in the wall. Sits
+  // above head height, so it needs no collision of its own.
+  const DOOR_HEIGHT = 2.2
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(T, WALL_HEIGHT - DOOR_HEIGHT, DOOR_WIDTH), wallMat)
+  lintel.position.set(hx + S, (WALL_HEIGHT + DOOR_HEIGHT) / 2, hz)
+  enableShadows(lintel)
+  scene.add(lintel)
+
+  // One pane per solid wall, slightly thicker than the wall so it shows on
+  // both the outside and the inside face.
+  for (const [wx, wz, alongX] of [[hx, hz - S, true], [hx, hz + S, true], [hx - S, hz, false]]) {
+    const pane = new THREE.Mesh(new THREE.BoxGeometry(alongX ? 1.5 : T + 0.06, 1.0, alongX ? T + 0.06 : 1.5), windowMat)
+    pane.position.set(wx, 1.9, wz)
+    scene.add(pane)
+  }
+
+  houseLight.position.set(hx, 2.4, hz)
+  scene.add(houseLight)
 
   const roofHeight = 1.8
   // radialSegments=4 makes a square pyramid; rotate 45° so its flat faces
@@ -193,6 +333,7 @@ function addWall(cx, cz, halfX, halfZ) {
   const roof = new THREE.Mesh(new THREE.ConeGeometry(S * Math.SQRT2 + 0.3, roofHeight, 4), roofMat)
   roof.rotation.y = Math.PI / 4
   roof.position.set(hx, WALL_HEIGHT + roofHeight / 2, hz)
+  enableShadows(roof)
   scene.add(roof)
   cameraBlockers.push(roof)
 }
@@ -270,6 +411,7 @@ function createCharacter(outfitColor) {
   const legL = makeLeg(group, BOOTS, 0.1, 0.38, 0.37, -0.14, 0.75)
   const legR = makeLeg(group, BOOTS, 0.1, 0.38, 0.37, 0.14, 0.75)
 
+  enableShadows(group)
   scene.add(group)
   return { group, armL, armR, legL, legR }
 }
@@ -354,7 +496,10 @@ function instantiateCharacterModel(sourceScene, variant = {}) {
 // anything that still references npc.armL/armR/legL/legR has something
 // harmless to rotate and nothing else has to special-case these npcs.
 function attachModelToNpc(npc, model) {
-  for (const child of npc.group.children) child.visible = false
+  for (const child of npc.group.children) {
+    if (child !== npc.nameTag) child.visible = false
+  }
+  enableShadows(model)
   npc.group.add(model)
   npc.modelRig = {
     root: model,
@@ -384,10 +529,44 @@ const NPC_DEFS = [
   { id: 'eunho', name: '은호', primitiveColor: 0x9c6bd6, pos: [18, -2], rotY: Math.PI * 0.2, variant: { hair: '#1f3a52', shirt: '#9c6bd6', shorts: '#2f2f3a', shoes: '#4a7a4a', skin: '#c98a63', height: 1.88 } },
 ]
 
+// Text drawn to a canvas and shown as a camera-facing sprite. `worldHeight`
+// is the sprite's height in world units; its width follows the text.
+function makeTextSprite(text, { color = '#ffffff', background = 'rgba(15, 18, 26, 0.6)', fontSize = 40, worldHeight = 0.4 } = {}) {
+  const canvas = document.createElement('canvas')
+  const g = canvas.getContext('2d')
+  const font = `bold ${fontSize}px sans-serif`
+  g.font = font
+  canvas.width = Math.ceil(g.measureText(text).width + fontSize * 1.2)
+  canvas.height = Math.ceil(fontSize * 1.7)
+  g.font = font
+  g.textAlign = 'center'
+  g.textBaseline = 'middle'
+  if (background) {
+    g.fillStyle = background
+    g.beginPath()
+    g.roundRect(0, 0, canvas.width, canvas.height, canvas.height / 2)
+    g.fill()
+  }
+  g.lineWidth = fontSize / 7
+  g.strokeStyle = 'rgba(0, 0, 0, 0.75)'
+  g.strokeText(text, canvas.width / 2, canvas.height / 2 + 2)
+  g.fillStyle = color
+  g.fillText(text, canvas.width / 2, canvas.height / 2 + 2)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }))
+  sprite.scale.set((worldHeight * canvas.width) / canvas.height, worldHeight, 1)
+  return sprite
+}
+
 const npcs = NPC_DEFS.map((def, i) => {
   const npc = { ...createCharacter(def.primitiveColor), phase: i * 1.7, greeted: false, id: def.id, name: def.name }
   npc.group.position.set(def.pos[0], 0, def.pos[1])
   npc.group.rotation.y = def.rotY
+  // The delivery quest names its target, so every NPC wears their name.
+  npc.nameTag = makeTextSprite(def.name)
+  npc.nameTag.position.y = def.variant.height + 0.42
+  npc.group.add(npc.nameTag)
   if (def.patrol) {
     const half = def.patrol.half
     npc.patrol =
@@ -454,8 +633,16 @@ function createCar() {
   headlightR.position.x = -0.55
   group.add(headlightR)
 
+  // One beam standing in for both headlights; only switched on while the
+  // car is being driven at night (see updateNightLights).
+  const headlightBeam = new THREE.SpotLight(0xfff1c4, 0, 34, 0.55, 0.6, 1.2)
+  headlightBeam.position.set(0, 0.8, 1.6)
+  headlightBeam.target.position.set(0, 0, 14)
+  group.add(headlightBeam, headlightBeam.target)
+
+  enableShadows(group)
   scene.add(group)
-  return { group, wheels, headlightMat }
+  return { group, wheels, headlightMat, headlightBeam }
 }
 
 const CAR_RADIUS = 1.2
@@ -464,6 +651,255 @@ const car = createCar()
 car.group.position.set(6, 0, -8)
 let carSpeed = 0
 let driving = false
+
+// ---------- Scenery ----------
+// Round, solid props (tree trunks, rocks, lamp posts). `height` lets a jump
+// clear the low ones, the same way a landmark box stops blocking from above.
+const sceneryColliders = []
+
+function resolveSceneryCollisions(pos, radius) {
+  for (const c of sceneryColliders) {
+    if (pos.y >= c.height) continue
+    const dx = pos.x - c.x
+    const dz = pos.z - c.z
+    const minDist = c.radius + radius
+    const dist = Math.hypot(dx, dz)
+    if (dist >= minDist) continue
+    const push = minDist - dist
+    const [nx, nz] = dist > 0.0001 ? [dx / dist, dz / dist] : [1, 0]
+    pos.x += nx * push
+    pos.z += nz * push
+  }
+}
+
+// Dirt paths as three strips that meet edge to edge rather than crossing:
+// two coplanar planes overlapping at the junction would z-fight there.
+// Each is [centerX, centerZ, sizeX, sizeZ].
+const PATH_STRIPS = [
+  [7, 2, 40, 2],
+  [6, -11, 2, 24],
+  [6, 9, 2, 12],
+]
+const pathMat = new THREE.MeshStandardMaterial({
+  map: makeSpeckleTexture('#b89a6a', ['#b09263', '#c0a272', '#aa8c5e'], 1400, 23),
+  polygonOffset: true,
+  polygonOffsetFactor: -2,
+  polygonOffsetUnits: -2,
+})
+for (const [cx, cz, sizeX, sizeZ] of PATH_STRIPS) {
+  const geometry = new THREE.PlaneGeometry(sizeX, sizeZ)
+  const uv = geometry.attributes.uv
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * sizeX) / TEXTURE_TILE, (uv.getY(i) * sizeZ) / TEXTURE_TILE)
+  const strip = new THREE.Mesh(geometry, pathMat)
+  strip.rotation.x = -Math.PI / 2
+  strip.position.set(cx, 0.03, cz)
+  strip.receiveShadow = true
+  scene.add(strip)
+}
+
+const LAMP_POSITIONS = [[-8, 3.7], [4.3, 3.7], [17, 0.3], [7.7, -15], [4.3, 11]]
+const lampPoleMat = new THREE.MeshStandardMaterial({ color: 0x2c2f36 })
+const lampBulbMat = new THREE.MeshStandardMaterial({ color: 0xfff3d0, emissive: 0xffd28a, emissiveIntensity: 0 })
+for (const [x, z] of LAMP_POSITIONS) {
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 3.2, 8), lampPoleMat)
+  pole.position.set(x, 1.6, z)
+  enableShadows(pole)
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 12), lampBulbMat)
+  bulb.position.set(x, 3.3, z)
+  scene.add(pole, bulb)
+  sceneryColliders.push({ x, z, radius: 0.15, height: 3.2 })
+}
+// Every real light costs every lit pixel on screen, so only the two lamps
+// nearest the player actually cast light (the bulbs themselves all glow).
+// The lamps are far enough apart that the pool swapping lamps happens
+// beyond the light's reach, where it isn't visible.
+const lampLights = []
+for (let i = 0; i < 2; i++) {
+  const light = new THREE.PointLight(0xffc98a, 0, 13, 1.6)
+  scene.add(light)
+  lampLights.push(light)
+}
+
+// True anywhere a tree or rock would be in the way: on a path, against a
+// box or the house, where someone stands or patrols (with room to dodge the
+// car), or on top of where the player and the car start.
+function sceneryBlocked(x, z) {
+  if (Math.hypot(x, z) < 5) return true
+  if (Math.hypot(x - car.group.position.x, z - car.group.position.z) < 4.5) return true
+  if (Math.abs(x - HOUSE_CENTER.x) < HOUSE_HALF + 4 && Math.abs(z - HOUSE_CENTER.z) < HOUSE_HALF + 4) return true
+  for (const [cx, cz, sizeX, sizeZ] of PATH_STRIPS) {
+    if (Math.abs(x - cx) < sizeX / 2 + 2.2 && Math.abs(z - cz) < sizeZ / 2 + 2.2) return true
+  }
+  for (const [lx, , lz] of LANDMARKS) {
+    if (Math.hypot(x - lx, z - lz) < 3.4) return true
+  }
+  for (const [lx, lz] of LAMP_POSITIONS) {
+    if (Math.hypot(x - lx, z - lz) < 2.5) return true
+  }
+  for (const def of NPC_DEFS) {
+    const half = def.patrol ? def.patrol.half : 0
+    const alongX = def.patrol && def.patrol.axis === 'x'
+    const nearestX = alongX ? Math.max(def.pos[0] - half, Math.min(def.pos[0] + half, x)) : def.pos[0]
+    const nearestZ = alongX ? def.pos[1] : Math.max(def.pos[1] - half, Math.min(def.pos[1] + half, z))
+    if (Math.hypot(x - nearestX, z - nearestZ) < 4.5) return true
+  }
+  return false
+}
+
+// Pines: a scattering across the map (solid trunks), plus a dense band just
+// outside the walkable square so the edge of the world reads as a forest
+// line instead of an invisible wall. All of them share three InstancedMeshes
+// (trunk + two foliage tiers) - a couple hundred separate trees would be
+// several hundred draw calls, doubled again by the shadow pass.
+const INNER_TREE_COUNT = 30
+const BORDER_TREE_COUNT = 200
+{
+  const rnd = seededRandom(7)
+  const trees = []
+  const crowded = (x, z, minDist) => trees.some((t) => Math.hypot(t.x - x, t.z - z) < minDist)
+  const innerLimit = GROUND_SIZE / 2 - 3
+  for (let tries = 0; trees.length < INNER_TREE_COUNT && tries < 5000; tries++) {
+    const x = (rnd() * 2 - 1) * innerLimit
+    const z = (rnd() * 2 - 1) * innerLimit
+    if (sceneryBlocked(x, z) || crowded(x, z, 3.4)) continue
+    const scale = 0.85 + rnd() * 0.6
+    trees.push({ x, z, scale, rot: rnd() * Math.PI * 2, tint: rnd() })
+    sceneryColliders.push({ x, z, radius: 0.3 * scale, height: Infinity })
+  }
+  const borderInner = GROUND_SIZE / 2 + 2.5
+  const borderOuter = GROUND_SIZE / 2 + 17
+  for (let tries = 0; trees.length < INNER_TREE_COUNT + BORDER_TREE_COUNT && tries < 20000; tries++) {
+    const x = (rnd() * 2 - 1) * borderOuter
+    const z = (rnd() * 2 - 1) * borderOuter
+    if (Math.max(Math.abs(x), Math.abs(z)) < borderInner || crowded(x, z, 2.8)) continue
+    trees.push({ x, z, scale: 1.1 + rnd() * 0.8, rot: rnd() * Math.PI * 2, tint: rnd() })
+  }
+
+  const trunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 1.5, 6).translate(0, 0.75, 0)
+  const lowerGeo = new THREE.ConeGeometry(1.25, 2.3, 7).translate(0, 2.4, 0)
+  const upperGeo = new THREE.ConeGeometry(0.9, 1.9, 7).translate(0, 3.55, 0)
+  const trunkMesh = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: 0x7a5536, flatShading: true }), trees.length)
+  const foliageMat = new THREE.MeshStandardMaterial({ flatShading: true })
+  const lowerMesh = new THREE.InstancedMesh(lowerGeo, foliageMat, trees.length)
+  const upperMesh = new THREE.InstancedMesh(upperGeo, foliageMat, trees.length)
+
+  const matrix = new THREE.Matrix4()
+  const quat = new THREE.Quaternion()
+  const up = new THREE.Vector3(0, 1, 0)
+  const color = new THREE.Color()
+  trees.forEach((t, i) => {
+    quat.setFromAxisAngle(up, t.rot)
+    matrix.compose(new THREE.Vector3(t.x, 0, t.z), quat, new THREE.Vector3(t.scale, t.scale, t.scale))
+    trunkMesh.setMatrixAt(i, matrix)
+    lowerMesh.setMatrixAt(i, matrix)
+    upperMesh.setMatrixAt(i, matrix)
+    color.setHSL(0.29 + t.tint * 0.09, 0.42 + t.tint * 0.15, 0.24 + t.tint * 0.1)
+    lowerMesh.setColorAt(i, color)
+    color.offsetHSL(0, 0, 0.035)
+    upperMesh.setColorAt(i, color)
+  })
+  for (const mesh of [trunkMesh, lowerMesh, upperMesh]) {
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    scene.add(mesh)
+  }
+
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x8b8f96, flatShading: true })
+  for (let placed = 0, tries = 0; placed < 12 && tries < 2000; tries++) {
+    const x = (rnd() * 2 - 1) * innerLimit
+    const z = (rnd() * 2 - 1) * innerLimit
+    if (sceneryBlocked(x, z) || crowded(x, z, 2.2)) continue
+    const size = 0.35 + rnd() * 0.35
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(size), rockMat)
+    rock.position.set(x, size * 0.35, z)
+    rock.rotation.set(rnd() * 3, rnd() * 3, rnd() * 3)
+    rock.scale.y = 0.7
+    enableShadows(rock)
+    scene.add(rock)
+    sceneryColliders.push({ x, z, radius: size * 0.8, height: size })
+    placed++
+  }
+}
+
+// Stars sit on a shell centred on the camera (re-centred every frame in
+// updateSkyDecor) so they never get closer or slide past like scenery, and
+// only fade in as nightFactor rises.
+const stars = (() => {
+  const rnd = seededRandom(31)
+  const positions = []
+  while (positions.length < 500 * 3) {
+    const v = new THREE.Vector3(rnd() * 2 - 1, rnd(), rnd() * 2 - 1)
+    if (v.lengthSq() > 1 || v.lengthSq() < 0.01) continue
+    v.normalize().multiplyScalar(300)
+    if (v.y < 15) continue
+    positions.push(v.x, v.y, v.z)
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  const points = new THREE.Points(
+    geometry,
+    new THREE.PointsMaterial({ color: 0xffffff, size: 1.8, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false }),
+  )
+  points.frustumCulled = false
+  scene.add(points)
+  return points
+})()
+
+const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false })
+const CLOUD_WRAP = 180
+const clouds = (() => {
+  const rnd = seededRandom(53)
+  const puffGeo = new THREE.SphereGeometry(1, 8, 6)
+  const list = []
+  for (let i = 0; i < 10; i++) {
+    const group = new THREE.Group()
+    const puffs = 4 + Math.floor(rnd() * 3)
+    for (let p = 0; p < puffs; p++) {
+      const puff = new THREE.Mesh(puffGeo, cloudMat)
+      puff.scale.set(6 + rnd() * 5, 2 + rnd() * 1.3, 4 + rnd() * 3)
+      puff.position.set((rnd() * 2 - 1) * 8, rnd() * 1.2, (rnd() * 2 - 1) * 3)
+      group.add(puff)
+    }
+    group.position.set((rnd() * 2 - 1) * CLOUD_WRAP, 44 + rnd() * 16, (rnd() * 2 - 1) * CLOUD_WRAP)
+    scene.add(group)
+    list.push({ group, speed: 0.8 + rnd() * 0.9 })
+  }
+  return list
+})()
+
+function updateSkyDecor(dt) {
+  stars.position.copy(camera.position)
+  stars.material.opacity = nightFactor * 0.9
+  cloudMat.color.setHex(lerpHex(currentSkyHex, 0xffffff, 0.12 + 0.78 * (1 - nightFactor)))
+  for (const cloud of clouds) {
+    cloud.group.position.x += cloud.speed * dt
+    if (cloud.group.position.x > CLOUD_WRAP) cloud.group.position.x = -CLOUD_WRAP
+  }
+}
+
+// Everything that only matters after dark, all driven by the same
+// nightFactor so lamps, windows and headlights come up together at dusk.
+const LAMP_INTENSITY = 13
+const HOUSE_LIGHT_INTENSITY = 9
+const HEADLIGHT_BEAM_INTENSITY = 110
+const HEADLIGHT_NIGHT = 0xfff0b0
+
+function updateNightLights() {
+  const focus = driving ? car.group.position : player.position
+  const nearest = LAMP_POSITIONS.map(([x, z]) => ({ x, z, d: Math.hypot(x - focus.x, z - focus.z) })).sort((a, b) => a.d - b.d)
+  lampLights.forEach((light, i) => {
+    light.position.set(nearest[i].x, 3.1, nearest[i].z)
+    light.intensity = nightFactor * LAMP_INTENSITY
+  })
+  lampBulbMat.emissiveIntensity = nightFactor * 2
+  windowMat.emissiveIntensity = nightFactor * 1.5
+  houseLight.intensity = nightFactor * HOUSE_LIGHT_INTENSITY
+  const beam = driving ? nightFactor : 0
+  car.headlightBeam.intensity = beam * HEADLIGHT_BEAM_INTENSITY
+  if (performance.now() / 1000 > headlightFlashUntil) {
+    car.headlightMat.emissive.setHex(lerpHex(HEADLIGHT_NORMAL, HEADLIGHT_NIGHT, beam))
+  }
+}
 
 function nearCar() {
   const dx = player.position.x - car.group.position.x
@@ -976,7 +1412,19 @@ function updateNpcHitAnimation(dt) {
 
 // Spoken out loud via the browser's built-in text-to-speech (no voice
 // files to generate or host) rather than a silent on-screen bubble.
+const subtitleEl = document.getElementById('subtitle')
+let subtitleTimer = 0
 function speak(text) {
+  // Shown on screen as well: text-to-speech is silent on a muted tab and
+  // missing outright in some browsers, and the quest lines matter.
+  if (subtitleEl) {
+    subtitleEl.textContent = text
+    subtitleEl.style.opacity = '1'
+    clearTimeout(subtitleTimer)
+    subtitleTimer = setTimeout(() => {
+      subtitleEl.style.opacity = '0'
+    }, 4000)
+  }
   if (!window.speechSynthesis) return
   const utter = new SpeechSynthesisUtterance(text)
   utter.lang = 'ko-KR'
@@ -1012,6 +1460,27 @@ let questTargetId = null
 
 function npcById(id) {
   return npcs.find((n) => n.id === id)
+}
+
+// Floating above whoever the player needs to find next: a "!" over the
+// quest giver while there's a delivery to pick up, a gold diamond over the
+// recipient while one is being carried.
+const questOfferMarker = makeTextSprite('!', { color: '#ffd23f', background: null, fontSize: 96, worldHeight: 0.8 })
+const questTargetMarker = new THREE.Mesh(new THREE.OctahedronGeometry(0.22), new THREE.MeshBasicMaterial({ color: 0xffd23f, fog: false }))
+questTargetMarker.scale.y = 1.5
+scene.add(questOfferMarker, questTargetMarker)
+const QUEST_MARKER_HEIGHT = 2.95
+
+function updateQuestMarkers(dt) {
+  const bob = Math.sin(performance.now() / 300) * 0.1
+  const carrying = questState === 'active'
+  const giver = npcById(QUEST_GIVER_ID).group.position
+  questOfferMarker.visible = !carrying
+  questOfferMarker.position.set(giver.x, QUEST_MARKER_HEIGHT + bob, giver.z)
+  const target = carrying ? npcById(questTargetId).group.position : null
+  questTargetMarker.visible = carrying
+  if (target) questTargetMarker.position.set(target.x, QUEST_MARKER_HEIGHT + bob, target.z)
+  questTargetMarker.rotation.y += dt * 2.5
 }
 
 const questBannerEl = document.getElementById('quest-banner')
@@ -1054,7 +1523,7 @@ function updateNpcGreetings() {
         speak(`${npc.name}: ${pick(QUEST_DONE_LINES)}`)
         setQuestBanner('퀘스트 완료! 다시 아린에게 가보세요.', 5000)
       } else {
-        speak('안녕?')
+        speak(`${npc.name}: 안녕?`)
       }
     } else if (!near) {
       npc.greeted = false
@@ -1271,8 +1740,8 @@ function loop(time) {
   lastTime = time
 
   updateDayNight(dt)
+  updateNightLights()
   updateNpcDodge(dt)
-  if (performance.now() / 1000 > headlightFlashUntil) car.headlightMat.emissive.setHex(HEADLIGHT_NORMAL)
 
   if (driving) {
     updateCar(dt)
@@ -1287,6 +1756,7 @@ function loop(time) {
     resolveBoxCollisions(car.group.position, CAR_RADIUS)
     resolveWallCollisions(car.group.position, CAR_RADIUS)
     resolveNpcCollisions(car.group.position, CAR_RADIUS)
+    resolveSceneryCollisions(car.group.position, CAR_RADIUS)
   } else {
     updatePlayer(dt)
     updateJumpAnim(dt)
@@ -1294,6 +1764,7 @@ function loop(time) {
     resolveWallCollisions(player.position, PLAYER_RADIUS)
     resolveNpcCollisions(player.position, PLAYER_RADIUS)
     resolveCarCollision(player.position, PLAYER_RADIUS)
+    resolveSceneryCollisions(player.position, PLAYER_RADIUS)
     updateVertical(dt)
     updateNpcGreetings()
   }
@@ -1302,6 +1773,8 @@ function loop(time) {
   updateNpcs(dt)
   updateHint()
   updateCamera()
+  updateSkyDecor(dt)
+  updateQuestMarkers(dt)
   renderer.render(scene, camera)
   requestAnimationFrame(loop)
 }
