@@ -1560,10 +1560,11 @@ function updateLimbs(dt, moving) {
 // (knees and squash spring back to neutral) that plays out while rising.
 // `updateJumpAnim` overrides the legs' hip/knee rotation and the player's
 // scale whenever it's active, taking priority over the walk cycle.
-const JUMP_WINDUP = 0.1
-const JUMP_EXTEND = 0.18
-const KNEE_BEND_MAX = 0.9
-const SQUASH_MIN = 0.85
+const JUMP_WINDUP = 0.2
+const JUMP_EXTEND = 0.22
+const KNEE_BEND_MAX = 1.4
+const HIP_TILT_MAX = 0.6 // 허벅지가 앞으로 나와야 쪼그려 앉는 자세로 보인다
+const SQUASH_MIN = 0.78
 let jumpState = 'none' // 'none' | 'windup' | 'extend'
 let jumpStateT = 0
 
@@ -1579,7 +1580,7 @@ function updateJumpAnim(dt) {
   if (jumpState === 'windup') {
     jumpStateT += dt
     const t = Math.min(1, jumpStateT / JUMP_WINDUP)
-    applyLegPose(t * KNEE_BEND_MAX, t * 0.25, 1 - t * (1 - SQUASH_MIN))
+    applyLegPose(t * KNEE_BEND_MAX, t * HIP_TILT_MAX, 1 - t * (1 - SQUASH_MIN))
     if (t >= 1) {
       velocityY = JUMP_SPEED
       grounded = false
@@ -1590,7 +1591,7 @@ function updateJumpAnim(dt) {
     jumpStateT += dt
     const t = Math.min(1, jumpStateT / JUMP_EXTEND)
     const ease = 1 - (1 - t) ** 3 // ease-out cubic: a snappy stretch, not a linear one
-    applyLegPose(KNEE_BEND_MAX * (1 - ease), 0.25 * (1 - ease), SQUASH_MIN + (1 - SQUASH_MIN) * ease)
+    applyLegPose(KNEE_BEND_MAX * (1 - ease), HIP_TILT_MAX * (1 - ease), SQUASH_MIN + (1 - SQUASH_MIN) * ease)
     if (t >= 1) {
       jumpState = 'none'
       applyLegPose(0, 0, 1)
