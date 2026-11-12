@@ -375,6 +375,8 @@ function doInteract(nearby) {
 
 window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase()
+  if (key === ' ') e.preventDefault() // 스페이스로 페이지가 스크롤되지 않게
+  if (e.repeat) return // 꾹 누르면 상호작용·상점 열기/닫기가 반복되는 것을 방지
   heldKeys.add(key)
 
   if (state.phase === 'title') {
