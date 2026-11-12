@@ -148,7 +148,8 @@ const HIGH = 70
 const VERY_HIGH = 85
 
 function computeEnding(s) {
-  if (s.stress >= 85) {
+  // 마지막 턴에 쉬어서 모면하지 못하도록, 고스트레스 상태가 여러 턴 이어졌다면 번아웃
+  if (s.stress >= 85 || s.burnoutTurns >= 4) {
     return {
       title: '번아웃 엔딩',
       text: `${s.name}은(는) 너무 지친 나머지 짐을 싸서 홀로 먼 곳으로 떠나버렸다.\n가끔 보내오는 편지에는 "이제야 제대로 쉴 수 있을 것 같아요"라고 적혀 있었다.\n\n조금 더 쉬게 해줄걸, 하는 아쉬움이 오래도록 남았다.`,
@@ -328,6 +329,7 @@ function freshState() {
     stats: { int: 20, str: 20, charm: 20, art: 20, faith: 20 },
     money: 30,
     stress: 20,
+    burnoutTurns: 0, // 스트레스 85 이상으로 끝난 턴 수
     sick: false,
     lastResult: '',
     ending: null,
@@ -361,6 +363,7 @@ function resolveTurn(activity) {
     state.sick = true
     lines.push(`${state.name}은(는) 무리를 한 탓인지 몸이 으슬으슬하다... (다음 턴은 앓아눕는다)`)
   }
+  if (state.stress >= 85) state.burnoutTurns += 1
   state.lastResult = lines.join(' ')
   state.turn += 1
   state.phase = 'result'
