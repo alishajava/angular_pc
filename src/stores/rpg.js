@@ -124,6 +124,7 @@ export const useRpgStore = defineStore('rpg', () => {
     log: '',
     timer: 0,
     fireballReady: true,
+    fireballCooldown: 0,
     effect: null, // 'attack' | 'fireball' | null
     effectTimer: 0,
     actionId: 0,
@@ -184,6 +185,7 @@ export const useRpgStore = defineStore('rpg', () => {
     battle.log = `${m.isBoss ? '보스' : '몬스터'}이(가) 나타났다!`
     battle.timer = 0
     battle.fireballReady = true
+    battle.fireballCooldown = 0
     battle.effect = null
     battle.effectTimer = 0
   }
@@ -210,6 +212,7 @@ export const useRpgStore = defineStore('rpg', () => {
     const dmg = rollDamage(FIREBALL_DAMAGE)
     m.hp -= dmg
     battle.fireballReady = false
+    battle.fireballCooldown = 2 // 한 턴 쉬고 다시 사용 가능
     battle.log = `파이어볼! ${dmg}의 피해를 입혔다!`
     battle.effect = 'fireball'
     battle.effectTimer = 0.35
@@ -275,7 +278,8 @@ export const useRpgStore = defineStore('rpg', () => {
     } else {
       battle.turn = 'player'
       battle.timer = 0
-      battle.fireballReady = true
+      if (battle.fireballCooldown > 0) battle.fireballCooldown -= 1
+      battle.fireballReady = battle.fireballCooldown === 0
     }
   }
 

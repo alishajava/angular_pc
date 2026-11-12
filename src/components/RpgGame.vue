@@ -28,6 +28,7 @@ function onKeyDown(e) {
   if ([...MOVE_UP, ...MOVE_DOWN, ...MOVE_LEFT, ...MOVE_RIGHT, ...ATTACK_KEYS, ...FIREBALL_KEYS, ...FLEE_KEYS, 'enter', 'escape'].includes(key)) {
     e.preventDefault()
   }
+  if (e.repeat) return // 키를 꾹 눌러도 화면 전환/행동이 반복되지 않게
   heldKeys.add(key)
   if (key === 'i') showStats.value = !showStats.value
   if (key === 'm') toggleMusic()
@@ -37,6 +38,7 @@ function onKeyDown(e) {
     return
   }
   if (key === 'escape') {
+    if (store.battle.active) return // 전투 중에는 마을로 도망칠 수 없다 (R로 도망)
     town.enterTown()
     flow.goToTown()
     return

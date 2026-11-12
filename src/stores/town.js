@@ -241,6 +241,8 @@ export const useTownStore = defineStore('town', () => {
         dialogueTimer.value = DIALOGUE_DURATION
         return null
       }
+      // 첫 대화: 임무를 받는다 (기본 대사가 이어서 표시된다)
+      if (!quest.value && !questDone.value) quest.value = '던전의 몬스터를 모두 물리치자'
     }
 
     if (item.type === 'heroine') {
