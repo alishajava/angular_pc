@@ -85,7 +85,7 @@ const TYPHOON_INTERVAL = 42
 const TYPHOON_WIND_CHAOS = rad(130) // extra wind-direction swing while inside
 const TYPHOON_SPEED_DRAG = 0.6 // overall speed multiplier while inside, on top of sail trim
 const TYPHOON_GUST_STRENGTH = 55 // px/s of chaotic buffeting drift while inside
-const TYPHOON_PULL_STRENGTH = 45 // px/s drawing the boat toward the eye, so it can't just drift out
+const TYPHOON_PULL_STRENGTH = 25 // px/s drawing the boat toward the eye, so it can't just drift out
 const TYPHOON_SPAWN_BOUNDS = { minX: -380, maxX: 420, minY: -260, maxY: 340 }
 const CARGO_LOSS_CHECK_INTERVAL = 4
 const CARGO_LOSS_CHANCE = 0.25
@@ -136,11 +136,22 @@ function makeInitialState() {
 }
 let state = makeInitialState()
 
+let lastResetPress = -9999
 const heldKeys = new Set()
 window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase()
   heldKeys.add(key)
-  if (key === 'r') state = makeInitialState()
+  if (key === 'r' && !e.repeat) {
+    // 진행 중에 실수로 눌러 기록이 날아가지 않도록 한 번 더 확인한다
+    const now = performance.now()
+    if (state.phase === 'finished' || state.elapsed < 3 || now - lastResetPress < 2000) {
+      state = makeInitialState()
+      lastResetPress = -9999
+    } else {
+      lastResetPress = now
+      showToast('R을 한 번 더 누르면 처음부터 다시 시작합니다')
+    }
+  }
 })
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
 function held(names) { return names.some((k) => heldKeys.has(k)) }
@@ -183,9 +194,17 @@ function spawnTyphoonsIfDue() {
   const b = TYPHOON_SPAWN_BOUNDS
   const dir = Math.random() * TAU
   const speed = 14 + Math.random() * 10
+  // 배 바로 옆에서 생기면 피할 틈이 없으므로, 배와 충분히 떨어진 곳에서만 생성한다
+  let sx = 0
+  let sy = 0
+  for (let tries = 0; tries < 30; tries++) {
+    sx = b.minX + Math.random() * (b.maxX - b.minX)
+    sy = b.minY + Math.random() * (b.maxY - b.minY)
+    if (Math.hypot(sx - state.boat.x, sy - state.boat.y) >= TYPHOON_RADIUS + 220) break
+  }
   state.typhoons.push({
-    x: b.minX + Math.random() * (b.maxX - b.minX),
-    y: b.minY + Math.random() * (b.maxY - b.minY),
+    x: sx,
+    y: sy,
     vx: Math.cos(dir) * speed,
     vy: Math.sin(dir) * speed,
     bornAt: state.elapsed,
@@ -657,7 +676,9 @@ function drawHud() {
     ctx.textAlign = 'center'
     ctx.fillRect(canvas.width / 2 - w / 2, 16, w, 32)
     ctx.fillStyle = '#ffd23f'
+    ctx.textBaseline = 'middle'
     ctx.fillText(state.toast.text, canvas.width / 2, 32)
+    ctx.textBaseline = 'top'
     ctx.textAlign = 'left'
     ctx.globalAlpha = 1
   }
