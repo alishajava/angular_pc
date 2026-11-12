@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 
 // --- DOM refs ---------------------------------------------------------------
 const titleScreen = document.getElementById('title-screen')
@@ -100,6 +101,11 @@ renderer.setSize(window.innerWidth, window.innerHeight)
 document.body.appendChild(renderer.domElement)
 const canvas = renderer.domElement
 
+// 금속 장갑이 반사할 환경이 있어야 로봇이 어둡게 죽지 않고 입체감 있게 보인다
+const pmrem = new THREE.PMREMGenerator(renderer)
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+scene.environmentIntensity = 0.9
+
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
@@ -115,7 +121,7 @@ const fill = new THREE.DirectionalLight(0x4d8bff, 0.5)
 fill.position.set(-25, 20, -30)
 scene.add(fill)
 
-const groundMat = new THREE.MeshStandardMaterial({ color: 0x162236, metalness: 0.1, roughness: 0.95 })
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x162236, metalness: 0.1, roughness: 0.95, envMapIntensity: 0.25 })
 const ground = new THREE.Mesh(new THREE.CircleGeometry(ARENA_RADIUS * 1.4, 48), groundMat)
 ground.rotation.x = -Math.PI / 2
 scene.add(ground)
@@ -142,7 +148,7 @@ for (let i = 0; i < 10; i++) {
   const w = 2 + Math.random() * 1.4
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(w, h, w),
-    new THREE.MeshStandardMaterial({ color: 0x1b2430, metalness: 0.25, roughness: 0.8 }),
+    new THREE.MeshStandardMaterial({ color: 0x1b2430, metalness: 0.25, roughness: 0.8, envMapIntensity: 0.35 }),
   )
   mesh.position.set(x, h / 2, z)
   scene.add(mesh)
@@ -150,60 +156,104 @@ for (let i = 0; i < 10; i++) {
 }
 
 // --- Mech model builder -----------------------------------------------------
-function createMechMesh({ bodyColor, accentColor, visorColor, scale = 1 }) {
+function createMechMesh({ bodyColor, trimColor = 0x1c2433, accentColor, visorColor, scale = 1, style = 'hero' }) {
+  const foe = style === 'foe'
   const group = new THREE.Group()
-  const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, metalness: 0.45, roughness: 0.5 })
-  const accentMat = new THREE.MeshStandardMaterial({ color: accentColor, metalness: 0.5, roughness: 0.4 })
-  const visorMat = new THREE.MeshStandardMaterial({ color: visorColor, emissive: visorColor, emissiveIntensity: 1.4, roughness: 0.3 })
-  const darkMat = new THREE.MeshStandardMaterial({ color: 0x1a2028, metalness: 0.3, roughness: 0.7 })
+  const armorMat = new THREE.MeshStandardMaterial({ color: bodyColor, metalness: 0.5, roughness: 0.38 })
+  const trimMat = new THREE.MeshStandardMaterial({ color: trimColor, metalness: 0.55, roughness: 0.4 })
+  const accentMat = new THREE.MeshStandardMaterial({ color: accentColor, metalness: 0.5, roughness: 0.35, emissive: accentColor, emissiveIntensity: 0.18 })
+  const glowMat = new THREE.MeshStandardMaterial({ color: accentColor, emissive: accentColor, emissiveIntensity: 2.2, roughness: 0.3 })
+  const visorMat = new THREE.MeshStandardMaterial({ color: visorColor, emissive: visorColor, emissiveIntensity: 2.4, roughness: 0.25 })
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x12161d, metalness: 0.5, roughness: 0.55 })
+  const lineMat = new THREE.LineBasicMaterial({ color: 0x05070a, transparent: true, opacity: 0.55 })
 
-  const legPivotL = new THREE.Group()
-  legPivotL.position.set(-0.5, 1.5, 0)
-  const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.2, 1.5, 8), darkMat)
-  legL.position.set(0, -0.75, 0)
-  legPivotL.add(legL)
-  const legPivotR = new THREE.Group()
-  legPivotR.position.set(0.5, 1.5, 0)
-  const legR = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.2, 1.5, 8), darkMat)
-  legR.position.set(0, -0.75, 0)
-  legPivotR.add(legR)
+  // box with a dark outline: gives the plates a crisp "panel line" look
+  function part(parent, geo, mat, x, y, z, rx = 0, ry = 0, rz = 0, outline = true) {
+    const m = new THREE.Mesh(geo, mat)
+    m.position.set(x, y, z)
+    m.rotation.set(rx, ry, rz)
+    parent.add(m)
+    if (outline) m.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), lineMat))
+    return m
+  }
+  const B = (w, h, d) => new THREE.BoxGeometry(w, h, d)
+  const C = (rt, rb, h, seg = 10) => new THREE.CylinderGeometry(rt, rb, h, seg)
+
+  // ---- legs (pivot at the hip so the walk swing keeps working) ----
+  function buildLeg(sign) {
+    const pivot = new THREE.Group()
+    pivot.position.set(sign * 0.5, 1.5, 0)
+    part(pivot, B(0.46, 0.7, 0.5), armorMat, 0, -0.35, 0) // thigh armor
+    part(pivot, B(0.3, 0.08, 0.3), glowMat, sign * 0.2, -0.35, 0.26, 0, 0, 0, false) // thigh light strip
+    part(pivot, B(0.4, 0.28, 0.4), accentMat, 0, -0.78, 0.18, -0.35, 0, 0) // knee guard
+    part(pivot, C(0.17, 0.2, 0.3), darkMat, 0, -0.78, 0) // knee joint
+    part(pivot, B(0.42, 0.78, 0.5), armorMat, 0, -1.12, 0.0, 0.06, 0, 0) // shin armor
+    part(pivot, B(0.3, 0.55, 0.22), trimMat, 0, -1.1, -0.34) // calf booster
+    part(pivot, B(0.52, 0.2, 0.9), trimMat, 0, -1.4, 0.14) // foot
+    part(pivot, B(0.4, 0.14, 0.3), accentMat, 0, -1.37, 0.52, 0.25, 0, 0) // toe cap
+    return pivot
+  }
+  const legPivotL = buildLeg(-1)
+  const legPivotR = buildLeg(1)
   group.add(legPivotL, legPivotR)
 
-  const hip = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.5, 0.8), bodyMat)
-  hip.position.set(0, 1.5, 0)
-  group.add(hip)
+  // ---- hips / skirt armor ----
+  part(group, B(1.0, 0.4, 0.7), darkMat, 0, 1.5, 0)
+  part(group, B(0.55, 0.55, 0.12), armorMat, 0, 1.3, 0.42, -0.28, 0, 0) // front skirt
+  part(group, B(0.55, 0.5, 0.12), armorMat, 0, 1.32, -0.42, 0.25, 0, 0) // rear skirt
+  for (const s of [-1, 1]) {
+    part(group, B(0.14, 0.5, 0.6), armorMat, s * 0.66, 1.4, 0, 0, 0, s * 0.18) // side skirt
+    part(group, B(0.06, 0.3, 0.06), glowMat, s * 0.74, 1.4, 0.24, 0, 0, 0, false)
+  }
 
+  // ---- upper body ----
   const upperBody = new THREE.Group()
   upperBody.position.set(0, 1.75, 0)
   group.add(upperBody)
 
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.1, 0.9), bodyMat)
-  torso.position.set(0, 0.55, 0)
-  upperBody.add(torso)
+  part(upperBody, B(0.7, 0.3, 0.55), darkMat, 0, 0.08, 0) // waist
+  part(upperBody, B(1.3, 0.8, 0.9), armorMat, 0, 0.66, 0) // chest
+  part(upperBody, B(1.0, 0.5, 0.12), trimMat, 0, 0.82, 0.5, -0.38, 0, 0) // slanted chest plate
+  part(upperBody, B(1.1, 0.2, 0.14), armorMat, 0, 0.42, 0.46, 0.25, 0, 0) // lower chest guard
+  for (const s of [-1, 1]) {
+    part(upperBody, B(0.34, 0.07, 0.08), accentMat, s * 0.27, 0.92, 0.5, 0, 0, s * -0.4, false) // V vent
+    part(upperBody, B(0.34, 0.07, 0.08), accentMat, s * 0.27, 0.8, 0.5, 0, 0, s * -0.4, false)
+  }
+  part(upperBody, C(0.13, 0.13, 0.1, 8), glowMat, 0, 0.6, 0.47, Math.PI / 2, 0, 0, false) // reactor core
+  part(upperBody, C(0.2, 0.2, 0.05, 8), trimMat, 0, 0.6, 0.45, Math.PI / 2, 0, 0, false)
+  part(upperBody, B(1.1, 0.7, 0.14), trimMat, 0, 0.68, -0.52) // back plate
+  part(upperBody, C(0.2, 0.26, 0.2, 8), darkMat, 0, 1.12, 0) // neck
 
-  const chestAccent = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.4, 0.14), accentMat)
-  chestAccent.position.set(0, 0.65, 0.48)
-  upperBody.add(chestAccent)
+  // ---- head ----
+  part(upperBody, B(0.5, 0.4, 0.5), armorMat, 0, 1.38, 0) // helmet
+  part(upperBody, B(0.34, 0.16, 0.12), trimMat, 0, 1.22, 0.27) // mouth guard
+  for (const s of [-1, 1]) part(upperBody, B(0.09, 0.3, 0.42), trimMat, s * 0.29, 1.34, 0.02) // cheek guards
+  let visor
+  if (foe) {
+    visor = part(upperBody, B(0.36, 0.09, 0.07), visorMat, 0, 1.4, 0.27, 0, 0, 0, false) // mono-eye
+    part(upperBody, B(0.12, 0.12, 0.05), visorMat, 0, 1.4, 0.3, 0, 0, Math.PI / 4, false)
+    part(upperBody, C(0.0, 0.1, 0.5, 4), accentMat, 0, 1.78, 0.02, -0.15, 0, 0) // horn
+    for (const s of [-1, 1]) part(upperBody, C(0.0, 0.06, 0.3, 4), accentMat, s * 0.26, 1.62, 0, 0, 0, s * -0.7)
+  } else {
+    visor = part(upperBody, B(0.24, 0.09, 0.06), visorMat, -0.11, 1.4, 0.27, 0, 0, 0.22, false) // V visor
+    part(upperBody, B(0.24, 0.09, 0.06), visorMat, 0.11, 1.4, 0.27, 0, 0, -0.22, false)
+    for (const s of [-1, 1]) part(upperBody, B(0.045, 0.46, 0.06), accentMat, s * 0.12, 1.75, 0.14, -0.3, 0, s * -0.42) // V-fin crest
+    part(upperBody, B(0.09, 0.09, 0.05), glowMat, 0, 1.56, 0.27, 0, 0, Math.PI / 4, false) // forehead gem
+  }
 
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.45, 0.55), bodyMat)
-  head.position.set(0, 1.35, 0)
-  upperBody.add(head)
-
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.06), visorMat)
-  visor.position.set(0, 1.35, 0.29)
-  upperBody.add(visor)
-
+  // ---- arms + guns ----
   function buildArm(sign) {
-    const shoulder = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), accentMat)
-    shoulder.position.set(sign * 0.95, 1.0, 0)
-    upperBody.add(shoulder)
-    const upperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.7, 8), bodyMat)
-    upperArm.position.set(sign * 0.95, 0.55, 0)
-    upperBody.add(upperArm)
-    const gun = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.9, 8), darkMat)
-    gun.rotation.x = Math.PI / 2
-    gun.position.set(sign * 0.95, 0.25, 0.55)
-    upperBody.add(gun)
+    const sx = sign * 1.0
+    const shoulder = part(upperBody, B(0.62, 0.46, 0.7), armorMat, sx, 1.0, 0, 0, 0, sign * -0.12) // pauldron
+    part(upperBody, B(0.64, 0.07, 0.52), accentMat, sx, 1.26, 0, 0, 0, sign * -0.12, false) // pauldron stripe
+    if (foe) part(upperBody, C(0.0, 0.14, 0.5, 5), accentMat, sx + sign * 0.12, 1.42, 0, 0, 0, sign * -0.5) // spike
+    const upperArm = part(upperBody, C(0.15, 0.17, 0.5), darkMat, sign * 0.95, 0.6, 0)
+    part(upperBody, new THREE.SphereGeometry(0.17, 10, 8), trimMat, sign * 0.95, 0.34, 0, 0, 0, 0, false) // elbow
+    part(upperBody, B(0.36, 0.36, 0.6), armorMat, sign * 0.95, 0.25, 0.32) // forearm / gun housing
+    part(upperBody, B(0.08, 0.2, 0.4), accentMat, sign * 0.95 + sign * 0.2, 0.28, 0.3, 0, 0, 0, false)
+    const gun = part(upperBody, C(0.1, 0.12, 0.9), darkMat, sign * 0.95, 0.25, 0.55, Math.PI / 2, 0, 0)
+    part(upperBody, C(0.15, 0.15, 0.08), accentMat, sign * 0.95, 0.25, 0.78, Math.PI / 2, 0, 0, false) // barrel ring
+    part(upperBody, C(0.07, 0.07, 0.06), glowMat, sign * 0.95, 0.25, 1.0, Math.PI / 2, 0, 0, false) // muzzle glow
     const muzzle = new THREE.Object3D()
     muzzle.position.set(sign * 0.95, 0.25, 1.0)
     upperBody.add(muzzle)
@@ -212,25 +262,23 @@ function createMechMesh({ bodyColor, accentColor, visorColor, scale = 1 }) {
   const armL = buildArm(-1)
   const armR = buildArm(1)
 
-  const pod = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.7), accentMat)
-  pod.position.set(0.95, 1.55, -0.15)
-  upperBody.add(pod)
+  // ---- shoulder missile pod (right) ----
+  part(upperBody, B(0.52, 0.4, 0.7), trimMat, 0.95, 1.55, -0.15)
+  part(upperBody, B(0.54, 0.06, 0.5), accentMat, 0.95, 1.77, -0.15, 0, 0, 0, false)
+  for (const dx of [-0.1, 0.1]) for (const dy of [-0.07, 0.07]) {
+    part(upperBody, C(0.0, 0.07, 0.2, 8), accentMat, 0.95 + dx, 1.55 + dy, 0.28, Math.PI / 2, 0, 0, false) // missile tips
+  }
   const missileMuzzle = new THREE.Object3D()
   missileMuzzle.position.set(0.95, 1.55, 0.25)
   upperBody.add(missileMuzzle)
 
-  // back-mounted rocket launcher: twin thruster tubes used for flight
+  // ---- backpack: twin thrusters + wing blades ----
   function buildThruster(xOffset) {
     const tg = new THREE.Group()
     tg.position.set(xOffset, 0, 0)
-    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.18, 0.85, 8), darkMat)
-    tg.add(tube)
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.185, 0.185, 0.1, 8), accentMat)
-    band.position.y = 0.15
-    tg.add(band)
-    const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.13, 0.16, 8), darkMat)
-    nozzle.position.y = -0.5
-    tg.add(nozzle)
+    part(tg, C(0.15, 0.18, 0.85), trimMat, 0, 0, 0)
+    part(tg, C(0.185, 0.185, 0.1), accentMat, 0, 0.15, 0, 0, 0, 0, false)
+    part(tg, C(0.2, 0.13, 0.16), darkMat, 0, -0.5, 0)
     const flame = new THREE.Mesh(
       new THREE.ConeGeometry(0.16, 0.6, 8),
       new THREE.MeshBasicMaterial({ color: 0xff9a3c, transparent: true, opacity: 0 }),
@@ -245,7 +293,12 @@ function createMechMesh({ bodyColor, accentColor, visorColor, scale = 1 }) {
   const thrusterL = buildThruster(-0.3)
   const thrusterR = buildThruster(0.3)
   backpack.add(thrusterL.group, thrusterR.group)
+  part(backpack, B(0.9, 0.5, 0.14), armorMat, 0, 0.25, -0.05) // pack housing
   upperBody.add(backpack)
+  for (const s of [-1, 1]) {
+    part(upperBody, B(0.12, 0.9, 0.34), foe ? trimMat : armorMat, s * 0.62, 1.25, -0.62, -0.25, 0, s * 0.45) // wing blade
+    part(upperBody, B(0.04, 0.8, 0.06), glowMat, s * 0.62, 1.25, -0.46, -0.25, 0, s * 0.45, false) // blade edge glow
+  }
 
   group.scale.setScalar(scale)
 
@@ -439,7 +492,7 @@ function updateEffects() {
 }
 
 // --- Player -------------------------------------------------------------------
-const playerBuild = createMechMesh({ bodyColor: 0x3a4958, accentColor: 0x4dd2ff, visorColor: 0x7fe0ff, scale: 1 })
+const playerBuild = createMechMesh({ bodyColor: 0xdfe7f0, trimColor: 0x26344d, accentColor: 0x2fb8ff, visorColor: 0x7fe9ff, scale: 1, style: 'hero' })
 scene.add(playerBuild.group)
 
 const player = {
@@ -484,7 +537,7 @@ function spawnEnemy(waveN) {
   const r = ARENA_RADIUS * 0.78
   const pos = new THREE.Vector3(Math.sin(angle) * r, 0, Math.cos(angle) * r)
   const hpMax = ENEMY_HP_BASE + (waveN - 1) * 6
-  const built = createMechMesh({ bodyColor: 0x3a2628, accentColor: 0xff5a3a, visorColor: 0xff6b4d, scale: 0.92 })
+  const built = createMechMesh({ bodyColor: 0x4a2c30, trimColor: 0x17100f, accentColor: 0xff4a2a, visorColor: 0xff5a3a, scale: 0.92, style: 'foe' })
   scene.add(built.group)
   const hitbox = new THREE.Mesh(new THREE.BoxGeometry(2.2, 3.4, 1.8), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }))
   hitbox.position.y = 1.5
