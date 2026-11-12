@@ -136,6 +136,7 @@ const state = {
   furnitureCelebrated: false,
   shopOpen: false,
   task: null,
+  fishLeft: 8, // 하루 낚시 횟수 (잠자면 초기화)
 }
 
 function newTask() {
@@ -229,11 +230,16 @@ function harvestTree(t) {
 }
 
 function attemptFish() {
+  if (state.fishLeft <= 0) {
+    say('알림', '오늘은 충분히 낚았어요. 내일 다시 해보세요!')
+    return
+  }
+  state.fishLeft -= 1
   if (Math.random() < 0.7) {
     state.inv.fish += 1
-    say('알림', '물고기를 잡았다! (+1 물고기)')
+    say('알림', `물고기를 잡았다! (+1 물고기) · 오늘 남은 낚시 ${state.fishLeft}번`)
   } else {
-    say('알림', '물고기가 도망갔다... 다시 시도해보세요.')
+    say('알림', `물고기가 도망갔다... 다시 시도해보세요. · 오늘 남은 낚시 ${state.fishLeft}번`)
   }
 }
 
@@ -275,6 +281,7 @@ function sleep() {
   }
   for (const s of shells) s.collected = false
   state.task = newTask()
+  state.fishLeft = 8
   say('알림', `포근한 밤을 보내고 Day ${state.day}가 되었습니다. 나무와 조개가 다시 채워졌어요!`)
   enterRoom('outside')
 }
