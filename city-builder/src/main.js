@@ -156,12 +156,12 @@ function tick() {
   const jobs = comCap + indCap
   state.demand = {
     res: clamp(jobs - resCap + 20 - state.taxRate * 1.5, -100, 100),
-    com: clamp(resCap * 0.5 - comCap * 2 + 10 - state.taxRate, -100, 100),
-    ind: clamp(resCap * 0.5 - indCap * 2 + 10 - state.taxRate, -100, 100),
+    com: clamp(resCap * 0.6 - comCap + 10 - state.taxRate, -100, 100),
+    ind: clamp(resCap * 0.6 - indCap + 10 - state.taxRate, -100, 100),
   }
 
   const income = Math.round((resCap * 1.2 + comCap + indCap) * (state.taxRate / 100))
-  const expense = Math.round(roadCount * 0.5 + powerPlants.length * 40 + waterTowers.length * 25)
+  const expense = Math.round(roadCount * 0.2 + powerPlants.length * 20 + waterTowers.length * 12)
   state.treasury += income - expense
   state.lastIncome = income
   state.lastExpense = expense
