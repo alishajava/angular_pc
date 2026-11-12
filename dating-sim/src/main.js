@@ -597,6 +597,10 @@ const CHARACTERS = [
 const FRIEND_ENDING =
   '여섯 번째 날, 다섯 사람이 동시에 동아리방으로 몰려와 선배를 둘러쌌다.\n\n다은: "선배는 저한테도 잘해주고."\n서준: "나한테도 그랬지."\n리아: "나한테도!"\n은서: "...저한테도요. 책까지 사 갔잖아요."\n하람: "저한테도 그랬잖아요! 코디 칭찬도 해주고."\n\n다섯이 동시에 선배를 쳐다보며 한숨을 쉰다.\n\n다은: "그러니까 결론은..."\n다섯이 입을 모아: "너무 다정해서 아무도 못 고르는 타입이라는 거지."\n\n선배는 그저 웃을 수밖에 없었다. 동아리의 평화는 지켜졌다.\n\n— ENDING: 모두의 좋은 선배(?) —'
 
+function nearMissEnding(ch) {
+  return `여섯 번째 날, 동아리방에는 ${ch.name}와(과) 선배 둘만 남았다.\n\n${ch.name}: "선배랑 있으면 편하고 좋아요. 그런데... 아직은 서로 잘 모르는 것 같아요."\n\n마음을 전하기엔 조금 부족했던 시간. 하지만 둘 사이엔 분명 무언가 싹트고 있었다.\n\n선배는 내일도 동아리방 문을 열기로 했다.\n\n— ENDING: 아직은 선후배 사이 —`
+}
+
 function makeInitialState() {
   return {
     screen: 'title',
@@ -687,7 +691,13 @@ function render() {
       return
     }
 
-    const choiceButtons = scene.choices
+    // 정답 선택지가 항상 첫 번째가 되지 않도록 매번 순서를 섞는다
+    const shuffled = [...scene.choices]
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+    }
+    const choiceButtons = shuffled
       .map((c, i) => `<button class="choice-btn" data-i="${i}">${c.label}</button>`)
       .join('')
     app.innerHTML = `
@@ -702,7 +712,7 @@ function render() {
     applyBackground(document.getElementById('bg'), scene.bg || 'clubroom')
     app.querySelectorAll('.choice-btn').forEach((btn) => {
       btn.onclick = () => {
-        const choice = scene.choices[Number(btn.dataset.i)]
+        const choice = shuffled[Number(btn.dataset.i)]
         ch.affection += choice.delta
         state.lastChoiceGood = choice.delta >= 3
         if (ch.stage < ch.stages.length) ch.stage += 1
@@ -716,7 +726,9 @@ function render() {
   if (state.screen === 'ending') {
     const best = state.chars.reduce((a, b) => (b.affection > a.affection ? b : a))
     const isGood = best.affection >= GOOD_ENDING_THRESHOLD
-    const ending = isGood ? best.goodEnding : FRIEND_ENDING
+    // 한두 명에게만 집중했는데 아쉽게 못 닿은 경우엔 "모두에게 다정해서" 엔딩이 어울리지 않는다
+    const spread = state.chars.filter((c) => c.affection > 0).length
+    const ending = isGood ? best.goodEnding : spread >= 3 ? FRIEND_ENDING : nearMissEnding(best)
     const bg = isGood ? best.endingBg : 'clubroom'
     app.innerHTML = `
       <div class="vn-bg" id="bg"></div>
