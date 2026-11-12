@@ -71,10 +71,9 @@ const ENEMY_TYPES = {
 
 // Classic beat-em-up pacing: crossing a trigger spawns that wave and locks
 // the camera (see updateCamera's gateX clamp) until every enemy in it is
-// dead, so the player can't just outrun the fight. SPAWN_AHEAD puts
-// enemies just off the right edge of the now-locked screen so they walk
+// dead, so the player can't just outrun the fight. Enemies spawn just
+// off the right edge of the now-locked screen so they walk
 // in rather than popping up already in frame.
-const SPAWN_AHEAD = 260
 const WAVES = [
   { triggerX: 480, enemies: [{ dx: 0, dy: -50, type: 'thug' }, { dx: 40, dy: 45, type: 'thug' }] },
   { triggerX: 1300, enemies: [{ dx: 0, dy: -55, type: 'thug' }, { dx: 30, dy: 0, type: 'thug' }, { dx: 60, dy: 55, type: 'thug' }] },
@@ -82,6 +81,8 @@ const WAVES = [
 ]
 
 const HITSTUN_DURATION = 0.3
+// 경직이 풀린 직후 잠깐은 다시 경직되지 않는다 (약공격 연타로 보스까지 계속 묶어두는 것 방지)
+const STUN_IMMUNITY = 0.45
 const DEATH_FADE = 0.4
 
 function makePlayer() {
@@ -119,6 +120,7 @@ function makeEnemy(type, x, y) {
     t: 0,
     cooldownTimer: 0,
     hitstunTimer: 0,
+    stunImmunity: 0,
     resolved: false,
     walkPhase: Math.random() * 10,
     deathTimer: 0,
@@ -198,6 +200,8 @@ window.addEventListener('keydown', (e) => {
   }
 })
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
+// 창이 포커스를 잃으면 눌려 있던 키가 계속 눌린 것으로 남지 않게 한다
+window.addEventListener('blur', () => heldKeys.clear())
 function held(names) { return names.some((k) => heldKeys.has(k)) }
 
 const MOVE_KEYS = {
@@ -381,7 +385,7 @@ function damageEnemy(en, dmg, knockbackDx) {
   if (en.hp <= 0) {
     en.state = 'dead'
     en.deathTimer = DEATH_FADE
-  } else {
+  } else if (en.stunImmunity <= 0) {
     en.state = 'hitstun'
     en.hitstunTimer = HITSTUN_DURATION
     en.t = 0
@@ -412,10 +416,14 @@ function updateEnemies(dt) {
       continue
     }
     if (en.cooldownTimer > 0) en.cooldownTimer -= dt
+    if (en.stunImmunity > 0 && en.state !== 'hitstun') en.stunImmunity -= dt
 
     if (en.state === 'hitstun') {
       en.hitstunTimer -= dt
-      if (en.hitstunTimer <= 0) en.state = 'approach'
+      if (en.hitstunTimer <= 0) {
+        en.state = 'approach'
+        en.stunImmunity = STUN_IMMUNITY
+      }
       continue
     }
 
@@ -509,10 +517,12 @@ function checkWaveTriggers() {
   const wave = WAVES[idx]
   if (state.player.x < wave.triggerX) return
 
-  for (const spec of wave.enemies) {
-    state.enemies.push(makeEnemy(spec.type, wave.triggerX + SPAWN_AHEAD + spec.dx, DEPTH_MID + spec.dy))
-  }
   state.gateX = state.cameraX
+  // 고정된 화면의 오른쪽 바깥에서 걸어 들어오게 한다 (화면 안에서 갑자기 나타나지 않도록)
+  const spawnX = state.gateX + canvas.width + 40
+  for (const spec of wave.enemies) {
+    state.enemies.push(makeEnemy(spec.type, Math.min(WORLD_WIDTH - 40, spawnX + spec.dx), DEPTH_MID + spec.dy))
+  }
 }
 
 function checkWaveCleared() {
