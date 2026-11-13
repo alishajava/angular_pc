@@ -11,7 +11,14 @@ export const ROWS = MAP.length
 export const STAGE_WIDTH = COLS * TILE
 export const STAGE_HEIGHT = ROWS * TILE
 
+// Tables (col, row): furniture you walk around, so they're solid like walls.
+export const TABLES = [
+  [6, 1],
+  [1, 4],
+]
+
 const grid = parseGrid(MAP)
+for (const [c, r] of TABLES) grid[r][c] = 1
 const PLAYER_START = [4, 4]
 const NPC_POS = [3, 2]
 const DOOR_POS = [4, 5]

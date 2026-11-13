@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
-import { useTavernStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT } from '../stores/tavern'
+import { useTavernStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT, TABLES } from '../stores/tavern'
+import { makeTavernBackdrop, drawTavernLife } from '../scenery'
 import { useFlowStore } from '../stores/flow'
 import { unlockAudio, playPickup, setMusicTrack } from '../audio'
 import { drawHero, drawVillager } from '../sprites'
@@ -66,20 +67,16 @@ function loop(time) {
   rafId = requestAnimationFrame(loop)
 }
 
+// Static interior (plank floor, log walls, shelves, hearth, tables) painted
+// once; the fire is animated on top each frame.
+let backdrop = null
+
 function drawMap(ctx) {
-  for (let row = 0; row < ROWS; row++) {
-    for (let col = 0; col < COLS; col++) {
-      ctx.fillStyle = store.grid[row][col] === 1 ? '#2b1d12' : '#6b4a2f'
-      ctx.fillRect(col * TILE, row * TILE, TILE, TILE)
-    }
+  if (!backdrop) {
+    backdrop = makeTavernBackdrop({ grid: store.grid, cols: COLS, rows: ROWS, tile: TILE, door: store.door, tables: TABLES })
   }
-  // door marker
-  ctx.fillStyle = 'rgba(255, 224, 102, 0.35)'
-  ctx.fillRect(store.door.x - TILE / 2, store.door.y - TILE / 2, TILE, TILE)
-  ctx.fillStyle = '#ffe066'
-  ctx.font = 'bold 11px sans-serif'
-  ctx.textAlign = 'center'
-  ctx.fillText('출구', store.door.x, store.door.y + 4)
+  ctx.drawImage(backdrop, 0, 0)
+  drawTavernLife(ctx, animTime, { tile: TILE })
 }
 
 function drawPlayer(ctx) {

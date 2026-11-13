@@ -18,7 +18,65 @@ function floorRow(markers = {}) {
   return chars.join('')
 }
 
-const MAP = [
+// Solid scenery (all in tile coordinates). Each of these is stamped into the
+// collision map as '#', and the same data tells the renderer (scenery.js)
+// what to paint there - so what looks solid is solid. `paths` and `lamps`
+// are purely visual.
+export const SCENERY = {
+  smithy: { col: 2, row: 1, w: 3 }, // behind the blacksmith (W)
+  herbShop: { col: 11, row: 1, w: 3 }, // behind the herbalist (H)
+  // The tavern building; its door is the 'T' tile, which stays walkable so
+  // stepping into the doorway enters the tavern.
+  tavern: { col: 6, row: 3, w: 3, h: 2, doorCol: 7, doorRow: 4 },
+  pond: { col: 3, row: 8, w: 2, h: 2 },
+  trees: [
+    [14, 4],
+    [10, 7],
+    [2, 10],
+    [13, 10],
+  ],
+  paths: [
+    // shop street
+    ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((c) => [c, 2]),
+    [1, 1],
+    // around the tavern down to its door
+    ...[3, 4, 5].flatMap((r) => [
+      [5, r],
+      [9, r],
+    ]),
+    ...[5, 6, 7, 8, 9].map((c) => [c, 5]),
+    // main street to the dungeon gate
+    ...[6, 7, 8, 9, 10].map((r) => [7, r]),
+    // cross street (heroine <-> villager)
+    ...[1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12].map((c) => [c, 6]),
+    // lanes to the villager and the elder
+    ...[7, 8, 9].map((r) => [1, r]),
+    ...[8, 9, 10, 11, 12].map((c) => [c, 9]),
+  ],
+  lamps: [
+    [4.5, 3],
+    [10.5, 3],
+    [6.5, 7.5],
+    [8.5, 7.5],
+  ],
+}
+
+function solidTiles() {
+  const s = SCENERY
+  const list = []
+  for (const b of [s.smithy, s.herbShop]) for (let c = b.col; c < b.col + b.w; c++) list.push([c, b.row])
+  for (let r = s.tavern.row; r < s.tavern.row + s.tavern.h; r++) {
+    for (let c = s.tavern.col; c < s.tavern.col + s.tavern.w; c++) {
+      if (c === s.tavern.doorCol && r === s.tavern.doorRow) continue
+      list.push([c, r])
+    }
+  }
+  for (let r = s.pond.row; r < s.pond.row + s.pond.h; r++) for (let c = s.pond.col; c < s.pond.col + s.pond.w; c++) list.push([c, r])
+  list.push(...s.trees)
+  return list
+}
+
+const BASE_MAP = [
   '#'.repeat(TOWN_COLS),
   floorRow(),
   floorRow({ 3: 'W', 12: 'H' }),
@@ -32,7 +90,16 @@ const MAP = [
   floorRow({ 7: 'D' }),
   '#'.repeat(TOWN_COLS),
 ]
-if (MAP.length !== TOWN_ROWS) throw new Error('town MAP row count mismatch')
+if (BASE_MAP.length !== TOWN_ROWS) throw new Error('town MAP row count mismatch')
+
+const MAP = (() => {
+  const rows = BASE_MAP.map((r) => [...r])
+  for (const [c, r] of solidTiles()) {
+    if (rows[r][c] !== '.') throw new Error(`scenery overlaps a marker at ${c},${r}`)
+    rows[r][c] = '#'
+  }
+  return rows.map((r) => r.join(''))
+})()
 
 export const TILE = 52
 export const COLS = MAP[0].length

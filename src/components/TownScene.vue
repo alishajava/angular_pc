@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
-import { useTownStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT } from '../stores/town'
+import { useTownStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT, SCENERY } from '../stores/town'
+import { makeTownBackdrop, drawTownLife } from '../scenery'
 import { useFlowStore } from '../stores/flow'
 import { PLAYER_MAX_HP, PLAYER_BASE_ATTACK } from '../stores/rpg'
 import { unlockAudio, playPickup, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
@@ -91,31 +92,58 @@ const TYPE_INFO = {
   heroine: { label: '히로인' },
 }
 
+// The static scenery (grass, paths, forest, buildings, pond) is painted once
+// into an offscreen canvas; each frame just blits it and adds the moving bits.
+let backdrop = null
+const sceneryInfo = { tile: TILE, scenery: SCENERY }
+
 function drawMap(ctx) {
-  for (let row = 0; row < ROWS; row++) {
-    for (let col = 0; col < COLS; col++) {
-      ctx.fillStyle = store.grid[row][col] === 1 ? '#263326' : '#3d5a3d'
-      ctx.fillRect(col * TILE, row * TILE, TILE, TILE)
-    }
-  }
+  if (!backdrop) backdrop = makeTownBackdrop({ grid: store.grid, cols: COLS, rows: ROWS, tile: TILE, scenery: SCENERY })
+  ctx.drawImage(backdrop, 0, 0)
+  drawTownLife(ctx, animTime, sceneryInfo)
 }
 
 const STATIC_TYPES = new Set(['gate', 'tavern'])
+
+function drawLabel(ctx, text, x, y) {
+  ctx.font = 'bold 11px sans-serif'
+  ctx.textAlign = 'center'
+  ctx.lineJoin = 'round'
+  ctx.strokeStyle = 'rgba(20,30,20,0.85)'
+  ctx.lineWidth = 3
+  ctx.strokeText(text, x, y)
+  ctx.fillStyle = '#fff'
+  ctx.fillText(text, x, y)
+}
 
 function drawInteractables(ctx) {
   store.interactables.forEach((item, idx) => {
     const info = TYPE_INFO[item.type]
     const swing = STATIC_TYPES.has(item.type) ? idleSwing(idx * 1.3) : wanderSwing(idx * 1.3)
     const facing = item.facing === 'left' ? 'left' : 'right'
-    if (item.type === 'gate') drawGate(ctx, item.x, item.y)
-    else if (item.type === 'elder') drawElder(ctx, item.x, item.y, swing, facing)
+    if (item.type === 'gate') {
+      // stone landing + a larger, pulsing portal so the dungeon entrance reads as a landmark
+      ctx.fillStyle = 'rgba(90,90,105,0.9)'
+      ctx.beginPath()
+      ctx.ellipse(item.x, item.y + 20, 30, 10, 0, 0, Math.PI * 2)
+      ctx.fill()
+      const pulse = 0.25 + Math.sin(animTime * 2.5) * 0.08
+      ctx.fillStyle = `rgba(79,209,255,${pulse})`
+      ctx.beginPath()
+      ctx.arc(item.x, item.y, 34, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.save()
+      ctx.translate(item.x, item.y + 4)
+      ctx.scale(1.5, 1.5)
+      drawGate(ctx, 0, 0)
+      ctx.restore()
+    } else if (item.type === 'tavern') {
+      // the building itself is part of the backdrop; this tile is its doorway
+    } else if (item.type === 'elder') drawElder(ctx, item.x, item.y, swing, facing)
     else if (item.type === 'heroine') drawHeroine(ctx, item.x, item.y, facing === 'left' ? 'left' : 'down', swing)
     else drawVillager(ctx, item.x, item.y, info.outfit, info.hair, swing, facing)
 
-    ctx.fillStyle = '#fff'
-    ctx.font = 'bold 11px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.fillText(info.label, item.x, item.y + 26)
+    drawLabel(ctx, info.label, item.x, item.y + (item.type === 'gate' ? 40 : 26))
   })
 }
 
@@ -125,6 +153,13 @@ function drawPlayer(ctx) {
 }
 
 function drawHud(ctx) {
+  // a soft strip behind the HUD text so it stays readable over the treetops
+  const hudShade = ctx.createLinearGradient(0, 0, 0, 46)
+  hudShade.addColorStop(0, 'rgba(10,20,12,0.7)')
+  hudShade.addColorStop(1, 'rgba(10,20,12,0)')
+  ctx.fillStyle = hudShade
+  ctx.fillRect(0, 0, STAGE_WIDTH, 46)
+
   ctx.textAlign = 'left'
   ctx.fillStyle = '#fff'
   ctx.font = 'bold 13px sans-serif'

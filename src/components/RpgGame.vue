@@ -5,6 +5,8 @@ import { useTownStore } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
 import { unlockAudio, playAttackSwing, playFireball, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
 import { drawHero, drawHeroine, drawMonster, drawBoss, drawSlash, drawFireball, FACE_ANGLE } from '../sprites'
+import { makeDungeonBackdrop, drawDungeonLife, drawDungeonDarkness, drawPotion, drawBattleBackdrop } from '../scenery'
+import { canMoveTo } from '../mapUtils'
 
 const store = useRpgStore()
 const town = useTownStore()
@@ -116,31 +118,24 @@ function loop(time) {
   animTime += dt
 
   store.update(dt, buildInput())
+  if (store.companion.active && !store.battle.active) updateFollower(dt)
   render()
 
   rafId = requestAnimationFrame(loop)
 }
 
+// Static dungeon (flagstones, brick walls, moss, bones) painted once into an
+// offscreen canvas; torch flames are animated on top each frame.
+let backdrop = null
+
 function drawMap(ctx) {
-  for (let row = 0; row < ROWS; row++) {
-    for (let col = 0; col < COLS; col++) {
-      ctx.fillStyle = store.grid[row][col] === 1 ? '#2a2438' : '#443d5c'
-      ctx.fillRect(col * TILE, row * TILE, TILE, TILE)
-    }
-  }
+  if (!backdrop) backdrop = makeDungeonBackdrop({ grid: store.grid, cols: COLS, rows: ROWS, tile: TILE })
+  ctx.drawImage(backdrop.canvas, 0, 0)
+  drawDungeonLife(ctx, animTime, backdrop.torches)
 }
 
 function drawPotions(ctx) {
-  ctx.fillStyle = '#ff6b9d'
-  for (const p of store.potions) {
-    ctx.beginPath()
-    ctx.moveTo(p.x, p.y - 8)
-    ctx.lineTo(p.x + 7, p.y)
-    ctx.lineTo(p.x, p.y + 8)
-    ctx.lineTo(p.x - 7, p.y)
-    ctx.closePath()
-    ctx.fill()
-  }
+  for (const p of store.potions) drawPotion(ctx, p.x, p.y, animTime)
 }
 
 function drawMonsters(ctx) {
@@ -163,13 +158,61 @@ function drawMonsters(ctx) {
   }
 }
 
+// The heroine trails the hero as if on a short leash: she only moves once
+// the gap grows past FOLLOW_DIST, so she walks behind you along your path
+// and stops a step away when you stop - instead of being glued to a fixed
+// offset on top of the hero.
+const FOLLOW_DIST = 34
+const FOLLOW_SPEED = 240
+const FOLLOWER_HALF = 10
+const follower = { x: 0, y: 0, facing: 'right', moving: false, ready: false }
+
+function updateFollower(dt) {
+  const p = store.player
+  let dx = p.x - follower.x
+  let dy = p.y - follower.y
+  let dist = Math.hypot(dx, dy)
+  // first frame, or the hero jumped (new run / returned from elsewhere): snap beside him
+  if (!follower.ready || dist > 170) {
+    follower.x = p.x
+    follower.y = p.y
+    follower.ready = true
+    follower.moving = false
+    return
+  }
+  follower.moving = false
+  if (dist <= FOLLOW_DIST) return
+  const step = Math.min(dist - FOLLOW_DIST, FOLLOW_SPEED * dt)
+  const sx = (dx / dist) * step
+  const sy = (dy / dist) * step
+  // slide along walls rather than cutting through corners
+  if (canMoveTo(store.grid, COLS, ROWS, TILE, follower.x + sx, follower.y, FOLLOWER_HALF)) follower.x += sx
+  if (canMoveTo(store.grid, COLS, ROWS, TILE, follower.x, follower.y + sy, FOLLOWER_HALF)) follower.y += sy
+  follower.moving = step > 0.3
+  if (Math.abs(dx) > 6) follower.facing = dx > 0 ? 'right' : 'left'
+}
+
 function drawPlayer(ctx) {
   const p = store.player
   const swing = walkSwing(p.moving)
-  if (store.companion.active) {
-    drawHeroine(ctx, p.x - 20, p.y + 16, p.facing, swing)
+  if (!store.companion.active) {
+    drawHero(ctx, p.x, p.y, p.facing, swing)
+    return
   }
-  drawHero(ctx, p.x, p.y, p.facing, swing)
+  // while the two are still stacked (start of a run) stand her just beside him
+  const stacked = Math.hypot(p.x - follower.x, p.y - follower.y) < 12
+  const fx = follower.x + (stacked ? -21 : 0)
+  const fy = follower.y + (stacked ? -3 : 0)
+  const fswing = follower.moving ? Math.sin(animTime * 10 + 1.6) * 3 : Math.sin(animTime * 2.4 + 1) * 2
+  const drawHer = () => drawHeroine(ctx, fx, fy, follower.facing, fswing)
+  // whoever stands lower on screen is drawn last, so they overlap correctly
+  if (fy > p.y) {
+    drawHero(ctx, p.x, p.y, p.facing, swing)
+    drawHer()
+  } else {
+    drawHer()
+    drawHero(ctx, p.x, p.y, p.facing, swing)
+  }
 }
 
 function drawHud(ctx) {
@@ -223,8 +266,23 @@ function drawBattle(ctx) {
   if (!m) return
   const p = store.player
 
-  ctx.fillStyle = '#1a1030'
-  ctx.fillRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT)
+  drawBattleBackdrop(ctx, STAGE_WIDTH, STAGE_HEIGHT, animTime)
+
+  // the party stands to the left, facing the monster
+  const idle = Math.sin(animTime * 2.4) * 2
+  const lunge = b.effectTimer > 0 && b.effect === 'attack' ? 14 : 0
+  ctx.save()
+  ctx.translate(STAGE_WIDTH * 0.2 + lunge, STAGE_HEIGHT * 0.44)
+  ctx.scale(2.2, 2.2)
+  drawHero(ctx, 0, 0, 'right', idle)
+  ctx.restore()
+  if (store.companion.active) {
+    ctx.save()
+    ctx.translate(STAGE_WIDTH * 0.09, STAGE_HEIGHT * 0.48)
+    ctx.scale(2, 2)
+    drawHeroine(ctx, 0, 0, 'right', -idle)
+    ctx.restore()
+  }
 
   // monster
   const mx = STAGE_WIDTH / 2
@@ -275,11 +333,10 @@ function drawBattle(ctx) {
   ctx.fillText(`용사 HP ${p.hp}/${p.maxHp}`, 24, cmdY + 11)
 
   if (store.companion.active) {
-    drawHeroine(ctx, STAGE_WIDTH - 36, cmdY + 7, 'left', Math.sin(animTime * 2.4) * 3)
     ctx.textAlign = 'right'
-    ctx.font = '11px sans-serif'
-    ctx.fillStyle = '#e0557a'
-    ctx.fillText('히로인 동행 중', STAGE_WIDTH - 56, cmdY + 11)
+    ctx.font = 'bold 11px sans-serif'
+    ctx.fillStyle = '#ff8fb0'
+    ctx.fillText('히로인 동행 중', STAGE_WIDTH - 20, cmdY + 11)
   }
 
   ctx.textAlign = 'center'
@@ -355,6 +412,7 @@ function render() {
     drawMonsters(ctx)
     drawPlayer(ctx)
     ctx.restore()
+    drawDungeonDarkness(ctx, store.player.x, store.player.y - cameraY, STAGE_WIDTH, STAGE_HEIGHT)
   }
 
   drawHud(ctx)
