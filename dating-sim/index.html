@@ -164,10 +164,97 @@
         align-self: center;
         margin-top: 0.6rem;
       }
+
+      /* --- portrait 연출: 등장, 숨쉬기, 선택 반응 --- */
+      .vn-portrait img {
+        transform-origin: 50% 100%;
+        animation: vn-breathe 3.6s ease-in-out infinite;
+      }
+      .vn-portrait.enter img {
+        animation: vn-enter 0.45s ease-out both, vn-breathe 3.6s ease-in-out 0.45s infinite;
+      }
+      .vn-portrait.happy {
+        filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.35)) drop-shadow(0 0 18px rgba(255, 143, 171, 0.55));
+      }
+      .vn-portrait.happy img {
+        animation: vn-hop 0.55s ease-out both, vn-breathe 3.6s ease-in-out 0.55s infinite;
+      }
+      .vn-portrait.meh img {
+        animation: vn-droop 0.6s ease-out both;
+        filter: saturate(0.82) brightness(0.94);
+      }
+      @keyframes vn-breathe {
+        0%, 100% { transform: scale(1, 1); }
+        50% { transform: scale(1.004, 1.012); }
+      }
+      @keyframes vn-enter {
+        from { transform: translateY(5%); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
+      @keyframes vn-hop {
+        0% { transform: translateY(0) scale(1, 1); }
+        30% { transform: translateY(-3.2%) scale(0.99, 1.02); }
+        55% { transform: translateY(0) scale(1.012, 0.985); }
+        75% { transform: translateY(-1.2%) scale(1, 1.006); }
+        100% { transform: translateY(0) scale(1, 1); }
+      }
+      @keyframes vn-droop {
+        0% { transform: rotate(0) translateY(0); }
+        100% { transform: rotate(-1.4deg) translateY(0.8%); }
+      }
+      .vn-fx {
+        position: absolute;
+        left: 50%;
+        top: 4%;
+        width: 46%;
+        height: 46%;
+        transform: translateX(-50%);
+        pointer-events: none;
+      }
+      .vn-fx span {
+        position: absolute;
+        bottom: 20%;
+        font-size: clamp(1rem, 3.2vw, 1.7rem);
+        opacity: 0;
+        animation: vn-float 1.9s ease-out infinite;
+      }
+      .vn-fx.hearts span { color: #ff6f9c; text-shadow: 0 0 10px rgba(255, 143, 171, 0.8); }
+      .vn-fx.dots span { color: #c9c3d9; bottom: 62%; animation-name: vn-dots; }
+      @keyframes vn-float {
+        0% { transform: translateY(0) scale(0.6); opacity: 0; }
+        15% { opacity: 1; }
+        100% { transform: translateY(-190%) scale(1.15) rotate(12deg); opacity: 0; }
+      }
+      @keyframes vn-dots {
+        0%, 100% { opacity: 0; transform: translateY(0); }
+        40%, 70% { opacity: 0.9; transform: translateY(-12%); }
+      }
+      .speaker-tag .hearts {
+        margin-left: 0.5em;
+        color: #7a1838;
+        letter-spacing: 0.1em;
+        font-size: 0.85em;
+      }
+      #mute-btn {
+        position: fixed;
+        top: 10px;
+        right: 12px;
+        background: rgba(255, 255, 255, 0.12);
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 999px;
+        padding: 0.3rem 0.7rem;
+        font-size: 0.8rem;
+        cursor: pointer;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .vn-portrait img, .vn-fx span { animation: none !important; }
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <button id="mute-btn" type="button">소리 켬</button>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

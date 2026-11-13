@@ -1,3 +1,5 @@
+import { sfx, unlockSfx, toggleMute } from './sfx.js'
+
 const MAX_DAYS = 6
 const GOOD_ENDING_THRESHOLD = 7
 
@@ -98,6 +100,7 @@ function updateField(dt) {
   if (hit) {
     state.activeCharId = hit.charId
     state.screen = 'scene'
+    sfx.pickup()
     render()
   }
 }
@@ -226,6 +229,7 @@ function setupFieldCanvas() {
       if (Math.hypot(mx - spot.x, my - spot.y) < SPRITE_R + 8) {
         state.activeCharId = charId
         state.screen = 'scene'
+        sfx.pickup()
         render()
         return
       }
@@ -601,6 +605,15 @@ function nearMissEnding(ch) {
   return `여섯 번째 날, 동아리방에는 ${ch.name}와(과) 선배 둘만 남았다.\n\n${ch.name}: "선배랑 있으면 편하고 좋아요. 그런데... 아직은 서로 잘 모르는 것 같아요."\n\n마음을 전하기엔 조금 부족했던 시간. 하지만 둘 사이엔 분명 무언가 싹트고 있었다.\n\n선배는 내일도 동아리방 문을 열기로 했다.\n\n— ENDING: 아직은 선후배 사이 —`
 }
 
+// Floating hearts for a choice that landed, a quiet "..." for one that didn't.
+function reactionFx(good) {
+  if (good) {
+    const spots = [8, 26, 44, 62, 80, 34, 70]
+    return `<div class="vn-fx hearts">${spots.map((l, i) => `<span style="left:${l}%;animation-delay:${(i * 0.27).toFixed(2)}s">♥</span>`).join('')}</div>`
+  }
+  return `<div class="vn-fx dots"><span style="left:66%;animation-duration:2.4s">. . .</span></div>`
+}
+
 function makeInitialState() {
   return {
     screen: 'title',
@@ -673,9 +686,10 @@ function render() {
       const mood = state.lastChoiceGood ? 'happy' : defaultMood
       app.innerHTML = `
         <div class="vn-bg" id="bg"></div>
-        <div class="vn-portrait">${renderPortrait(ch, mood)}</div>
+        <div class="vn-portrait ${state.lastChoiceGood ? 'happy' : 'meh'}">${renderPortrait(ch, mood)}</div>
+        ${reactionFx(state.lastChoiceGood)}
         <div class="vn-panel">
-          <div class="speaker-tag">${ch.name}</div>
+          <div class="speaker-tag">${ch.name} <span class="hearts">${heartsFor(ch.affection)}</span></div>
           <div class="dialogue-panel">${state.pendingResponse}</div>
           <button class="continue-btn" id="continue-btn">다음 날로 ▶</button>
         </div>
@@ -702,7 +716,7 @@ function render() {
       .join('')
     app.innerHTML = `
       <div class="vn-bg" id="bg"></div>
-      <div class="vn-portrait">${renderPortrait(ch, defaultMood)}</div>
+      <div class="vn-portrait enter">${renderPortrait(ch, defaultMood)}</div>
       <div class="vn-panel">
         <div class="speaker-tag">${ch.name}</div>
         <div class="dialogue-panel">${scene.text}\n\n"${scene.line}"</div>
@@ -715,6 +729,7 @@ function render() {
         const choice = shuffled[Number(btn.dataset.i)]
         ch.affection += choice.delta
         state.lastChoiceGood = choice.delta >= 3
+        if (state.lastChoiceGood) sfx.good()
         if (ch.stage < ch.stages.length) ch.stage += 1
         state.pendingResponse = choice.response
         render()
@@ -732,13 +747,18 @@ function render() {
     const bg = isGood ? best.endingBg : 'clubroom'
     app.innerHTML = `
       <div class="vn-bg" id="bg"></div>
-      ${isGood ? `<div class="vn-portrait">${renderPortrait(best, 'happy')}</div>` : ''}
+      ${isGood ? `<div class="vn-portrait happy">${renderPortrait(best, 'happy')}</div>${reactionFx(true)}` : ''}
       <div class="vn-panel">
         <div class="dialogue-panel">${ending}</div>
         <button class="restart-btn" id="restart-btn">다시 시작하기</button>
       </div>
     `
     applyBackground(document.getElementById('bg'), bg)
+    if (!state.endingSoundPlayed) {
+      state.endingSoundPlayed = true
+      if (isGood) sfx.fanfare()
+      else sfx.good()
+    }
     document.getElementById('restart-btn').onclick = () => {
       state = makeInitialState()
       render()
@@ -748,3 +768,15 @@ function render() {
 }
 
 render()
+
+// 버튼 클릭음 + 소리 켜기/끄기 버튼 (화면이 통째로 다시 그려지므로 문서 단위로 한 번만 등록)
+document.addEventListener('pointerdown', unlockSfx)
+document.addEventListener('keydown', unlockSfx)
+document.addEventListener('click', (e) => {
+  const muteBtn = e.target.closest('#mute-btn')
+  if (muteBtn) {
+    muteBtn.textContent = toggleMute() ? '소리 끔' : '소리 켬'
+    return
+  }
+  if (e.target.closest('button')) sfx.click()
+})
