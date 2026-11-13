@@ -1585,15 +1585,140 @@ function drawToast() {
 }
 
 function drawTitle() {
-  ctx.fillStyle = '#231b12'
-  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
+  const W = CANVAS_W
+  const H = CANVAS_H
+  const t = performance.now() / 1000
+
+  // dusk sky + low sun
+  const sky = ctx.createLinearGradient(0, 0, 0, H)
+  sky.addColorStop(0, '#2a1a2e')
+  sky.addColorStop(0.5, '#8a3a2e')
+  sky.addColorStop(0.78, '#e8963a')
+  sky.addColorStop(1, '#f2c96a')
+  ctx.fillStyle = sky
+  ctx.fillRect(0, 0, W, H)
+  ctx.fillStyle = 'rgba(255,220,140,0.25)'
+  ctx.beginPath()
+  ctx.arc(W * 0.72, H * 0.66, 110, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = '#ffe2a0'
+  ctx.beginPath()
+  ctx.arc(W * 0.72, H * 0.66, 66, 0, Math.PI * 2)
+  ctx.fill()
+
+  // far and near mountain ridges
+  const ridge = (baseY, amp, color, seed) => {
+    ctx.fillStyle = color
+    ctx.beginPath()
+    ctx.moveTo(0, H)
+    for (let x = 0; x <= W; x += 20) {
+      const y = baseY - Math.abs(Math.sin(x * 0.006 + seed)) * amp - Math.sin(x * 0.021 + seed * 3) * amp * 0.18
+      ctx.lineTo(x, y)
+    }
+    ctx.lineTo(W, H)
+    ctx.closePath()
+    ctx.fill()
+  }
+  ridge(H * 0.74, 150, '#5a2a34', 1.3)
+  ridge(H * 0.84, 100, '#33182a', 4.1)
+
+  // castle keep silhouette on the hill (stacked curved roofs)
+  const cx = W * 0.3
+  const cb = H * 0.8
+  ctx.fillStyle = '#170b18'
+  ctx.beginPath()
+  ctx.moveTo(cx - 150, cb + 40)
+  ctx.lineTo(cx - 100, cb - 30)
+  ctx.lineTo(cx + 100, cb - 30)
+  ctx.lineTo(cx + 150, cb + 40)
+  ctx.closePath()
+  ctx.fill()
+  const tier = (y, w, h) => {
+    ctx.fillRect(cx - w * 0.36, y - h, w * 0.72, h)
+    ctx.beginPath()
+    ctx.moveTo(cx - w / 2 - 12, y - h + 4)
+    ctx.quadraticCurveTo(cx - w / 2 + 6, y - h - 6, cx - w * 0.3, y - h - 16)
+    ctx.lineTo(cx + w * 0.3, y - h - 16)
+    ctx.quadraticCurveTo(cx + w / 2 - 6, y - h - 6, cx + w / 2 + 12, y - h + 4)
+    ctx.closePath()
+    ctx.fill()
+  }
+  tier(cb - 30, 190, 46)
+  tier(cb - 92, 140, 40)
+  tier(cb - 148, 96, 34)
+  ctx.beginPath()
+  ctx.moveTo(cx - 34, cb - 198)
+  ctx.lineTo(cx, cb - 228)
+  ctx.lineTo(cx + 34, cb - 198)
+  ctx.closePath()
+  ctx.fill()
+  // lit windows
+  ctx.fillStyle = 'rgba(255,200,110,0.9)'
+  for (const [wx, wy] of [[-40, -52], [0, -52], [40, -52], [-22, -112], [22, -112], [0, -166]]) ctx.fillRect(cx + wx - 5, cb + wy, 10, 12)
+
+  // foreground ground + army banners waving
+  ctx.fillStyle = '#120812'
+  ctx.fillRect(0, H - 56, W, 56)
+  const colors = ['#c0392b', '#2e6fb5', '#3f9a4d', '#d9a52a', '#8a4fb0', '#c0392b', '#2e6fb5']
+  colors.forEach((c, i) => {
+    const bx = W * 0.5 + i * 62 + (i % 2) * 14
+    const by = H - 56
+    const ph = t * 2.4 + i * 0.9
+    ctx.strokeStyle = '#0b050b'
+    ctx.lineWidth = 3
+    ctx.beginPath()
+    ctx.moveTo(bx, by + 10)
+    ctx.lineTo(bx, by - 96)
+    ctx.stroke()
+    ctx.fillStyle = c
+    ctx.beginPath()
+    ctx.moveTo(bx + 1, by - 96)
+    ctx.quadraticCurveTo(bx + 16, by - 94 + Math.sin(ph) * 4, bx + 30, by - 96 + Math.sin(ph + 1) * 5)
+    ctx.lineTo(bx + 30, by - 40 + Math.sin(ph + 1.6) * 5)
+    ctx.quadraticCurveTo(bx + 16, by - 38 + Math.sin(ph + 0.6) * 4, bx + 1, by - 40)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'
+    ctx.beginPath()
+    ctx.arc(bx + 15, by - 68 + Math.sin(ph + 0.8) * 3, 6, 0, Math.PI * 2)
+    ctx.fill()
+    // spearman heads under the banner
+    ctx.fillStyle = '#0b050b'
+    ctx.beginPath()
+    ctx.arc(bx - 10, by - 6, 8, 0, Math.PI * 2)
+    ctx.arc(bx + 22, by - 4, 8, 0, Math.PI * 2)
+    ctx.fill()
+  })
+
+  // title + red seal
   ctx.textAlign = 'center'
-  ctx.fillStyle = '#ffe066'
-  ctx.font = 'bold 40px sans-serif'
-  ctx.fillText('천하제패', CANVAS_W / 2, CANVAS_H / 2 - 30)
+  ctx.lineJoin = 'round'
+  ctx.font = 'bold 76px serif'
+  ctx.strokeStyle = 'rgba(20,8,12,0.85)'
+  ctx.lineWidth = 10
+  ctx.strokeText('천하제패', W / 2, 170)
+  ctx.fillStyle = '#ffe9b8'
+  ctx.fillText('천하제패', W / 2, 170)
+  ctx.save()
+  ctx.translate(W / 2 + 205, 120)
+  ctx.rotate(0.12)
+  ctx.fillStyle = '#b8261f'
+  ctx.fillRect(-22, -22, 44, 44)
+  ctx.fillStyle = '#ffe9b8'
+  ctx.font = 'bold 20px serif'
+  ctx.fillText('天', -9, -3)
+  ctx.fillText('下', 10, -3)
+  ctx.fillText('制', -9, 17)
+  ctx.fillText('覇', 10, 17)
+  ctx.restore()
+  ctx.font = '16px sans-serif'
+  ctx.fillStyle = '#ffd9a0'
+  ctx.fillText('영지를 다스리고 군을 일으켜 천하를 통일하라', W / 2, 206)
+  ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
+  ctx.font = 'bold 17px sans-serif'
   ctx.fillStyle = '#fff'
-  ctx.font = '15px sans-serif'
-  ctx.fillText('클릭하여 시작', CANVAS_W / 2, CANVAS_H / 2 + 20)
+  ctx.fillText('클릭하여 시작', W / 2, 252)
+  ctx.globalAlpha = 1
 }
 
 function drawIntro() {
