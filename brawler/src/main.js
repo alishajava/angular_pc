@@ -607,8 +607,24 @@ function drawShadow(x, y, scale) {
   ctx.fill()
 }
 
+// Per-character look: skin/hair/pants/boots plus an optional face style.
+// `style` also picks the signature gear (player headband, thug bandana +
+// scar, boss horned helm + beard).
+const LOOKS = {
+  player: { skin: '#f2c79b', hair: '#2a1d1a', pants: '#243456', boots: '#1d1b26', trim: '#e04a4a', eye: '#2a1d1a' },
+  thug: { skin: '#e0b58a', hair: '#1c1512', pants: '#3a2a2a', boots: '#161214', trim: '#2b2b33', eye: '#2a1d1a' },
+  boss: { skin: '#b79ac9', hair: '#2a1535', pants: '#2c1a3a', boots: '#150d1c', trim: '#ffd24a', eye: '#ff3b3b' },
+}
+
+function hRound(x, y, w, h, r) {
+  ctx.beginPath()
+  ctx.roundRect(x, y, w, h, r)
+}
+
 function drawHumanoid(x, y, opts) {
-  const scale = depthScale(y)
+  const scale = depthScale(y) * (opts.size || 1)
+  const look = LOOKS[opts.style || 'player']
+  const t = performance.now() / 1000
   ctx.save()
   ctx.globalAlpha = opts.alpha ?? 1
   ctx.translate(worldToScreenX(x), y - (opts.lift || 0))
@@ -619,41 +635,215 @@ function drawHumanoid(x, y, opts) {
   const kicking = opts.attacking && opts.attackType === 'kick'
   const throwing = opts.attacking && opts.attackType === 'throw'
   const punching = opts.attacking && !kicking && !throwing
-
-  ctx.fillStyle = '#2a2a2a'
-  if (kicking) {
-    ctx.fillRect(-10, -26, 7, 26) // back leg planted
-    ctx.fillRect(8, -22, 24, 9) // front leg extended into the kick
-  } else if (throwing) {
-    ctx.fillRect(-9, -26, 7, 26) // a braced, wide stance for hauling an opponent around
-    ctx.fillRect(6, -26, 7, 26)
-  } else {
-    ctx.fillRect(-10, -26 + legSwing * 0.2, 7, 26)
-    ctx.fillRect(3, -26 - legSwing * 0.2, 7, 26)
+  const OUT = 'rgba(15,10,20,0.75)'
+  const boot = (bx, by, bw) => {
+    ctx.fillStyle = look.boots
+    hRound(bx - 1, by, bw + 2, 7, 2)
+    ctx.fill()
+    ctx.fillStyle = 'rgba(255,255,255,0.18)'
+    ctx.fillRect(bx, by + 5, bw, 1.4)
   }
 
-  ctx.fillStyle = bodyColor
-  ctx.fillRect(-12, -56, 24, 32)
-
-  ctx.fillStyle = '#f2c79b'
-  ctx.beginPath()
-  ctx.arc(0, -66, 11, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.fillStyle = bodyColor
-  if (punching) {
-    ctx.fillRect(10, -52, 22, 8)
-    ctx.fillRect(-14, -50, 10, 20)
-  } else if (kicking) {
-    ctx.fillRect(8, -50, 8, 16) // arms pulled into a guard while the leg does the work
-    ctx.fillRect(-16, -50, 8, 16)
+  // ---- legs ----
+  ctx.fillStyle = look.pants
+  if (kicking) {
+    hRound(-10, -26, 7, 26, 2); ctx.fill()
+    boot(-10, -6, 7)
+    hRound(8, -22, 24, 9, 3); ctx.fill()
+    boot(28, -24, 6)
   } else if (throwing) {
-    ctx.fillRect(8, -58, 26, 10) // both arms reaching out wide for the grab
-    ctx.fillRect(-16, -50, 10, 18)
+    hRound(-9, -26, 7, 26, 2); ctx.fill()
+    hRound(6, -26, 7, 26, 2); ctx.fill()
+    boot(-9, -6, 7)
+    boot(6, -6, 7)
+  } else {
+    hRound(-10, -26 + legSwing * 0.2, 7, 26, 2); ctx.fill()
+    hRound(3, -26 - legSwing * 0.2, 7, 26, 2); ctx.fill()
+    boot(-10, -6 + legSwing * 0.2, 7)
+    boot(3, -6 - legSwing * 0.2, 7)
+  }
+
+  // ---- torso ----
+  ctx.fillStyle = bodyColor
+  hRound(-12, -56, 24, 32, 5); ctx.fill()
+  ctx.strokeStyle = OUT
+  ctx.lineWidth = 1.2
+  ctx.stroke()
+  if (!opts.flash) {
+    ctx.fillStyle = 'rgba(0,0,0,0.16)'
+    hRound(-12, -38, 24, 14, 5); ctx.fill()
+    ctx.fillStyle = 'rgba(255,255,255,0.16)'
+    hRound(-9, -54, 9, 9, 3); ctx.fill()
+  }
+  // belt + buckle
+  ctx.fillStyle = look.trim === '#ffd24a' ? '#3a2a10' : '#2a2018'
+  ctx.fillRect(-12, -31, 24, 4)
+  ctx.fillStyle = look.trim
+  ctx.fillRect(-3, -31, 6, 4)
+  if (opts.style === 'player') {
+    ctx.fillStyle = '#ffe066' // chest bolt emblem
+    ctx.beginPath()
+    ctx.moveTo(1, -50); ctx.lineTo(-4, -42); ctx.lineTo(-0.5, -42); ctx.lineTo(-2, -35); ctx.lineTo(4, -44); ctx.lineTo(0.5, -44)
+    ctx.closePath(); ctx.fill()
+  } else if (opts.style === 'thug') {
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)' // tank-top stripes
+    ctx.lineWidth = 2
+    ctx.beginPath(); ctx.moveTo(-6, -54); ctx.lineTo(-6, -32); ctx.moveTo(6, -54); ctx.lineTo(6, -32); ctx.stroke()
+  } else {
+    ctx.fillStyle = look.trim // boss armour plates + spiked shoulders
+    hRound(-13, -57, 26, 7, 3); ctx.fill()
+    for (const s of [-1, 1]) {
+      ctx.beginPath()
+      ctx.moveTo(s * 11, -56); ctx.lineTo(s * 20, -66); ctx.lineTo(s * 17, -52)
+      ctx.closePath(); ctx.fill()
+    }
+  }
+
+  // ---- arms (sleeve + fist) ----
+  const arm = (ax, ay, aw, ah) => {
+    ctx.fillStyle = bodyColor
+    hRound(ax, ay, aw, ah, 3); ctx.fill()
+    ctx.strokeStyle = OUT
+    ctx.lineWidth = 1
+    ctx.stroke()
+  }
+  const fist = (fx, fy) => {
+    ctx.fillStyle = look.skin
+    ctx.beginPath(); ctx.arc(fx, fy, 4.2, 0, Math.PI * 2); ctx.fill()
+    ctx.strokeStyle = OUT
+    ctx.lineWidth = 1
+    ctx.stroke()
+  }
+  if (punching) {
+    arm(8, -52, 18, 8); fist(29, -48)
+    arm(-14, -50, 10, 18); fist(-9, -30)
+  } else if (kicking) {
+    arm(8, -50, 8, 16); fist(12, -33)
+    arm(-16, -50, 8, 16); fist(-12, -33)
+  } else if (throwing) {
+    arm(8, -58, 22, 10); fist(33, -53)
+    arm(-16, -50, 10, 18); fist(-11, -30)
   } else {
     const armSwing = opts.moving ? Math.sin(opts.walkPhase + Math.PI) * 6 : 0
-    ctx.fillRect(10, -50 + armSwing * 0.3, 8, 18)
-    ctx.fillRect(-18, -50 - armSwing * 0.3, 8, 18)
+    arm(10, -50 + armSwing * 0.3, 8, 18); fist(14, -30 + armSwing * 0.3)
+    arm(-18, -50 - armSwing * 0.3, 8, 18); fist(-14, -30 - armSwing * 0.3)
+  }
+
+  // ---- head ----
+  const hx = 0
+  const hy = -66
+  // headband tails flutter behind the player
+  if (opts.style === 'player') {
+    ctx.fillStyle = look.trim
+    const fl = Math.sin(t * 9 + (opts.walkPhase || 0)) * 3
+    ctx.beginPath(); ctx.moveTo(-10, -71); ctx.lineTo(-24, -68 + fl); ctx.lineTo(-22, -73 + fl); ctx.lineTo(-10, -74); ctx.closePath(); ctx.fill()
+    ctx.beginPath(); ctx.moveTo(-10, -70); ctx.lineTo(-22, -62 - fl); ctx.lineTo(-19, -67 - fl); ctx.closePath(); ctx.fill()
+  }
+  // ear
+  ctx.fillStyle = look.skin
+  ctx.beginPath(); ctx.arc(hx - 9, hy + 1, 2.8, 0, Math.PI * 2); ctx.fill()
+  // face
+  ctx.fillStyle = look.skin
+  ctx.beginPath(); ctx.arc(hx, hy, 11, 0, Math.PI * 2); ctx.fill()
+  ctx.strokeStyle = OUT
+  ctx.lineWidth = 1.2
+  ctx.stroke()
+  // jaw shading
+  ctx.fillStyle = 'rgba(0,0,0,0.08)'
+  ctx.beginPath(); ctx.arc(hx, hy, 11, 0.15 * Math.PI, 0.85 * Math.PI); ctx.fill()
+
+  // hair / headgear
+  ctx.fillStyle = look.hair
+  if (opts.style === 'player') {
+    ctx.beginPath()
+    ctx.arc(hx - 1, hy - 3, 11.5, Math.PI * 1.02, Math.PI * 1.98)
+    ctx.lineTo(10, hy - 6); ctx.lineTo(6, hy - 11); ctx.lineTo(2, hy - 7); ctx.lineTo(-2, hy - 13); ctx.lineTo(-6, hy - 7); ctx.lineTo(-10, hy - 10)
+    ctx.closePath(); ctx.fill()
+    ctx.fillStyle = look.trim // headband
+    ctx.fillRect(-11, hy - 7, 22, 4)
+  } else if (opts.style === 'thug') {
+    ctx.beginPath() // mohawk
+    ctx.moveTo(-8, hy - 8); ctx.lineTo(-4, hy - 18); ctx.lineTo(0, hy - 10); ctx.lineTo(4, hy - 19); ctx.lineTo(8, hy - 8)
+    ctx.closePath(); ctx.fill()
+    ctx.fillStyle = '#c24a3a' // bandana
+    ctx.fillRect(-11, hy - 7, 22, 4)
+  } else {
+    ctx.fillStyle = '#3b2a48' // horned helm
+    ctx.beginPath(); ctx.arc(hx, hy - 3, 12, Math.PI, 0); ctx.fill()
+    ctx.strokeStyle = OUT; ctx.lineWidth = 1.2; ctx.stroke()
+    ctx.fillStyle = '#f2efe0'
+    for (const s of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(s * 9, hy - 8); ctx.lineTo(s * 17, hy - 22); ctx.lineTo(s * 13, hy - 6); ctx.closePath(); ctx.fill()
+    }
+    ctx.fillStyle = look.trim
+    ctx.fillRect(-12, hy - 6, 24, 3)
+  }
+
+  // eyes (3/4 view: near eye bigger, far eye smaller)
+  const hurt = !!opts.hurt
+  const blink = (t % 3.6) > 3.48
+  const eyeSpec = [[3, 3.2], [8.5, 2.4]]
+  for (const [ex, er] of eyeSpec) {
+    if (hurt || blink) {
+      ctx.strokeStyle = look.eye === '#ff3b3b' ? '#ff3b3b' : '#1a1420'
+      ctx.lineWidth = 1.6
+      ctx.beginPath()
+      if (hurt) { ctx.moveTo(ex - er, hy - 2 - er * 0.8); ctx.lineTo(ex + er, hy - 2 + er * 0.8); ctx.moveTo(ex - er, hy - 2 + er * 0.8); ctx.lineTo(ex + er, hy - 2 - er * 0.8) }
+      else { ctx.moveTo(ex - er, hy - 1); ctx.lineTo(ex + er, hy - 1) }
+      ctx.stroke()
+      continue
+    }
+    ctx.fillStyle = opts.style === 'boss' ? '#ffe9a0' : '#ffffff'
+    ctx.beginPath(); ctx.ellipse(ex, hy - 1, er, er * 1.15, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.strokeStyle = OUT
+    ctx.lineWidth = 0.8
+    ctx.stroke()
+    ctx.fillStyle = look.eye
+    ctx.beginPath(); ctx.arc(ex + 0.8, hy - 0.8, er * 0.62, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#ffffff'
+    ctx.beginPath(); ctx.arc(ex + 1.5, hy - 1.8, er * 0.24, 0, Math.PI * 2); ctx.fill()
+  }
+  // brows: angry for enemies, determined for player
+  ctx.strokeStyle = opts.style === 'player' ? look.hair : '#120d12'
+  ctx.lineWidth = 2
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  const ang = opts.style === 'player' ? 1.6 : 3.4
+  ctx.moveTo(-0.5, hy - 6 - ang * 0.5); ctx.lineTo(5.5, hy - 5 + (opts.style === 'player' ? 0 : 1.5))
+  ctx.moveTo(6.5, hy - 5.5 + (opts.style === 'player' ? 0 : 1.2)); ctx.lineTo(11, hy - 6.5 - ang * 0.3)
+  ctx.stroke()
+  ctx.lineCap = 'butt'
+  // nose bump + mouth
+  ctx.fillStyle = look.skin
+  ctx.beginPath(); ctx.moveTo(10.5, hy); ctx.lineTo(14, hy + 3.5); ctx.lineTo(10.5, hy + 4.5); ctx.closePath(); ctx.fill()
+  ctx.strokeStyle = OUT
+  ctx.lineWidth = 0.9
+  ctx.stroke()
+  ctx.beginPath()
+  if (opts.attacking || hurt) {
+    ctx.ellipse(6.5, hy + 7, 3.2, 2.6, 0, 0, Math.PI * 2) // shouting / grimace
+    ctx.fillStyle = '#4a1218'
+    ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.fillRect(4, hy + 5.2, 5, 1.4)
+  } else if (opts.style === 'player') {
+    ctx.arc(6, hy + 5.5, 3, 0.15 * Math.PI, 0.8 * Math.PI) // confident grin
+    ctx.stroke()
+  } else {
+    ctx.moveTo(2.5, hy + 7.5); ctx.lineTo(10, hy + 6) // sneer
+    ctx.stroke()
+  }
+  // extras
+  if (opts.style === 'thug') {
+    ctx.strokeStyle = '#a23a3a' // scar
+    ctx.lineWidth = 1.4
+    ctx.beginPath(); ctx.moveTo(-1, hy + 2); ctx.lineTo(5, hy + 10); ctx.stroke()
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'
+    ctx.lineWidth = 0.7
+    for (const k of [0.3, 0.6]) { ctx.beginPath(); ctx.moveTo(-1 + 6 * k - 1.5, hy + 2 + 8 * k); ctx.lineTo(-1 + 6 * k + 1.5, hy + 2 + 8 * k); ctx.stroke() }
+  } else if (opts.style === 'boss') {
+    ctx.fillStyle = '#2a1535' // beard
+    ctx.beginPath(); ctx.moveTo(-6, hy + 7); ctx.quadraticCurveTo(2, hy + 22, 11, hy + 8); ctx.quadraticCurveTo(3, hy + 10, -6, hy + 7); ctx.fill()
   }
   ctx.restore()
 }
@@ -669,6 +859,7 @@ function drawPlayerSprite() {
     // moves in a straight line, so a fixed offset per copy is enough.
     for (let i = 3; i >= 1; i--) {
       drawHumanoid(p.x - p.dashDir * i * 14, p.y, {
+        style: 'player',
         color: '#3f7fd1',
         facing: p.facing,
         walkPhase: p.walkPhase,
@@ -679,6 +870,8 @@ function drawPlayerSprite() {
   }
 
   drawHumanoid(p.x, p.y, {
+    style: 'player',
+    hurt: p.hitstunTimer > 0,
     color: '#3f7fd1',
     facing: p.facing,
     walkPhase: p.walkPhase,
@@ -694,9 +887,9 @@ function drawBossHealthBar(en) {
   const sx = worldToScreenX(en.x)
   const w = 70
   ctx.fillStyle = 'rgba(0,0,0,0.5)'
-  ctx.fillRect(sx - w / 2, en.y - 100, w, 6)
+  ctx.fillRect(sx - w / 2, en.y - 128, w, 6)
   ctx.fillStyle = '#ff4d4d'
-  ctx.fillRect(sx - w / 2, en.y - 100, w * Math.max(0, en.hp / en.maxHp), 6)
+  ctx.fillRect(sx - w / 2, en.y - 128, w * Math.max(0, en.hp / en.maxHp), 6)
 }
 
 function drawEnemySprite(en) {
@@ -706,6 +899,9 @@ function drawEnemySprite(en) {
   const shadowShrink = clamp(1 - liftZ / 160, 0.55, 1)
   drawShadow(en.x, en.y, depthScale(en.y) * shadowShrink)
   drawHumanoid(en.x, en.y, {
+    style: en.type === 'boss' ? 'boss' : 'thug',
+    size: en.type === 'boss' ? 1.25 : 1,
+    hurt: en.state === 'hitstun',
     color: en.state === 'telegraph' ? '#ffcf4d' : stats.color,
     facing: en.facing,
     walkPhase: en.walkPhase,
