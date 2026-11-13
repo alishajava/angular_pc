@@ -1,3 +1,5 @@
+import { sfx, unlockSfx, toggleMute } from './sfx.js'
+
 const canvas = document.getElementById('game')
 canvas.width = 900
 canvas.height = 600
@@ -135,12 +137,26 @@ function makeInitialState() {
   }
 }
 let state = makeInitialState()
+state.phase = 'title' // 첫 화면에서는 시작 입력을 기다린다 (R 재시작은 바로 레이스)
+
+function startFromTitle() {
+  if (state.phase !== 'title') return false
+  state.phase = 'racing'
+  sfx.start()
+  return true
+}
 
 let lastResetPress = -9999
 const heldKeys = new Set()
 window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase()
+  unlockSfx()
+  if (state.phase === 'title') {
+    if (!e.repeat && key.length === 1 || key === 'enter' || key.startsWith('arrow')) startFromTitle()
+    return
+  }
   heldKeys.add(key)
+  if (key === 'm' && !e.repeat) showToast(toggleMute() ? '소리 끔 (M으로 다시 켜기)' : '소리 켬')
   if (key === 'r' && !e.repeat) {
     // 진행 중에 실수로 눌러 기록이 날아가지 않도록 한 번 더 확인한다
     const now = performance.now()
@@ -154,6 +170,10 @@ window.addEventListener('keydown', (e) => {
   }
 })
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
+window.addEventListener('pointerdown', () => {
+  unlockSfx()
+  startFromTitle()
+})
 function held(names) { return names.some((k) => heldKeys.has(k)) }
 
 function currentWindFrom() {
@@ -212,6 +232,7 @@ function spawnTyphoonsIfDue() {
   })
   state.nextTyphoonAt = state.elapsed + TYPHOON_INTERVAL
   showToast('태풍 발생! 소용돌이 구름을 피해 항해하세요')
+  sfx.alarm()
 }
 
 function updateTyphoons(dt) {
@@ -262,6 +283,8 @@ function updateRacing(dt) {
   const inStorm = !!state.activeTyphoon
   if (inStorm !== state.wasInStorm) {
     showToast(inStorm ? '태풍 속으로 진입! 조타가 불안정해집니다' : '태풍을 빠져나왔다')
+    if (inStorm) sfx.bad()
+    else sfx.good()
     state.wasInStorm = inStorm
   }
 
@@ -292,6 +315,7 @@ function updateRacing(dt) {
         state.stormCargoTimer = 0
         if (Math.random() < CARGO_LOSS_CHANCE) {
           showToast(`태풍에 ${state.cargo.good}을(를) 잃어버렸다!`)
+          sfx.bad()
           state.cargo = null
         }
       }
@@ -309,8 +333,10 @@ function updateRacing(dt) {
   const dist = Math.hypot(state.boat.x - target.x, state.boat.y - target.y)
   if (dist < CHECKPOINT_RADIUS) {
     state.checkpointIndex += 1
+    sfx.pickup()
     if (state.checkpointIndex >= CHECKPOINTS.length) {
       state.phase = 'finished'
+      sfx.fanfare()
       state.finishTime = state.elapsed
       const best = readBestTime()
       if (!best || state.finishTime < best) {
@@ -344,6 +370,7 @@ function updateCargo() {
 
   if (state.cargo && state.cargo.toId === here.id) {
     state.gold += state.cargo.reward
+    sfx.coin()
     showToast(`배달 완료! ${state.cargo.good} 운송 +${state.cargo.reward} 골드`)
     state.cargo = null
     return
@@ -354,6 +381,7 @@ function updateCargo() {
     const good = CARGO_GOODS[Math.floor(Math.random() * CARGO_GOODS.length)]
     const reward = 40 + Math.floor(Math.random() * 40)
     state.cargo = { good, fromId: here.id, toId: dest.id, reward }
+    sfx.click()
     showToast(`${good} 선적 완료 → ${dest.name}로 배달하세요`)
   }
 }
@@ -702,13 +730,100 @@ function drawFinishOverlay() {
   ctx.fillText('R 키를 눌러 다시 시작', canvas.width / 2, canvas.height / 2 + 70)
 }
 
+function drawTitleOverlay() {
+  const W = canvas.width
+  const H = canvas.height
+  const t = performance.now() / 1000
+  const shade = ctx.createLinearGradient(0, 0, 0, H)
+  shade.addColorStop(0, 'rgba(6,24,44,0.86)')
+  shade.addColorStop(1, 'rgba(6,24,44,0.55)')
+  ctx.fillStyle = shade
+  ctx.fillRect(0, 0, W, H)
+
+  // big sailboat riding a swell
+  const bx = W / 2
+  const by = H * 0.56 + Math.sin(t * 1.6) * 6
+  ctx.save()
+  ctx.translate(bx, by)
+  ctx.rotate(Math.sin(t * 1.6 + 0.6) * 0.05)
+  ctx.fillStyle = '#8a5a2e'
+  ctx.beginPath()
+  ctx.moveTo(-90, 0)
+  ctx.quadraticCurveTo(-70, 36, 0, 38)
+  ctx.quadraticCurveTo(70, 36, 100, 0)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = '#6b4322'
+  ctx.fillRect(-84, 0, 178, 6)
+  ctx.fillStyle = '#4a3320'
+  ctx.fillRect(-3, -150, 6, 152)
+  const billow = 18 + Math.sin(t * 2.2) * 5
+  ctx.fillStyle = '#fdfaf0'
+  ctx.beginPath()
+  ctx.moveTo(4, -146)
+  ctx.quadraticCurveTo(70 + billow, -90, 84, -12)
+  ctx.lineTo(4, -12)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = '#ffd23f'
+  ctx.beginPath()
+  ctx.moveTo(-4, -130)
+  ctx.quadraticCurveTo(-46 - billow * 0.5, -80, -62, -14)
+  ctx.lineTo(-4, -14)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = '#e04a4a'
+  ctx.beginPath()
+  ctx.moveTo(3, -150)
+  ctx.lineTo(30 + Math.sin(t * 6) * 4, -158)
+  ctx.lineTo(3, -166)
+  ctx.closePath()
+  ctx.fill()
+  ctx.restore()
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)'
+  ctx.lineWidth = 3
+  for (let i = 0; i < 3; i++) {
+    const wy = H * 0.56 + 44 + i * 16
+    ctx.beginPath()
+    for (let x = bx - 190; x <= bx + 190; x += 10) {
+      const y = wy + Math.sin(x * 0.045 + t * 2.4 + i) * 5
+      if (x === bx - 190) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    }
+    ctx.stroke()
+  }
+
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'alphabetic'
+  ctx.lineJoin = 'round'
+  ctx.font = 'bold 52px sans-serif'
+  ctx.strokeStyle = 'rgba(4,16,30,0.9)'
+  ctx.lineWidth = 8
+  ctx.strokeText('항해 시뮬레이션', W / 2, H * 0.2)
+  ctx.fillStyle = '#ffd23f'
+  ctx.fillText('항해 시뮬레이션', W / 2, H * 0.2)
+  ctx.font = '16px sans-serif'
+  ctx.fillStyle = '#cfe8ff'
+  ctx.fillText('바람을 읽어 체크포인트를 돌고, 항구 사이로 화물을 나르세요', W / 2, H * 0.2 + 32)
+  ctx.font = '14px sans-serif'
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'
+  ctx.fillText('A/D 또는 ←/→ 조타 · R 재시작 · M 소리 켜기/끄기', W / 2, H * 0.86)
+  ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
+  ctx.font = 'bold 18px sans-serif'
+  ctx.fillStyle = '#fff'
+  ctx.fillText('아무 키나 누르거나 클릭해서 출항', W / 2, H * 0.93)
+  ctx.globalAlpha = 1
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'top'
+}
+
 let lastTime = performance.now()
 function loop(time) {
   const dt = Math.min(0.05, (time - lastTime) / 1000)
   lastTime = time
 
   if (state.phase === 'racing') updateRacing(dt)
-  updateCargo()
+  if (state.phase !== 'title') updateCargo()
 
   const inStorm = !!state.activeTyphoon
   ctx.save()
@@ -726,6 +841,7 @@ function loop(time) {
   if (inStorm) drawStormOverlay()
   drawHud()
   if (state.phase === 'finished') drawFinishOverlay()
+  if (state.phase === 'title') drawTitleOverlay()
 
   requestAnimationFrame(loop)
 }
