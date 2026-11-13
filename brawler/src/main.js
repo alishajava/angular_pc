@@ -1,3 +1,5 @@
+import { sfx, unlockSfx, toggleMute, isMuted } from './sfx.js'
+
 const canvas = document.getElementById('game')
 canvas.width = 960
 canvas.height = 560
@@ -140,6 +142,8 @@ function makeInitialState() {
   }
 }
 let state = makeInitialState()
+state.phase = 'title' // 첫 화면에서는 시작 입력을 기다린다 (R 재시작은 바로 플레이)
+let muteNoticeUntil = 0
 
 function canAct() {
   const p = state.player
@@ -159,9 +163,23 @@ window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase()
   const isRepeat = heldKeys.has(key)
   heldKeys.add(key)
+  unlockSfx()
+  if (state.phase === 'title') {
+    if (!isRepeat && (key.length === 1 || key === 'enter' || key.startsWith('arrow'))) {
+      e.preventDefault()
+      state.phase = 'playing'
+      sfx.start()
+    }
+    return
+  }
   if (key === 'r') {
     state = makeInitialState()
+    sfx.click()
     return
+  }
+  if (key === 'm' && !isRepeat) {
+    toggleMute()
+    muteNoticeUntil = performance.now() + 1600
   }
   if (state.phase !== 'playing') return
 
@@ -202,6 +220,13 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
 // 창이 포커스를 잃으면 눌려 있던 키가 계속 눌린 것으로 남지 않게 한다
 window.addEventListener('blur', () => heldKeys.clear())
+window.addEventListener('pointerdown', () => {
+  unlockSfx()
+  if (state.phase === 'title') {
+    state.phase = 'playing'
+    sfx.start()
+  }
+})
 function held(names) { return names.some((k) => heldKeys.has(k)) }
 
 const MOVE_KEYS = {
@@ -214,7 +239,9 @@ const MOVE_KEYS = {
 function startAttack(type) {
   const p = state.player
   p.attack = { type, phase: 'startup', t: 0, resolved: false }
+  if (type !== 'ultimate') sfx.whoosh()
   if (type === 'ultimate') {
+    sfx.heavy()
     p.gauge = 0
     p.ultimateFlash = 0.3
     p.invulnTimer = ATTACKS.ultimate.startup + ATTACKS.ultimate.active
@@ -225,6 +252,7 @@ function startJump() {
   const p = state.player
   p.jumping = true
   p.vz = JUMP_VELOCITY
+  sfx.jump()
 }
 
 function startDash(dir) {
@@ -232,6 +260,7 @@ function startDash(dir) {
   if (p.attack || p.hitstunTimer > 0 || p.dashing || p.jumping) return
   p.dashing = true
   p.dashTimer = DASH_DURATION
+  sfx.whoosh()
   p.dashDir = dir
   p.facing = dir
 }
@@ -367,6 +396,7 @@ function resolvePlayerThrow() {
   const dir = Math.sign(best.x - p.x) || p.facing
   best.hp -= def.damage
   best.flashTimer = 0.12
+  sfx.heavy()
   best.facing = -dir
   p.gauge = Math.min(GAUGE_MAX, p.gauge + GAUGE_PER_HIT)
   if (best.hp <= 0) {
@@ -380,6 +410,8 @@ function resolvePlayerThrow() {
 
 function damageEnemy(en, dmg, knockbackDx) {
   en.hp -= dmg
+  if (dmg >= 30) sfx.heavy()
+  else sfx.hit()
   en.flashTimer = 0.12
   en.x = clamp(en.x + knockbackDx, 40, WORLD_WIDTH - 40)
   if (en.hp <= 0) {
@@ -398,13 +430,17 @@ function damagePlayer(dmg, knockbackDx) {
   if (p.invulnTimer > 0) return // mid-ultimate invulnerability window
   if (p.jumping && p.z > JUMP_DODGE_HEIGHT) return // high enough to hop over a grounded attack
   p.hp = Math.max(0, p.hp - dmg)
+  sfx.hurt()
   p.hitstunTimer = HITSTUN_DURATION
   p.flashTimer = 0.15
   p.attack = null
   p.dashing = false // otherwise next frame's dash branch would run before this stun and ignore it entirely
   p.gauge = Math.min(GAUGE_MAX, p.gauge + GAUGE_PER_HURT)
   p.x = clamp(p.x + knockbackDx, 40, playerMaxX())
-  if (p.hp <= 0) state.phase = 'gameover'
+  if (p.hp <= 0) {
+    state.phase = 'gameover'
+    sfx.lose()
+  }
 }
 
 function updateEnemies(dt) {
@@ -530,7 +566,12 @@ function checkWaveCleared() {
   if (state.enemies.some((e) => e.state !== 'dead')) return
   state.gateX = null
   state.waveIndex += 1
-  if (state.waveIndex >= WAVES.length) state.phase = 'cleared'
+  if (state.waveIndex >= WAVES.length) {
+    state.phase = 'cleared'
+    sfx.fanfare()
+  } else {
+    sfx.good()
+  }
 }
 
 function updateCamera() {
@@ -983,7 +1024,89 @@ function drawHud() {
   ctx.fillText(waveLabel, 16, 62)
 }
 
+function drawTitleScreen() {
+  const W = canvas.width
+  const H = canvas.height
+  const t = performance.now() / 1000
+  ctx.textBaseline = 'alphabetic'
+  const shade = ctx.createLinearGradient(0, 0, 0, H)
+  shade.addColorStop(0, 'rgba(12,8,28,0.9)')
+  shade.addColorStop(1, 'rgba(12,8,28,0.6)')
+  ctx.fillStyle = shade
+  ctx.fillRect(0, 0, W, H)
+
+  // slanted action stripes behind the logo
+  ctx.save()
+  ctx.translate(W / 2, 128)
+  ctx.rotate(-0.06)
+  ctx.fillStyle = '#e04a4a'
+  ctx.fillRect(-330, -52, 660, 96)
+  ctx.fillStyle = '#ffd24a'
+  ctx.fillRect(-330, 44, 660, 8)
+  ctx.textAlign = 'center'
+  ctx.font = 'italic bold 66px sans-serif'
+  ctx.lineJoin = 'round'
+  ctx.strokeStyle = '#1a0f24'
+  ctx.lineWidth = 10
+  ctx.strokeText('횡스크롤 액션', 0, 22)
+  ctx.fillStyle = '#fff'
+  ctx.fillText('횡스크롤 액션', 0, 22)
+  ctx.restore()
+
+  // the cast, big: hero mid-punch facing a thug and the boss
+  const big = (cx, cy, k, opts) => {
+    ctx.save()
+    ctx.translate(cx, cy)
+    ctx.scale(k, k)
+    ctx.fillStyle = 'rgba(0,0,0,0.4)'
+    ctx.beginPath()
+    ctx.ellipse(0, 2, 26, 7, 0, 0, Math.PI * 2)
+    ctx.fill()
+    drawHumanoid(state.cameraX, 0, { size: 1 / depthScale(0), walkPhase: t * 6, ...opts })
+    ctx.restore()
+  }
+  const jab = Math.sin(t * 5) > 0.2
+  big(W / 2 - 150, 430, 2.4, { style: 'player', color: '#3f7fd1', facing: 1, attacking: jab, attackType: 'punch' })
+  big(W / 2 + 60, 426, 2.1, { style: 'thug', color: ENEMY_TYPES.thug.color, facing: -1, hurt: jab })
+  big(W / 2 + 220, 436, 2.7, { style: 'boss', color: ENEMY_TYPES.boss.color, facing: -1 })
+  if (jab) {
+    ctx.fillStyle = '#ffe066'
+    ctx.beginPath()
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2
+      const r = i % 2 ? 12 : 26
+      ctx.lineTo(W / 2 - 46 + Math.cos(a) * r, 312 + Math.sin(a) * r)
+    }
+    ctx.closePath()
+    ctx.fill()
+  }
+
+  ctx.textAlign = 'center'
+  ctx.font = '14px sans-serif'
+  ctx.fillStyle = 'rgba(255,255,255,0.9)'
+  ctx.fillText('A/D 이동 · W/S 앞뒤 · 스페이스 점프 · J 펀치 · K 킥 · J+K 던지기 · L 필살기 · M 소리', W / 2, H - 62)
+  ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
+  ctx.font = 'bold 20px sans-serif'
+  ctx.fillStyle = '#ffe066'
+  ctx.fillText('아무 키나 누르거나 클릭해서 시작', W / 2, H - 26)
+  ctx.globalAlpha = 1
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'top'
+}
+
 function drawOverlay() {
+  if (performance.now() < muteNoticeUntil) {
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'top'
+    ctx.font = 'bold 13px sans-serif'
+    ctx.fillStyle = '#fff'
+    ctx.fillText(isMuted() ? '소리 끔 (M)' : '소리 켬 (M)', canvas.width - 16, 16)
+    ctx.textAlign = 'left'
+  }
+  if (state.phase === 'title') {
+    drawTitleScreen()
+    return
+  }
   if (state.phase === 'playing') return
   ctx.fillStyle = 'rgba(10,8,20,0.75)'
   ctx.fillRect(0, 0, canvas.width, canvas.height)
