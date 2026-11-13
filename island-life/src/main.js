@@ -1,3 +1,5 @@
+import { sfx, unlockSfx, toggleMute } from './sfx.js'
+
 // Cozy life-sim (Animal Crossing-style): wander a small island, gather
 // wood/fruit/fish/shells, sell them at the shop, buy furniture to decorate
 // your house, chat with villagers, and fulfil the bulletin board's daily
@@ -219,10 +221,12 @@ function harvestTree(t) {
   if (t.hasFruit) {
     t.hasFruit = false
     state.inv.fruit += 1
+    sfx.pickup()
     say('알림', '과일을 땄다! (+1 과일)')
   } else if (t.woodCharges > 0) {
     t.woodCharges -= 1
     state.inv.wood += 1
+    sfx.build()
     say('알림', '나무를 베었다! (+1 나무)')
   } else {
     say('알림', '이 나무는 오늘 더 얻을 게 없어요. 내일 다시 와보세요.')
@@ -235,8 +239,10 @@ function attemptFish() {
     return
   }
   state.fishLeft -= 1
+  sfx.splash()
   if (Math.random() < 0.7) {
     state.inv.fish += 1
+    sfx.pickup()
     say('알림', `물고기를 잡았다! (+1 물고기) · 오늘 남은 낚시 ${state.fishLeft}번`)
   } else {
     say('알림', `물고기가 도망갔다... 다시 시도해보세요. · 오늘 남은 낚시 ${state.fishLeft}번`)
@@ -244,6 +250,7 @@ function attemptFish() {
 }
 
 function talkTo(who) {
+  sfx.click()
   if (who === 'tori') {
     say('토리', VILLAGER_LINES.tori[toriLine])
     toriLine = (toriLine + 1) % VILLAGER_LINES.tori.length
@@ -264,6 +271,7 @@ function checkBoard() {
     state.inv[task.item] -= task.amount
     state.bells += task.bells
     task.done = true
+    sfx.good()
     say('게시판', `부탁을 들어줬다! ${ITEM_LABEL[task.item]} ${task.amount}개를 전달하고 ${task.bells}벨을 받았다.`)
   } else {
     say(
@@ -274,6 +282,7 @@ function checkBoard() {
 }
 
 function sleep() {
+  sfx.sleep()
   state.day += 1
   for (const t of trees) {
     t.hasFruit = true
@@ -288,9 +297,11 @@ function sleep() {
 
 function openShop() {
   state.shopOpen = true
+  sfx.click()
 }
 function closeShop() {
   state.shopOpen = false
+  sfx.click()
 }
 
 function sellAll(item) {
@@ -302,6 +313,7 @@ function sellAll(item) {
   const earned = count * SELL_PRICE[item]
   state.inv[item] = 0
   state.bells += earned
+  sfx.coin()
   say('상점', `${ITEM_LABEL[item]} ${count}개를 팔고 ${earned}벨을 받았다.`)
 }
 
@@ -314,13 +326,16 @@ function buyFurniture(index) {
   }
   if (state.bells < f.price) {
     say('상점', `벨이 부족해요. ${f.name}은 ${f.price}벨이 필요해요.`)
+    sfx.bad()
     return
   }
   state.bells -= f.price
   state.furniture.add(f.id)
+  sfx.good()
   say('상점', `${f.name}을 구매했다! 집에서 확인해보세요.`)
   if (state.furniture.size === FURNITURE.length && !state.furnitureCelebrated) {
     state.furnitureCelebrated = true
+    sfx.fanfare()
     say('알림', '축하합니다! 가구를 모두 모아 집 꾸미기를 완성했어요.')
   }
 }
@@ -384,14 +399,25 @@ window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase()
   if (key === ' ') e.preventDefault() // 스페이스로 페이지가 스크롤되지 않게
   if (e.repeat) return // 꾹 누르면 상호작용·상점 열기/닫기가 반복되는 것을 방지
+  unlockSfx()
   heldKeys.add(key)
 
   if (state.phase === 'title') {
-    if (key === ' ' || key === 'enter') state.phase = 'intro'
+    if (key === ' ' || key === 'enter') {
+      state.phase = 'intro'
+      sfx.click()
+    }
     return
   }
   if (state.phase === 'intro') {
-    if (key === ' ' || key === 'enter') state.phase = 'play'
+    if (key === ' ' || key === 'enter') {
+      state.phase = 'play'
+      sfx.start()
+    }
+    return
+  }
+  if (key === 'm' && !state.shopOpen) {
+    say('알림', toggleMute() ? '소리 끔 (M으로 다시 켜기)' : '소리 켬')
     return
   }
 
@@ -416,8 +442,14 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
 
 canvas.addEventListener('click', () => {
-  if (state.phase === 'title') state.phase = 'intro'
-  else if (state.phase === 'intro') state.phase = 'play'
+  unlockSfx()
+  if (state.phase === 'title') {
+    state.phase = 'intro'
+    sfx.click()
+  } else if (state.phase === 'intro') {
+    state.phase = 'play'
+    sfx.start()
+  }
 })
 
 // ---------- Update ----------
@@ -450,6 +482,7 @@ function updatePlayer(dt) {
       if (s.collected) continue
       if (Math.abs(player.x - s.x) < PLAYER_HALF + 14 && Math.abs(player.y - s.y) < PLAYER_HALF + 14) {
         s.collected = true
+        sfx.pickup()
         state.inv.shell += 1
         say('알림', '조개를 주웠다! (+1 조개)')
       }
@@ -884,16 +917,146 @@ function drawShopPanel() {
   ctx.fillText('ESC/SPACE: 닫기', x + w - 14, y + h - 12)
 }
 
-function drawTitle() {
-  ctx.fillStyle = '#1c2a1e'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
+// Shared title-card text: big title with a soft shadow, a subtitle and a
+// gently pulsing "press to start" line.
+function drawTitleText(title, subtitle, prompt, cy) {
+  const t = performance.now() / 1000
   ctx.textAlign = 'center'
-  ctx.fillStyle = '#ffe066'
-  ctx.font = 'bold 36px sans-serif'
-  ctx.fillText('아늑한 섬 생활', canvas.width / 2, canvas.height / 2 - 20)
-  ctx.fillStyle = '#fff'
-  ctx.font = '15px sans-serif'
-  ctx.fillText('클릭 또는 스페이스를 눌러 시작', canvas.width / 2, canvas.height / 2 + 24)
+  ctx.font = 'bold 44px sans-serif'
+  ctx.lineJoin = 'round'
+  ctx.strokeStyle = '#2f6f4a'
+  ctx.lineWidth = 7
+  ctx.strokeText(title, canvas.width / 2, cy)
+  ctx.fillStyle = '#fff6d6'
+  ctx.fillText(title, canvas.width / 2, cy)
+  ctx.font = 'bold 16px sans-serif'
+  ctx.fillStyle = '#2a5a6a'
+  ctx.fillText(subtitle, canvas.width / 2, cy + 32)
+  ctx.globalAlpha = 0.6 + Math.sin(t * 3) * 0.4
+  ctx.font = 'bold 17px sans-serif'
+  ctx.fillStyle = '#b0502a'
+  ctx.fillText(prompt, canvas.width / 2, cy + 74)
+  ctx.globalAlpha = 1
+}
+
+function drawTitle() {
+  const W = canvas.width
+  const H = canvas.height
+  const t = performance.now() / 1000
+
+  // sky + sun
+  const sky = ctx.createLinearGradient(0, 0, 0, H)
+  sky.addColorStop(0, '#7ec8f0')
+  sky.addColorStop(0.55, '#cdeeff')
+  sky.addColorStop(1, '#ffe9c4')
+  ctx.fillStyle = sky
+  ctx.fillRect(0, 0, W, H)
+  ctx.fillStyle = 'rgba(255,240,170,0.35)'
+  ctx.beginPath()
+  ctx.arc(W - 150, 110, 70 + Math.sin(t * 1.5) * 4, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = '#fff3b0'
+  ctx.beginPath()
+  ctx.arc(W - 150, 110, 44, 0, Math.PI * 2)
+  ctx.fill()
+
+  // drifting clouds
+  ctx.fillStyle = 'rgba(255,255,255,0.9)'
+  for (const [bx, by, s, sp] of [[120, 90, 1, 9], [470, 60, 0.75, 6], [760, 150, 0.6, 12]]) {
+    const cx = ((bx + t * sp) % (W + 200)) - 100
+    for (const [dx, dy, r] of [[0, 0, 26], [28, 6, 20], [-28, 6, 20], [10, -12, 20]]) {
+      ctx.beginPath()
+      ctx.arc(cx + dx * s, by + dy * s, r * s, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  // sea with moving wave lines
+  const seaY = H * 0.62
+  const sea = ctx.createLinearGradient(0, seaY, 0, H)
+  sea.addColorStop(0, '#4aa3d8')
+  sea.addColorStop(1, '#2f6fa8')
+  ctx.fillStyle = sea
+  ctx.fillRect(0, seaY, W, H - seaY)
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)'
+  ctx.lineWidth = 2
+  for (let i = 0; i < 6; i++) {
+    const wy = seaY + 26 + i * 30
+    const off = (t * (14 + i * 3) + i * 70) % 160
+    for (let x = -160 + off; x < W; x += 160) {
+      ctx.beginPath()
+      ctx.moveTo(x, wy)
+      ctx.quadraticCurveTo(x + 20, wy - 5, x + 40, wy)
+      ctx.stroke()
+    }
+  }
+
+  // island: sand rim + grass mound
+  const ix = W / 2
+  const iy = seaY + 54
+  ctx.fillStyle = '#e8d08a'
+  ctx.beginPath()
+  ctx.ellipse(ix, iy + 14, 330, 60, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = '#5e9e52'
+  ctx.beginPath()
+  ctx.ellipse(ix, iy, 290, 50, 0, Math.PI, 0)
+  ctx.fill()
+  ctx.fillRect(ix - 290, iy - 1, 580, 14)
+  ctx.beginPath()
+  ctx.ellipse(ix, iy + 12, 290, 22, 0, 0, Math.PI)
+  ctx.fill()
+
+  // trees (two with fruit) + little house
+  for (const [tx, s, fruit] of [[-230, 1.1, true], [-170, 0.85, false], [205, 1.15, true], [150, 0.8, false]]) {
+    const bx = ix + tx
+    const by = iy - 22
+    ctx.fillStyle = '#7a5230'
+    ctx.fillRect(bx - 4 * s, by - 6 * s, 8 * s, 30 * s)
+    ctx.fillStyle = '#2f7a3d'
+    ctx.beginPath()
+    ctx.arc(bx, by - 20 * s, 24 * s, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#3f9a4d'
+    ctx.beginPath()
+    ctx.arc(bx - 7 * s, by - 26 * s, 13 * s, 0, Math.PI * 2)
+    ctx.fill()
+    if (fruit) {
+      ctx.fillStyle = '#ff7a59'
+      for (const [fx, fy] of [[-9, -14], [8, -24], [3, -8]]) {
+        ctx.beginPath()
+        ctx.arc(bx + fx * s, by + fy * s, 4 * s, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+  }
+  const hx = ix + 70
+  const hyB = iy - 16
+  ctx.fillStyle = '#f2e3c9'
+  ctx.fillRect(hx - 26, hyB - 30, 52, 34)
+  ctx.fillStyle = '#c0553f'
+  ctx.beginPath()
+  ctx.moveTo(hx - 34, hyB - 30)
+  ctx.lineTo(hx, hyB - 56)
+  ctx.lineTo(hx + 34, hyB - 30)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = '#8a5a2e'
+  ctx.fillRect(hx - 7, hyB - 16, 14, 20)
+  ctx.fillStyle = '#9fd6ff'
+  ctx.fillRect(hx + 11, hyB - 22, 10, 10)
+
+  // the cast, waving hello (scaled-up versions of the in-game characters)
+  ctx.save()
+  ctx.translate(ix - 80, iy - 6)
+  ctx.scale(2, 2)
+  const hop = Math.abs(Math.sin(t * 2.4)) * 2
+  drawCharacter(-30, 0, { shirt: '#8c9bab', hair: '#2b2440', eye: '#4a6a8a' })
+  drawCharacter(0, -hop, { shirt: '#3f9fd1', hair: '#5c3a1e', eye: '#2f5fa0', foot: Math.sin(t * 4.8) * 1.5 })
+  drawCharacter(30, 0, { shirt: '#7fb06a', hair: '#5c3a1e', eye: '#3f8f5a', extra: 'hat' })
+  ctx.restore()
+
+  drawTitleText('아늑한 섬 생활', '나무를 가꾸고, 낚시하고, 집을 꾸미는 느긋한 하루', '클릭 또는 스페이스를 눌러 시작', 130)
 }
 
 function drawIntro() {
