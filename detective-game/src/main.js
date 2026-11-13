@@ -202,9 +202,161 @@ function proceedButtonRect() {
 }
 
 // ---------- Flat-sticker characters ----------
-function drawWitness(cx, baseY) {
-  const OUTLINE = '#241a14'
+// Shared face painter. Everything is drawn relative to the head centre and
+// radius so the same routine serves both characters. `mood` picks brows and
+// mouth; eyes blink on their own every few seconds.
+function drawFace(cx, cy, r, { mood = 'neutral', eye = '#5a3d2a', skin = '#e8b98a', outline = '#241a14', halfLid = 0, stubble = false } = {}) {
+  const t = performance.now() / 1000
+  const blinking = (t % 4.2) > 4.05
+  const ex = r * 0.38
+  const ey = cy + r * 0.02
 
+  // ears
+  for (const s of [-1, 1]) {
+    ctx.beginPath()
+    ctx.ellipse(cx + s * r * 0.97, cy + r * 0.08, r * 0.14, r * 0.2, 0, 0, Math.PI * 2)
+    ctx.fillStyle = skin
+    ctx.fill()
+    ctx.lineWidth = 2
+    ctx.strokeStyle = outline
+    ctx.stroke()
+  }
+
+  // cheeks
+  for (const s of [-1, 1]) {
+    ctx.beginPath()
+    ctx.ellipse(cx + s * r * 0.56, cy + r * 0.38, r * 0.17, r * 0.1, 0, 0, Math.PI * 2)
+    ctx.fillStyle = mood === 'nervous' ? 'rgba(255,120,120,0.45)' : 'rgba(255,140,130,0.28)'
+    ctx.fill()
+  }
+
+  // eyes
+  for (const s of [-1, 1]) {
+    const x = cx + s * ex
+    if (blinking) {
+      ctx.beginPath()
+      ctx.moveTo(x - r * 0.17, ey + r * 0.02)
+      ctx.quadraticCurveTo(x, ey + r * 0.1, x + r * 0.17, ey + r * 0.02)
+      ctx.lineWidth = 2
+      ctx.strokeStyle = outline
+      ctx.stroke()
+      continue
+    }
+    const shocked = mood === 'shocked'
+    const rx = r * (shocked ? 0.21 : 0.17)
+    const ry = r * (shocked ? 0.27 : 0.21)
+    ctx.beginPath()
+    ctx.ellipse(x, ey, rx, ry, 0, 0, Math.PI * 2)
+    ctx.fillStyle = '#ffffff'
+    ctx.fill()
+    ctx.lineWidth = 1.4
+    ctx.strokeStyle = outline
+    ctx.stroke()
+
+    // iris/pupil look slightly toward the centre (nervous: darts aside)
+    const look = mood === 'nervous' ? Math.sin(t * 3) * r * 0.05 : -s * r * 0.02
+    const ir = shocked ? r * 0.08 : r * 0.12
+    ctx.beginPath()
+    ctx.arc(x + look, ey + r * 0.02, ir, 0, Math.PI * 2)
+    ctx.fillStyle = eye
+    ctx.fill()
+    ctx.beginPath()
+    ctx.arc(x + look, ey + r * 0.02, ir * 0.5, 0, Math.PI * 2)
+    ctx.fillStyle = '#120d0a'
+    ctx.fill()
+    ctx.beginPath()
+    ctx.arc(x + look + ir * 0.4, ey - ir * 0.35, Math.max(1, ir * 0.3), 0, Math.PI * 2)
+    ctx.fillStyle = '#ffffff'
+    ctx.fill()
+
+    // upper lid line (heavier = more serious); half-closed lids for the detective
+    ctx.beginPath()
+    ctx.ellipse(x, ey, rx, ry, 0, Math.PI * 1.08, Math.PI * 1.92)
+    ctx.lineWidth = 2.4
+    ctx.strokeStyle = outline
+    ctx.stroke()
+    if (halfLid) {
+      ctx.fillStyle = skin
+      ctx.fillRect(x - rx, ey - ry, rx * 2, ry * 2 * halfLid)
+      ctx.beginPath()
+      ctx.moveTo(x - rx, ey - ry + ry * 2 * halfLid)
+      ctx.lineTo(x + rx, ey - ry + ry * 2 * halfLid)
+      ctx.lineWidth = 2.2
+      ctx.strokeStyle = outline
+      ctx.stroke()
+    }
+  }
+
+  // brows
+  const browY = ey - r * (mood === 'shocked' ? 0.52 : 0.4)
+  for (const s of [-1, 1]) {
+    const x = cx + s * ex
+    let inner = 0
+    let outer = 0
+    if (mood === 'nervous') { inner = -r * 0.1; outer = r * 0.05 } // worried: inner ends up
+    else if (mood === 'determined') { inner = r * 0.1; outer = -r * 0.04 }
+    else if (mood === 'defeated') { inner = -r * 0.14; outer = r * 0.08 }
+    ctx.beginPath()
+    ctx.moveTo(x - s * r * 0.2, browY + inner)
+    ctx.lineTo(x + s * r * 0.2, browY + outer)
+    ctx.lineWidth = mood === 'determined' ? 3.6 : 2.8
+    ctx.lineCap = 'round'
+    ctx.strokeStyle = outline
+    ctx.stroke()
+    ctx.lineCap = 'butt'
+  }
+
+  // nose
+  ctx.beginPath()
+  ctx.moveTo(cx - r * 0.03, cy + r * 0.1)
+  ctx.quadraticCurveTo(cx - r * 0.1, cy + r * 0.3, cx + r * 0.02, cy + r * 0.3)
+  ctx.lineWidth = 1.8
+  ctx.strokeStyle = outline
+  ctx.stroke()
+
+  // mouth
+  const my = cy + r * 0.55
+  ctx.lineWidth = 2
+  ctx.strokeStyle = outline
+  ctx.beginPath()
+  if (mood === 'shocked') {
+    ctx.ellipse(cx, my + r * 0.04, r * 0.11, r * 0.16, 0, 0, Math.PI * 2)
+    ctx.fillStyle = '#5a1f25'
+    ctx.fill()
+    ctx.stroke()
+  } else if (mood === 'nervous') {
+    ctx.moveTo(cx - r * 0.2, my + r * 0.04)
+    for (let i = 1; i <= 4; i++) ctx.lineTo(cx - r * 0.2 + (i * r * 0.1), my + (i % 2 ? -r * 0.04 : r * 0.05))
+    ctx.stroke()
+  } else if (mood === 'defeated') {
+    ctx.moveTo(cx - r * 0.2, my + r * 0.08)
+    ctx.quadraticCurveTo(cx, my - r * 0.08, cx + r * 0.2, my + r * 0.08)
+    ctx.stroke()
+  } else if (mood === 'determined') {
+    ctx.moveTo(cx - r * 0.2, my)
+    ctx.quadraticCurveTo(cx, my + r * 0.05, cx + r * 0.2, my - r * 0.03)
+    ctx.stroke()
+  } else {
+    ctx.moveTo(cx - r * 0.2, my)
+    ctx.lineTo(cx + r * 0.2, my)
+    ctx.stroke()
+  }
+
+  if (stubble) {
+    ctx.fillStyle = 'rgba(40,30,22,0.45)'
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI
+      ctx.fillRect(cx + Math.cos(a) * r * 0.6 - 0.5, cy + r * 0.62 + Math.sin(a) * r * 0.3 + (i % 3) * 2, 1.4, 1.4)
+    }
+  }
+}
+
+function drawWitness(cx, baseY, mood = 'nervous') {
+  const OUTLINE = '#241a14'
+  const shake = mood === 'nervous' ? Math.sin(performance.now() / 70) * 0.8 : 0
+  cx += shake
+
+  // jacket + shirt
   ctx.beginPath()
   ctx.moveTo(cx - 50, baseY + 20)
   ctx.lineTo(cx - 36, baseY - 70)
@@ -216,66 +368,104 @@ function drawWitness(cx, baseY) {
   ctx.lineWidth = 3
   ctx.strokeStyle = OUTLINE
   ctx.stroke()
-
+  // lapel shading + buttons
   ctx.beginPath()
-  ctx.moveTo(cx - 14, baseY - 66)
+  ctx.moveTo(cx - 24, baseY - 68)
+  ctx.lineTo(cx - 4, baseY - 30)
+  ctx.lineTo(cx - 8, baseY + 20)
+  ctx.moveTo(cx + 24, baseY - 68)
+  ctx.lineTo(cx + 4, baseY - 30)
+  ctx.lineTo(cx + 8, baseY + 20)
+  ctx.lineWidth = 2
+  ctx.strokeStyle = 'rgba(20,30,50,0.6)'
+  ctx.stroke()
+  ctx.fillStyle = '#e8e0d0'
+  for (const by of [-18, 0]) {
+    ctx.beginPath()
+    ctx.arc(cx, baseY + by, 2.4, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  // collar + tie
+  ctx.beginPath()
+  ctx.moveTo(cx - 16, baseY - 68)
   ctx.lineTo(cx, baseY - 46)
-  ctx.lineTo(cx + 14, baseY - 66)
-  ctx.strokeStyle = '#e8e0d0'
-  ctx.lineWidth = 3
+  ctx.lineTo(cx + 16, baseY - 68)
+  ctx.fillStyle = '#e8e0d0'
+  ctx.fill()
+  ctx.lineWidth = 2.4
+  ctx.strokeStyle = OUTLINE
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(cx - 3.5, baseY - 52)
+  ctx.lineTo(cx + 3.5, baseY - 52)
+  ctx.lineTo(cx + 5, baseY - 28)
+  ctx.lineTo(cx, baseY - 22)
+  ctx.lineTo(cx - 5, baseY - 28)
+  ctx.closePath()
+  ctx.fillStyle = '#b84a4a'
+  ctx.fill()
+  ctx.lineWidth = 1.5
   ctx.stroke()
 
+  // neck + head
+  ctx.fillStyle = '#d9a97c'
+  ctx.fillRect(cx - 8, baseY - 76, 16, 12)
+  const hy = baseY - 98
   ctx.beginPath()
-  ctx.arc(cx, baseY - 96, 26, 0, Math.PI * 2)
+  ctx.arc(cx, hy, 28, 0, Math.PI * 2)
   ctx.fillStyle = '#e8b98a'
   ctx.fill()
   ctx.lineWidth = 3
   ctx.strokeStyle = OUTLINE
   ctx.stroke()
 
-  ctx.beginPath()
-  ctx.arc(cx, baseY - 104, 26, Math.PI, Math.PI * 2)
+  // hair: side-parted fringe + side locks
   ctx.fillStyle = '#2b2118'
-  ctx.fill()
   ctx.beginPath()
-  ctx.moveTo(cx - 26, baseY - 104)
-  ctx.lineTo(cx - 30, baseY - 80)
-  ctx.lineTo(cx - 18, baseY - 92)
+  ctx.arc(cx, hy - 6, 29, Math.PI * 1.02, Math.PI * 1.98)
+  ctx.lineTo(cx + 24, hy - 12)
+  ctx.quadraticCurveTo(cx + 8, hy - 22, cx - 8, hy - 12)
+  ctx.quadraticCurveTo(cx - 20, hy - 6, cx - 28, hy - 2)
   ctx.closePath()
   ctx.fill()
-  ctx.beginPath()
-  ctx.moveTo(cx + 26, baseY - 104)
-  ctx.lineTo(cx + 30, baseY - 80)
-  ctx.lineTo(cx + 18, baseY - 92)
-  ctx.closePath()
-  ctx.fill()
-
-  ctx.fillStyle = OUTLINE
-  ctx.beginPath(); ctx.arc(cx - 9, baseY - 96, 2.4, 0, Math.PI * 2); ctx.fill()
-  ctx.beginPath(); ctx.arc(cx + 9, baseY - 96, 2.4, 0, Math.PI * 2); ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(cx - 8, baseY - 85)
-  ctx.quadraticCurveTo(cx, baseY - 80, cx + 8, baseY - 85)
-  ctx.strokeStyle = OUTLINE
   ctx.lineWidth = 2
-  ctx.stroke()
-
-  const sweatWobble = Math.sin(performance.now() / 180) * 1.5
-  ctx.beginPath()
-  ctx.moveTo(cx + 30, baseY - 118 + sweatWobble)
-  ctx.quadraticCurveTo(cx + 36, baseY - 108 + sweatWobble, cx + 30, baseY - 100 + sweatWobble)
-  ctx.quadraticCurveTo(cx + 24, baseY - 108 + sweatWobble, cx + 30, baseY - 118 + sweatWobble)
-  ctx.fillStyle = '#8fd0ff'
-  ctx.fill()
-  ctx.lineWidth = 1.5
   ctx.strokeStyle = OUTLINE
   ctx.stroke()
+  for (const s of [-1, 1]) {
+    ctx.beginPath()
+    ctx.moveTo(cx + s * 27, hy - 8)
+    ctx.lineTo(cx + s * 32, hy + 12)
+    ctx.lineTo(cx + s * 22, hy + 2)
+    ctx.closePath()
+    ctx.fill()
+  }
+  // hair shine
+  ctx.beginPath()
+  ctx.arc(cx - 4, hy - 8, 24, Math.PI * 1.15, Math.PI * 1.38)
+  ctx.lineWidth = 2
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)'
+  ctx.stroke()
+
+  drawFace(cx, hy + 3, 26, { mood, eye: '#4a3a2a', skin: '#e8b98a', outline: OUTLINE })
+
+  if (mood === 'nervous' || mood === 'shocked') {
+    const sweatWobble = Math.sin(performance.now() / 180) * 1.5
+    ctx.beginPath()
+    ctx.moveTo(cx + 34, baseY - 122 + sweatWobble)
+    ctx.quadraticCurveTo(cx + 41, baseY - 111 + sweatWobble, cx + 34, baseY - 103 + sweatWobble)
+    ctx.quadraticCurveTo(cx + 27, baseY - 111 + sweatWobble, cx + 34, baseY - 122 + sweatWobble)
+    ctx.fillStyle = '#8fd0ff'
+    ctx.fill()
+    ctx.lineWidth = 1.5
+    ctx.strokeStyle = OUTLINE
+    ctx.stroke()
+  }
 }
 
 function drawDetective(cx, baseY) {
   const OUTLINE = '#1c1710'
 
+  // trench coat
   ctx.beginPath()
   ctx.moveTo(cx - 44, baseY + 20)
   ctx.lineTo(cx - 32, baseY - 66)
@@ -287,49 +477,85 @@ function drawDetective(cx, baseY) {
   ctx.lineWidth = 3
   ctx.strokeStyle = OUTLINE
   ctx.stroke()
-
+  // belt + buttons
+  ctx.fillStyle = '#2e2a22'
+  ctx.fillRect(cx - 40, baseY - 8, 80, 8)
+  ctx.fillStyle = '#c9b46a'
+  ctx.fillRect(cx - 5, baseY - 9, 10, 10)
   ctx.beginPath()
-  ctx.moveTo(cx - 10, baseY - 62)
-  ctx.lineTo(cx, baseY - 44)
-  ctx.lineTo(cx + 10, baseY - 62)
-  ctx.strokeStyle = '#d8cfa8'
-  ctx.lineWidth = 3
+  ctx.moveTo(cx, baseY - 40)
+  ctx.lineTo(cx, baseY - 10)
+  ctx.lineWidth = 1.5
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)'
+  ctx.stroke()
+  // popped collar + tie
+  for (const s of [-1, 1]) {
+    ctx.beginPath()
+    ctx.moveTo(cx + s * 8, baseY - 64)
+    ctx.lineTo(cx + s * 24, baseY - 72)
+    ctx.lineTo(cx + s * 20, baseY - 44)
+    ctx.closePath()
+    ctx.fillStyle = '#5a5444'
+    ctx.fill()
+    ctx.lineWidth = 2.4
+    ctx.strokeStyle = OUTLINE
+    ctx.stroke()
+  }
+  ctx.beginPath()
+  ctx.moveTo(cx - 4, baseY - 62)
+  ctx.lineTo(cx + 4, baseY - 62)
+  ctx.lineTo(cx + 5, baseY - 38)
+  ctx.lineTo(cx, baseY - 32)
+  ctx.lineTo(cx - 5, baseY - 38)
+  ctx.closePath()
+  ctx.fillStyle = '#7a2a2a'
+  ctx.fill()
+  ctx.lineWidth = 1.5
+  ctx.strokeStyle = OUTLINE
   ctx.stroke()
 
+  // neck + head
+  ctx.fillStyle = '#c99a68'
+  ctx.fillRect(cx - 8, baseY - 72, 16, 10)
+  const hy = baseY - 90
   ctx.beginPath()
-  ctx.arc(cx, baseY - 90, 23, 0, Math.PI * 2)
+  ctx.arc(cx, hy, 25, 0, Math.PI * 2)
   ctx.fillStyle = '#d9a876'
   ctx.fill()
   ctx.lineWidth = 3
   ctx.strokeStyle = OUTLINE
   ctx.stroke()
+  // sideburns
+  ctx.fillStyle = '#2e2a22'
+  for (const s of [-1, 1]) ctx.fillRect(cx + s * 22 - 2, hy - 12, 4, 16)
 
-  ctx.fillStyle = OUTLINE
-  ctx.beginPath(); ctx.arc(cx - 8, baseY - 90, 2.2, 0, Math.PI * 2); ctx.fill()
-  ctx.beginPath(); ctx.arc(cx + 8, baseY - 90, 2.2, 0, Math.PI * 2); ctx.fill()
-  ctx.beginPath()
-  ctx.moveTo(cx - 7, baseY - 81)
-  ctx.lineTo(cx + 7, baseY - 81)
-  ctx.lineWidth = 2
-  ctx.stroke()
+  drawFace(cx, hy + 4, 23, { mood: 'determined', eye: '#3a4a52', skin: '#d9a876', outline: OUTLINE, halfLid: 0.28, stubble: true })
 
+  // fedora: brim, crown, band, pinch dent
   ctx.beginPath()
-  ctx.ellipse(cx, baseY - 108, 30, 9, 0, 0, Math.PI * 2)
+  ctx.ellipse(cx, hy - 20, 36, 10, 0, 0, Math.PI * 2)
   ctx.fillStyle = '#2e2a22'
   ctx.fill()
   ctx.lineWidth = 2.5
   ctx.strokeStyle = OUTLINE
   ctx.stroke()
   ctx.beginPath()
-  ctx.moveTo(cx - 16, baseY - 108)
-  ctx.lineTo(cx - 14, baseY - 128)
-  ctx.lineTo(cx + 14, baseY - 128)
-  ctx.lineTo(cx + 16, baseY - 108)
+  ctx.moveTo(cx - 19, hy - 20)
+  ctx.quadraticCurveTo(cx - 20, hy - 44, cx - 6, hy - 46)
+  ctx.quadraticCurveTo(cx, hy - 40, cx + 6, hy - 46)
+  ctx.quadraticCurveTo(cx + 20, hy - 44, cx + 19, hy - 20)
   ctx.closePath()
   ctx.fillStyle = '#3a3528'
   ctx.fill()
   ctx.lineWidth = 2.5
-  ctx.strokeStyle = OUTLINE
+  ctx.stroke()
+  ctx.fillStyle = '#7a2a2a'
+  ctx.fillRect(cx - 19, hy - 29, 38, 6)
+  ctx.beginPath()
+  ctx.moveTo(cx - 26, hy - 18)
+  ctx.quadraticCurveTo(cx, hy - 13, cx + 26, hy - 18)
+  ctx.lineWidth = 2
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)'
   ctx.stroke()
 }
 
@@ -539,7 +765,7 @@ function drawInvestigateScene() {
 
 function drawTestimonyScene() {
   drawCourtroomBackdrop()
-  drawWitness(CANVAS_W / 2, CANVAS_H - 200)
+  drawWitness(CANVAS_W / 2, CANVAS_H - 200, 'nervous')
 
   const revealed = TESTIMONY.slice(0, Math.floor(state.revealChars))
   drawDialogueBox(WITNESS_NAME, revealed)
@@ -560,7 +786,7 @@ function drawTestimonyScene() {
 
 function drawEvidencePickScene() {
   drawCourtroomBackdrop()
-  drawWitness(CANVAS_W / 2, CANVAS_H - 200)
+  drawWitness(CANVAS_W / 2, CANVAS_H - 200, 'nervous')
   ctx.fillStyle = 'rgba(10, 8, 6, 0.65)'
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
 
@@ -592,7 +818,7 @@ function drawEvidencePickScene() {
 
 function drawObjectionScene() {
   drawCourtroomBackdrop()
-  drawWitness(CANVAS_W / 2, CANVAS_H - 200)
+  drawWitness(CANVAS_W / 2, CANVAS_H - 200, 'shocked')
 
   const t = 1 - clamp(state.objectionTimer / 0.9, 0, 1)
   const scale = t < 0.3 ? 1.6 - t * 2 : 1
@@ -610,7 +836,7 @@ function drawObjectionScene() {
 
 function drawResultScene() {
   drawCourtroomBackdrop()
-  drawWitness(CANVAS_W / 2, CANVAS_H - 200)
+  drawWitness(CANVAS_W / 2, CANVAS_H - 200, 'defeated')
   drawDialogueBox('탐정', `${CONTRADICTION_TEXT}\n\n${REVEAL_TEXT}`, 190)
 
   ctx.textAlign = 'center'
