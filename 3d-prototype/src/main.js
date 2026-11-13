@@ -384,7 +384,175 @@ function makeLeg(group, color, radius, upperLen, lowerLen, jointX, jointY) {
   return { hip, knee }
 }
 
-function createCharacter(outfitColor) {
+// ---- Face detail --------------------------------------------------------
+// Faces are built from small flat-shaded shapes layered on the head (white
+// of the eye -> iris -> pupil -> highlight, lash line, brows, nose, mouth,
+// cheeks...) so they read as faces up close but still match the low-poly
+// look. Eyes live in their own groups so a periodic blink can squash them.
+const blinkers = []
+function shade(color, f) {
+  return new THREE.Color(color).multiplyScalar(f)
+}
+function flat(color, extra = {}) {
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.8, ...extra })
+}
+function faceBox(parent, w, h, d, color, x, y, z, rz = 0, extra) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), flat(color, extra))
+  m.position.set(x, y, z)
+  m.rotation.z = rz
+  parent.add(m)
+  return m
+}
+function faceBlob(parent, r, sx, sy, sz, color, x, y, z, extra) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), flat(color, extra))
+  m.scale.set(sx, sy, sz)
+  m.position.set(x, y, z)
+  parent.add(m)
+  return m
+}
+const LASH = 0x2a1d1a
+
+// Face for the imported (boxy) character model. Coordinates are in the
+// model's own space: the head's front surface is at z=0.35, eyes ~y 2.34.
+function addModelFace(model, variant = {}, look = {}) {
+  const F = 0.352
+  const skin = variant.skin || '#f5c5a6'
+  const hair = variant.hair || '#2b2320'
+  const eyeColor = look.eye || '#4a3a2a'
+  const browColor = shade(hair, 0.65)
+  for (const n of ['left_eye', 'right_eye', 'smile']) {
+    const o = model.getObjectByName(n)
+    if (o) o.visible = false
+  }
+  const eyes = []
+  for (const s of [-1, 1]) {
+    const eye = new THREE.Group()
+    eye.position.set(s * 0.15, 2.34, F)
+    faceBox(eye, 0.15, 0.17, 0.02, 0xffffff, 0, 0, 0.01)
+    faceBox(eye, 0.095, 0.145, 0.02, eyeColor, -s * 0.005, -0.005, 0.025)
+    faceBox(eye, 0.05, 0.09, 0.02, 0x14101a, -s * 0.005, -0.005, 0.04)
+    faceBox(eye, 0.03, 0.03, 0.02, 0xffffff, 0.02, 0.035, 0.055)
+    faceBox(eye, 0.18, 0.035, 0.03, LASH, 0, 0.095, 0.03)
+    faceBox(eye, 0.05, 0.03, 0.03, LASH, s * 0.095, 0.085, 0.03, s * -0.5)
+    model.add(eye)
+    eyes.push(eye)
+    const strong = look.brow === 'strong'
+    faceBox(model, strong ? 0.19 : 0.16, strong ? 0.055 : 0.038, 0.03, browColor, s * 0.15, strong ? 2.5 : 2.505, F + 0.02, s * (strong ? 0.14 : -0.1))
+  }
+  blinkers.push({ eyes, next: 1.5 + Math.random() * 3, until: 0 })
+
+  const nose = shade(skin, 0.92)
+  faceBox(model, 0.05, 0.1, 0.04, nose, 0, 2.25, F + 0.02)
+  faceBox(model, 0.085, 0.05, 0.05, shade(skin, 0.88), 0, 2.2, F + 0.03)
+  for (const s of [-1, 1]) faceBox(model, 0.02, 0.015, 0.02, shade(skin, 0.55), s * 0.025, 2.18, F + 0.058)
+
+  const lip = 0x9a3f45
+  const mouth = look.mouth || 'smile'
+  if (mouth === 'open') {
+    faceBox(model, 0.12, 0.075, 0.02, 0x5a1f25, 0, 2.115, F + 0.012)
+    faceBox(model, 0.1, 0.022, 0.02, 0xffffff, 0, 2.145, F + 0.022)
+    faceBox(model, 0.06, 0.025, 0.02, 0xe0707a, 0, 2.09, F + 0.022)
+  } else if (mouth === 'smirk') {
+    faceBox(model, 0.11, 0.028, 0.02, lip, -0.01, 2.125, F + 0.012, 0.08)
+    faceBox(model, 0.05, 0.026, 0.02, lip, 0.075, 2.145, F + 0.012, 0.6)
+  } else if (mouth === 'calm') {
+    faceBox(model, 0.1, 0.026, 0.02, lip, 0, 2.125, F + 0.012)
+    faceBox(model, 0.05, 0.02, 0.02, shade(lip, 1.15), 0, 2.098, F + 0.012)
+  } else {
+    faceBox(model, 0.1, 0.03, 0.02, lip, 0, 2.115, F + 0.012)
+    for (const s of [-1, 1]) faceBox(model, 0.05, 0.03, 0.02, lip, s * 0.07, 2.14, F + 0.012, s * 0.55)
+  }
+
+  for (const s of [-1, 1]) faceBox(model, 0.13, 0.07, 0.012, 0xff8c96, s * 0.24, 2.17, F + 0.004, 0, { transparent: true, opacity: 0.4 })
+
+  if (look.freckles) {
+    const fc = shade(skin, 0.7)
+    for (const s of [-1, 1]) {
+      for (const [dx, dy] of [[0.2, 2.215], [0.26, 2.235], [0.3, 2.205], [0.23, 2.19], [0.28, 2.18]]) faceBox(model, 0.02, 0.02, 0.012, fc, s * dx, dy, F + 0.01)
+    }
+  }
+  if (look.glasses) {
+    const fr = look.glasses
+    const z = F + 0.05
+    for (const s of [-1, 1]) {
+      const cx = s * 0.15
+      faceBox(model, 0.25, 0.018, 0.02, fr, cx, 2.44, z)
+      faceBox(model, 0.25, 0.018, 0.02, fr, cx, 2.24, z)
+      faceBox(model, 0.018, 0.21, 0.02, fr, cx - 0.116, 2.34, z)
+      faceBox(model, 0.018, 0.21, 0.02, fr, cx + 0.116, 2.34, z)
+      faceBox(model, 0.232, 0.2, 0.01, 0xbfe4ff, cx, 2.34, z - 0.005, 0, { transparent: true, opacity: 0.14 })
+      faceBox(model, 0.016, 0.016, 0.4, fr, s * 0.385, 2.38, z - 0.2)
+    }
+    faceBox(model, 0.06, 0.018, 0.02, fr, 0, 2.38, z)
+  }
+}
+
+// Face + hair for the primitive (sphere-head) characters: the player and
+// the NPCs' placeholder bodies. Head is a radius-0.3 sphere at y=1.55.
+function addPrimitiveFace(group, hairColor, look = {}) {
+  const HY = 1.55
+  const eyeColor = look.eye || '#5a3d2a'
+  const eyes = []
+  for (const s of [-1, 1]) {
+    const eye = new THREE.Group()
+    eye.position.set(s * 0.105, HY + 0.02, 0.268)
+    eye.rotation.y = s * 0.36
+    faceBlob(eye, 0.06, 1, 1.15, 0.3, 0xffffff, 0, 0, 0)
+    faceBlob(eye, 0.04, 1, 1.25, 0.3, eyeColor, 0, -0.004, 0.012)
+    faceBlob(eye, 0.022, 1, 1.25, 0.3, 0x14101a, 0, -0.004, 0.02)
+    faceBlob(eye, 0.012, 1, 1, 0.3, 0xffffff, 0.016, 0.02, 0.027)
+    faceBox(eye, 0.12, 0.014, 0.02, LASH, 0, 0.06, 0.012)
+    group.add(eye)
+    eyes.push(eye)
+    const brow = faceBox(group, 0.09, 0.02, 0.02, shade(hairColor, 0.85), s * 0.108, HY + 0.095, 0.262, s * -0.12)
+    brow.rotation.y = s * 0.36
+  }
+  blinkers.push({ eyes, next: 1.5 + Math.random() * 3, until: 0 })
+
+  faceBlob(group, 0.035, 1, 0.9, 1, shade(SKIN, 0.92), 0, HY - 0.03, 0.29)
+  const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.008, 6, 14, Math.PI), flat(0x9a3f45))
+  mouth.rotation.z = Math.PI
+  mouth.scale.y = 0.55
+  mouth.position.set(0, HY - 0.045, 0.288)
+  group.add(mouth)
+  for (const s of [-1, 1]) {
+    const blush = new THREE.Mesh(new THREE.CircleGeometry(0.04, 12), flat(0xff8c96, { transparent: true, opacity: 0.45 }))
+    blush.position.set(s * 0.17, HY - 0.045, 0.245)
+    blush.rotation.y = s * 0.6
+    group.add(blush)
+    faceBlob(group, 0.06, 0.5, 1, 0.8, SKIN, s * 0.295, HY - 0.01, 0)
+  }
+
+  const hairMat = flat(hairColor, { roughness: 0.6 })
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.318, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.5), hairMat)
+  cap.position.y = HY
+  cap.rotation.x = -0.3
+  group.add(cap)
+  const back = new THREE.Mesh(new THREE.SphereGeometry(0.3, 18, 12), hairMat)
+  back.scale.set(1.05, 1.0, 0.75)
+  back.position.set(0, HY - 0.05, -0.14)
+  group.add(back)
+  const fringe = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), hairMat)
+  fringe.scale.set(1.6, 0.42, 0.7)
+  fringe.position.set(0, HY + 0.13, 0.2)
+  fringe.rotation.x = 0.35
+  group.add(fringe)
+}
+
+function updateBlinks(now) {
+  for (const b of blinkers) {
+    if (now >= b.next && b.until === 0) {
+      b.until = now + 0.12
+      for (const e of b.eyes) e.scale.y = 0.08
+    } else if (b.until && now >= b.until) {
+      b.until = 0
+      b.next = now + 2 + Math.random() * 3.5
+      for (const e of b.eyes) e.scale.y = 1
+    }
+  }
+}
+
+function createCharacter(outfitColor, hairColor = 0x3a2a22) {
   const group = new THREE.Group()
 
   const torso = new THREE.Mesh(
@@ -394,17 +562,10 @@ function createCharacter(outfitColor) {
   torso.position.y = 1.05
   group.add(torso)
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), new THREE.MeshStandardMaterial({ color: SKIN }))
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 24, 18), new THREE.MeshStandardMaterial({ color: SKIN }))
   head.position.y = 1.55
   group.add(head)
-
-  const nose = new THREE.Mesh(
-    new THREE.ConeGeometry(0.08, 0.2, 8),
-    new THREE.MeshStandardMaterial({ color: 0xffe066 }),
-  )
-  nose.rotation.x = Math.PI / 2
-  nose.position.set(0, 1.55, 0.3)
-  group.add(nose)
+  addPrimitiveFace(group, hairColor)
 
   const armL = makeLimb(group, SKIN, 0.07, 0.5, -0.36, 1.3)
   const armR = makeLimb(group, SKIN, 0.07, 0.5, 0.36, 1.3)
@@ -485,6 +646,7 @@ function instantiateCharacterModel(sourceScene, variant = {}) {
   if (variant.shorts) recolorParts(model, SHORTS_PARTS, variant.shorts)
   if (variant.shoes) recolorParts(model, SHOE_PARTS, variant.shoes)
   if (variant.skin) recolorParts(model, SKIN_PARTS, variant.skin)
+  addModelFace(model, variant, variant.look)
   const box = new THREE.Box3().setFromObject(model)
   const height = box.max.y - box.min.y || 1
   model.scale.setScalar((variant.height || MODEL_TARGET_HEIGHT) / height)
@@ -522,11 +684,11 @@ function attachModelToNpc(npc, model) {
 // updateNpcGreetings - any of the others can be that quest's target).
 const NPC_WALK_SPEED = 1.6
 const NPC_DEFS = [
-  { id: 'arin', name: '아린', primitiveColor: 0xd1553f, pos: [4, -3], rotY: Math.PI * 0.6, variant: { hair: '#45324f', shirt: '#79b8da', shorts: '#314a79', shoes: '#202437', skin: '#f5c5a6', height: 1.85 }, patrol: { axis: 'z', half: 2.5 } },
-  { id: 'bomi', name: '보미', primitiveColor: 0x55b86a, pos: [-4, 9], rotY: -Math.PI * 0.3, variant: { hair: '#6b4226', shirt: '#55b86a', shorts: '#2f2f2f', shoes: '#3a2e20', skin: '#e8b48f', height: 1.78 } },
-  { id: 'chanho', name: '찬호', primitiveColor: 0x4477cc, pos: [10, 10], rotY: Math.PI * 0.9, variant: { hair: '#2b2320', shirt: '#4477cc', shorts: '#1f1f1f', shoes: '#c0392b', skin: '#f5c5a6', height: 1.93 } },
-  { id: 'dain', name: '다인', primitiveColor: 0xe0a93f, pos: [-6, -12], rotY: -Math.PI * 0.5, variant: { hair: '#9c3b2e', shirt: '#e0a93f', shorts: '#3a2e20', shoes: '#e8d9b5', skin: '#d99a76', height: 1.7 }, patrol: { axis: 'z', half: 2.5 } },
-  { id: 'eunho', name: '은호', primitiveColor: 0x9c6bd6, pos: [18, -2], rotY: Math.PI * 0.2, variant: { hair: '#1f3a52', shirt: '#9c6bd6', shorts: '#2f2f3a', shoes: '#4a7a4a', skin: '#c98a63', height: 1.88 } },
+  { id: 'arin', name: '아린', primitiveColor: 0xd1553f, pos: [4, -3], rotY: Math.PI * 0.6, variant: { hair: '#45324f', shirt: '#79b8da', shorts: '#314a79', shoes: '#202437', skin: '#f5c5a6', height: 1.85, look: { eye: '#7a5cc0', glasses: 0x2b2b3a } }, patrol: { axis: 'z', half: 2.5 } },
+  { id: 'bomi', name: '보미', primitiveColor: 0x55b86a, pos: [-4, 9], rotY: -Math.PI * 0.3, variant: { hair: '#6b4226', shirt: '#55b86a', shorts: '#2f2f2f', shoes: '#3a2e20', skin: '#e8b48f', height: 1.78, look: { eye: '#3f9a5a', mouth: 'open', freckles: true } } },
+  { id: 'chanho', name: '찬호', primitiveColor: 0x4477cc, pos: [10, 10], rotY: Math.PI * 0.9, variant: { hair: '#2b2320', shirt: '#4477cc', shorts: '#1f1f1f', shoes: '#c0392b', skin: '#f5c5a6', height: 1.93, look: { eye: '#4a3a2a', mouth: 'smirk', brow: 'strong' } } },
+  { id: 'dain', name: '다인', primitiveColor: 0xe0a93f, pos: [-6, -12], rotY: -Math.PI * 0.5, variant: { hair: '#9c3b2e', shirt: '#e0a93f', shorts: '#3a2e20', shoes: '#e8d9b5', skin: '#d99a76', height: 1.7, look: { eye: '#c07a2a', freckles: true } }, patrol: { axis: 'z', half: 2.5 } },
+  { id: 'eunho', name: '은호', primitiveColor: 0x9c6bd6, pos: [18, -2], rotY: Math.PI * 0.2, variant: { hair: '#1f3a52', shirt: '#9c6bd6', shorts: '#2f2f3a', shoes: '#4a7a4a', skin: '#c98a63', height: 1.88, look: { eye: '#2f6a9a', mouth: 'calm', glasses: 0xc0392b } } },
 ]
 
 // Text drawn to a canvas and shown as a camera-facing sprite. `worldHeight`
@@ -560,7 +722,7 @@ function makeTextSprite(text, { color = '#ffffff', background = 'rgba(15, 18, 26
 }
 
 const npcs = NPC_DEFS.map((def, i) => {
-  const npc = { ...createCharacter(def.primitiveColor), phase: i * 1.7, greeted: false, id: def.id, name: def.name }
+  const npc = { ...createCharacter(def.primitiveColor, def.variant.hair), phase: i * 1.7, greeted: false, id: def.id, name: def.name }
   npc.group.position.set(def.pos[0], 0, def.pos[1])
   npc.group.rotation.y = def.rotY
   // The delivery quest names its target, so every NPC wears their name.
@@ -1772,6 +1934,7 @@ function loop(time) {
   updateNpcHitAnimation(dt)
   updateNpcPatrol(dt)
   updateNpcs(dt)
+  updateBlinks(performance.now() / 1000)
   updateHint()
   updateCamera()
   updateSkyDecor(dt)
