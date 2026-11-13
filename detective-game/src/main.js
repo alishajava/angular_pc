@@ -669,18 +669,127 @@ function drawHotspots() {
 }
 
 function drawTitle() {
-  ctx.fillStyle = '#14181f'
-  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
+  const W = CANVAS_W
+  const H = CANVAS_H
+  const t = performance.now() / 1000
+
+  // night alley: sky, brick wall, wet pavement
+  ctx.fillStyle = '#0c1018'
+  ctx.fillRect(0, 0, W, H)
+  ctx.fillStyle = '#161c28'
+  ctx.fillRect(0, 150, W, 290)
+  ctx.strokeStyle = 'rgba(255,255,255,0.045)'
+  ctx.lineWidth = 1
+  for (let y = 150; y < 440; y += 22) {
+    ctx.beginPath()
+    ctx.moveTo(0, y)
+    ctx.lineTo(W, y)
+    ctx.stroke()
+    for (let x = (y / 22) % 2 ? 0 : 30; x < W; x += 60) {
+      ctx.beginPath()
+      ctx.moveTo(x, y)
+      ctx.lineTo(x, y + 22)
+      ctx.stroke()
+    }
+  }
+  // lit window with a silhouette
+  ctx.fillStyle = '#e8c86a'
+  ctx.fillRect(120, 210, 70, 90)
+  ctx.fillStyle = '#161c28'
+  ctx.fillRect(153, 210, 4, 90)
+  ctx.fillRect(120, 252, 70, 4)
+  ctx.fillStyle = 'rgba(20,20,30,0.85)'
+  ctx.beginPath()
+  ctx.arc(170, 262, 11, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillRect(158, 272, 24, 28)
+  ctx.fillStyle = '#10141c'
+  ctx.fillRect(0, 440, W, H - 440)
+
+  // street lamp + light cone
+  const lx = W - 250
+  ctx.strokeStyle = '#05070a'
+  ctx.lineWidth = 7
+  ctx.beginPath()
+  ctx.moveTo(lx, 470)
+  ctx.lineTo(lx, 190)
+  ctx.quadraticCurveTo(lx, 168, lx - 40, 168)
+  ctx.stroke()
+  const flick = 0.85 + Math.sin(t * 13) * 0.03 + (Math.sin(t * 2.3) > 0.97 ? -0.3 : 0)
+  const cone = ctx.createLinearGradient(0, 176, 0, 480)
+  cone.addColorStop(0, `rgba(255,220,140,${0.42 * flick})`)
+  cone.addColorStop(1, 'rgba(255,220,140,0)')
+  ctx.fillStyle = cone
+  ctx.beginPath()
+  ctx.moveTo(lx - 52, 176)
+  ctx.lineTo(lx - 28, 176)
+  ctx.lineTo(lx + 110, 480)
+  ctx.lineTo(lx - 190, 480)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = `rgba(255,236,170,${flick})`
+  ctx.beginPath()
+  ctx.ellipse(lx - 40, 174, 14, 6, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = `rgba(255,220,140,${0.16 * flick})`
+  ctx.beginPath()
+  ctx.ellipse(lx - 40, 470, 150, 16, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  // the detective under the lamp (in-game sprite, drawn larger) + shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'
+  ctx.beginPath()
+  ctx.ellipse(lx - 22, 474, 70, 9, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.save()
+  ctx.translate(lx - 50, 440)
+  ctx.scale(1.5, 1.5)
+  drawDetective(0, 0)
+  ctx.restore()
+
+  // rain
+  ctx.strokeStyle = 'rgba(170,200,255,0.3)'
+  ctx.lineWidth = 1.2
+  for (let i = 0; i < 90; i++) {
+    const rx = (i * 97.3 + t * 90) % (W + 60) - 30
+    const ry = (i * 53.7 + t * (520 + (i % 5) * 60)) % H
+    ctx.beginPath()
+    ctx.moveTo(rx, ry)
+    ctx.lineTo(rx - 5, ry + 16)
+    ctx.stroke()
+  }
+
+  // title with a magnifying glass
   ctx.textAlign = 'center'
+  ctx.lineJoin = 'round'
+  ctx.font = 'bold 64px serif'
+  ctx.strokeStyle = 'rgba(0,0,0,0.8)'
+  ctx.lineWidth = 9
+  ctx.strokeText('모순 탐정', W / 2 - 40, 110)
   ctx.fillStyle = '#ffd36b'
-  ctx.font = 'bold 42px sans-serif'
-  ctx.fillText('모순 탐정', CANVAS_W / 2, CANVAS_H / 2 - 30)
+  ctx.fillText('모순 탐정', W / 2 - 40, 110)
+  ctx.strokeStyle = '#ffd36b'
+  ctx.lineWidth = 6
+  ctx.beginPath()
+  ctx.arc(W / 2 + 150, 84, 24, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.fillStyle = 'rgba(159,200,255,0.22)'
+  ctx.fill()
+  ctx.lineWidth = 8
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  ctx.moveTo(W / 2 + 168, 102)
+  ctx.lineTo(W / 2 + 190, 126)
+  ctx.stroke()
+  ctx.lineCap = 'butt'
   ctx.fillStyle = '#9fb3d9'
-  ctx.font = '14px sans-serif'
-  ctx.fillText('현장을 조사하고, 증언 속 거짓을 찾아 범인을 밝혀내라', CANVAS_W / 2, CANVAS_H / 2 + 6)
-  ctx.fillStyle = '#fff'
   ctx.font = '15px sans-serif'
-  ctx.fillText('클릭하여 시작', CANVAS_W / 2, CANVAS_H / 2 + 50)
+  ctx.fillText('현장을 조사하고, 증언 속 거짓을 찾아 범인을 밝혀내라', W / 2 - 40, 144)
+  ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 16px sans-serif'
+  ctx.fillText('클릭하여 시작', W / 2 - 40, 560)
+  ctx.globalAlpha = 1
 }
 
 function drawIntroScene() {
