@@ -1638,7 +1638,9 @@ function drawEnding() {
 // ---------- Advisor scene (turn start) ----------
 function drawAdvisor(cx, baseY) {
   const OUTLINE = '#2a2017'
+  const t = performance.now() / 1000
 
+  // kimono body + layered collar
   ctx.beginPath()
   ctx.moveTo(cx - 34, baseY + 10)
   ctx.lineTo(cx - 20, baseY - 40)
@@ -1650,43 +1652,135 @@ function drawAdvisor(cx, baseY) {
   ctx.lineWidth = 2.5
   ctx.strokeStyle = OUTLINE
   ctx.stroke()
-
+  // winged shoulders (kataginu)
+  for (const s of [-1, 1]) {
+    ctx.beginPath()
+    ctx.moveTo(cx + s * 12, baseY - 40)
+    ctx.lineTo(cx + s * 40, baseY - 36)
+    ctx.lineTo(cx + s * 30, baseY - 14)
+    ctx.lineTo(cx + s * 16, baseY - 22)
+    ctx.closePath()
+    ctx.fillStyle = '#a63a3a'
+    ctx.fill()
+    ctx.lineWidth = 1.8
+    ctx.stroke()
+  }
+  // inner collar (white, then gold edge) forming a deep V
   ctx.beginPath()
-  ctx.moveTo(cx - 10, baseY - 38)
-  ctx.lineTo(cx, baseY - 24)
-  ctx.lineTo(cx + 10, baseY - 38)
-  ctx.strokeStyle = '#e8c87a'
-  ctx.lineWidth = 2
+  ctx.moveTo(cx - 12, baseY - 40)
+  ctx.lineTo(cx, baseY - 18)
+  ctx.lineTo(cx + 12, baseY - 40)
+  ctx.lineTo(cx + 7, baseY - 40)
+  ctx.lineTo(cx, baseY - 28)
+  ctx.lineTo(cx - 7, baseY - 40)
+  ctx.closePath()
+  ctx.fillStyle = '#f2ead8'
+  ctx.fill()
+  ctx.lineWidth = 1.6
+  ctx.strokeStyle = '#c9a85c'
   ctx.stroke()
-
+  // family crest
   ctx.beginPath()
-  ctx.arc(cx, baseY - 56, 16, 0, Math.PI * 2)
+  ctx.arc(cx, baseY - 4, 5, 0, Math.PI * 2)
+  ctx.fillStyle = '#f2ead8'
+  ctx.fill()
+  ctx.strokeStyle = '#7a2e2e'
+  ctx.lineWidth = 1.4
+  ctx.beginPath()
+  ctx.arc(cx, baseY - 4, 3, 0, Math.PI * 2)
+  ctx.stroke()
+  // sash
+  ctx.fillStyle = '#2a2a44'
+  ctx.fillRect(cx - 24, baseY - 14, 48, 6)
+
+  // neck + head
+  const hy = baseY - 56
+  ctx.fillStyle = '#d9a97c'
+  ctx.fillRect(cx - 5, baseY - 44, 10, 8)
+  for (const s of [-1, 1]) {
+    ctx.beginPath()
+    ctx.ellipse(cx + s * 15.5, hy + 1, 2.8, 4, 0, 0, Math.PI * 2)
+    ctx.fillStyle = '#e8b98a'
+    ctx.fill()
+    ctx.lineWidth = 1.6
+    ctx.strokeStyle = OUTLINE
+    ctx.stroke()
+  }
+  ctx.beginPath()
+  ctx.arc(cx, hy, 16, 0, Math.PI * 2)
   ctx.fillStyle = '#e8b98a'
   ctx.fill()
   ctx.lineWidth = 2.5
   ctx.strokeStyle = OUTLINE
   ctx.stroke()
 
-  ctx.beginPath()
-  ctx.arc(cx, baseY - 62, 16, Math.PI, Math.PI * 2)
+  // hair: shaved front with topknot (chonmage) and side locks
   ctx.fillStyle = '#1c1c1c'
-  ctx.fill()
-
   ctx.beginPath()
-  ctx.arc(cx, baseY - 74, 4, 0, Math.PI * 2)
+  ctx.arc(cx, hy - 3, 16, Math.PI * 1.05, Math.PI * 1.95)
+  ctx.lineTo(cx + 9, hy - 12)
+  ctx.quadraticCurveTo(cx, hy - 16, cx - 9, hy - 12)
+  ctx.closePath()
+  ctx.fill()
+  for (const s of [-1, 1]) ctx.fillRect(cx + s * 15 - 1.5, hy - 8, 3, 10)
+  ctx.beginPath()
+  ctx.ellipse(cx + 2, hy - 22, 6, 3.2, -0.25, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillRect(cx - 1, hy - 19, 4, 5)
+  ctx.fillStyle = '#c9a85c' // hair tie
+  ctx.fillRect(cx - 1.5, hy - 15.5, 5, 1.8)
+
+  // eyes
+  const blink = (t % 4.6) > 4.45
+  for (const s of [-1, 1]) {
+    const ex = cx + s * 6
+    if (blink) {
+      ctx.strokeStyle = OUTLINE
+      ctx.lineWidth = 1.6
+      ctx.beginPath(); ctx.moveTo(ex - 3.2, hy + 1); ctx.lineTo(ex + 3.2, hy + 1); ctx.stroke()
+      continue
+    }
+    ctx.fillStyle = '#fff'
+    ctx.beginPath(); ctx.ellipse(ex, hy + 1, 3.4, 2.6, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.lineWidth = 1
+    ctx.strokeStyle = OUTLINE
+    ctx.stroke()
+    ctx.fillStyle = '#3a2a1c'
+    ctx.beginPath(); ctx.arc(ex - s * 0.4, hy + 1, 1.9, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.beginPath(); ctx.arc(ex - s * 0.4 + 0.8, hy + 0.2, 0.6, 0, Math.PI * 2); ctx.fill()
+    ctx.strokeStyle = OUTLINE
+    ctx.lineWidth = 1.6
+    ctx.beginPath(); ctx.moveTo(ex - 3.6, hy - 1.4); ctx.lineTo(ex + 3.6, hy - 1.4 - s * -0.0); ctx.stroke()
+  }
+  // thin, composed brows (inner ends slightly lowered = stern)
+  ctx.strokeStyle = '#1c1c1c'
+  ctx.lineWidth = 2
+  ctx.lineCap = 'round'
+  for (const s of [-1, 1]) {
+    ctx.beginPath()
+    ctx.moveTo(cx + s * 2.5, hy - 5)
+    ctx.lineTo(cx + s * 9.5, hy - 6.8)
+    ctx.stroke()
+  }
+  ctx.lineCap = 'butt'
+  // nose, moustache, mouth, light beard
+  ctx.strokeStyle = 'rgba(120,70,50,0.8)'
+  ctx.lineWidth = 1.4
+  ctx.beginPath(); ctx.moveTo(cx - 1, hy + 3); ctx.quadraticCurveTo(cx - 3, hy + 8, cx + 1, hy + 8); ctx.stroke()
   ctx.fillStyle = '#1c1c1c'
-  ctx.fill()
-
-  ctx.fillStyle = OUTLINE
-  ctx.beginPath(); ctx.arc(cx - 5, baseY - 56, 1.6, 0, Math.PI * 2); ctx.fill()
-  ctx.beginPath(); ctx.arc(cx + 5, baseY - 56, 1.6, 0, Math.PI * 2); ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(cx - 5, baseY - 49)
-  ctx.lineTo(cx + 5, baseY - 49)
-  ctx.strokeStyle = OUTLINE
-  ctx.lineWidth = 1.5
-  ctx.stroke()
+  for (const s of [-1, 1]) {
+    ctx.beginPath()
+    ctx.moveTo(cx, hy + 9.5)
+    ctx.quadraticCurveTo(cx + s * 6, hy + 8, cx + s * 11, hy + 12)
+    ctx.quadraticCurveTo(cx + s * 6, hy + 11.5, cx, hy + 11)
+    ctx.fill()
+  }
+  ctx.strokeStyle = '#7a3a3a'
+  ctx.lineWidth = 1.4
+  ctx.beginPath(); ctx.moveTo(cx - 3.5, hy + 13); ctx.quadraticCurveTo(cx, hy + 14.5, cx + 3.5, hy + 13); ctx.stroke()
+  ctx.fillStyle = '#1c1c1c'
+  ctx.beginPath(); ctx.moveTo(cx - 3, hy + 15.2); ctx.lineTo(cx + 3, hy + 15.2); ctx.lineTo(cx, hy + 21); ctx.closePath(); ctx.fill()
 }
 
 function drawAdvisorScene() {
