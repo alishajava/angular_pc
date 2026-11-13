@@ -1,3 +1,5 @@
+import { sfx, unlockSfx, toggleMute } from './sfx.js'
+
 const app = document.getElementById('app')
 
 const TOTAL_TURNS = 32 // 8 years x 4 quarters
@@ -533,6 +535,7 @@ function resolveTurn(activity) {
   }
   if (state.stress >= 85) state.burnoutTurns += 1
   state.lastResult = lines.join(' ')
+  setTimeout(() => (state.sick ? sfx.bad() : sfx.pickup()), 90)
   state.turn += 1
   state.phase = 'result'
 }
@@ -541,6 +544,7 @@ function continueFromResult() {
   if (state.turn >= TOTAL_TURNS) {
     state.ending = computeEnding(state)
     state.phase = 'ending'
+    setTimeout(() => (state.ending.title.includes('번아웃') ? sfx.lose() : sfx.fanfare()), 120)
   } else {
     state.phase = 'choose'
   }
@@ -691,3 +695,15 @@ function renderEnding() {
 }
 
 render()
+
+// 버튼 클릭음 + 소리 켜기/끄기 버튼 (화면이 통째로 다시 그려지므로 문서 단위로 한 번만 등록)
+document.addEventListener('pointerdown', unlockSfx)
+document.addEventListener('keydown', unlockSfx)
+document.addEventListener('click', (e) => {
+  const muteBtn = e.target.closest('#mute-btn')
+  if (muteBtn) {
+    muteBtn.textContent = toggleMute() ? '소리 끔' : '소리 켬'
+    return
+  }
+  if (e.target.closest('button')) sfx.click()
+})

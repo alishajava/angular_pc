@@ -168,10 +168,24 @@
         .portrait-col { flex-direction: row; flex: 0 0 auto; border-right: none; border-bottom: 1px solid var(--soft); gap: 0.8rem; }
         .portrait-col canvas, .portrait-col img.portrait-img { width: 110px; height: 132px; }
       }
+
+      #mute-btn {
+        position: fixed;
+        top: 10px;
+        right: 12px;
+        background: rgba(0, 0, 0, 0.08);
+        color: inherit;
+        border: 1px solid rgba(0, 0, 0, 0.2);
+        border-radius: 999px;
+        padding: 0.3rem 0.7rem;
+        font-size: 0.8rem;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <button id="mute-btn" type="button">소리 켬</button>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
