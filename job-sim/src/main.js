@@ -367,17 +367,24 @@ function drawFaceDetail(ctx, cx, headY, headR, moodKey, { eyeHex = '#4a332b', la
   }
   ctx.lineCap = 'butt'
 
-  // age lines for senior ranks
+  // age lines for senior ranks: nasolabial folds, plus a forehead crease at the top rank
   if (lines) {
-    ctx.strokeStyle = 'rgba(120,80,60,0.4)'
-    ctx.lineWidth = Math.max(1, R * 0.03)
+    ctx.strokeStyle = 'rgba(150,95,70,0.45)'
+    ctx.lineWidth = Math.max(1.2, R * 0.035)
+    ctx.lineCap = 'round'
     for (const sx of [-1, 1]) {
-      for (let i = 0; i < lines; i++) {
-        ctx.beginPath()
-        ctx.arc(cx + sx * R * 0.33, headY + R * 0.4, R * (0.2 + i * 0.05), sx > 0 ? -0.5 : Math.PI - 1.4 + 0.9, sx > 0 ? 0.6 : Math.PI + 0.1)
-        ctx.stroke()
-      }
+      ctx.beginPath()
+      ctx.moveTo(cx + sx * R * 0.17, headY + R * 0.32)
+      ctx.quadraticCurveTo(cx + sx * R * 0.34, headY + R * 0.4, cx + sx * R * 0.33, headY + R * 0.6)
+      ctx.stroke()
     }
+    if (lines >= 2) {
+      ctx.beginPath()
+      ctx.moveTo(cx - R * 0.3, headY - R * 0.42)
+      ctx.quadraticCurveTo(cx, headY - R * 0.47, cx + R * 0.3, headY - R * 0.42)
+      ctx.stroke()
+    }
+    ctx.lineCap = 'butt'
   }
 }
 
@@ -388,102 +395,180 @@ function drawPortrait(canvas, { rankKey, moodKey, hairHex }) {
   ctx.clearRect(0, 0, W, H)
 
   const cx = W / 2
+  // Higher ranks get a slightly smaller head (more "grown-up" proportions)
+  // and broader shoulders.
   const proportions = {
-    junior: { headR: 0.3, headY: 0.32, bodyTop: 0.55, bodyW: 0.5, shoulderW: 0.64 },
-    staff: { headR: 0.28, headY: 0.31, bodyTop: 0.53, bodyW: 0.48, shoulderW: 0.62 },
-    manager: { headR: 0.27, headY: 0.3, bodyTop: 0.51, bodyW: 0.47, shoulderW: 0.62 },
-    director: { headR: 0.26, headY: 0.29, bodyTop: 0.49, bodyW: 0.46, shoulderW: 0.64 },
+    junior: { headR: 0.27, headY: 0.33, shoulderW: 0.74 },
+    staff: { headR: 0.26, headY: 0.32, shoulderW: 0.78 },
+    manager: { headR: 0.25, headY: 0.31, shoulderW: 0.82 },
+    director: { headR: 0.245, headY: 0.3, shoulderW: 0.86 },
   }
   const p = proportions[rankKey] || proportions.junior
-  const headR = H * p.headR
+  const R = H * p.headR
   const headY = H * p.headY
+  const SKIN = '#ffd9b8'
+  const SKIN_SHADE = '#f0c09c'
+  const chinY = headY + R
+  const shoulderY = chinY + R * 0.2
+  const SW = W * p.shoulderW
 
-  // Suit / shoulders - darker and sharper the higher the rank
+  // --- suit jacket with real shoulders ---
   const suitColors = { junior: '#8fa3c9', staff: '#5f7cb0', manager: '#3a4f7a', director: '#23314f' }
-  ctx.fillStyle = suitColors[rankKey] || suitColors.junior
+  const lapelColors = { junior: '#7b90ba', staff: '#4f6a9c', manager: '#2e4066', director: '#19243c' }
+  const suit = suitColors[rankKey] || suitColors.junior
+  ctx.fillStyle = suit
   ctx.beginPath()
-  ctx.moveTo(cx - W * p.shoulderW * 0.5, H)
-  ctx.quadraticCurveTo(cx - W * p.bodyW * 0.5, H * p.bodyTop, cx, H * (p.bodyTop - 0.02))
-  ctx.quadraticCurveTo(cx + W * p.bodyW * 0.5, H * p.bodyTop, cx + W * p.shoulderW * 0.5, H)
+  ctx.moveTo(cx - SW / 2, H)
+  ctx.lineTo(cx - SW / 2, shoulderY + R * 0.42)
+  ctx.quadraticCurveTo(cx - SW / 2, shoulderY + R * 0.06, cx - R * 0.42, shoulderY)
+  ctx.lineTo(cx + R * 0.42, shoulderY)
+  ctx.quadraticCurveTo(cx + SW / 2, shoulderY + R * 0.06, cx + SW / 2, shoulderY + R * 0.42)
+  ctx.lineTo(cx + SW / 2, H)
   ctx.closePath()
   ctx.fill()
 
-  // Shirt collar / tie
+  // shirt front
   ctx.fillStyle = '#ffffff'
   ctx.beginPath()
-  ctx.moveTo(cx - headR * 0.32, H * (p.bodyTop - 0.01))
-  ctx.lineTo(cx, H * p.bodyTop + headR * 0.3)
-  ctx.lineTo(cx + headR * 0.32, H * (p.bodyTop - 0.01))
+  ctx.moveTo(cx - R * 0.42, shoulderY)
+  ctx.lineTo(cx, shoulderY + R * 0.95)
+  ctx.lineTo(cx + R * 0.42, shoulderY)
   ctx.closePath()
   ctx.fill()
+
+  // tie: knot + blade
   ctx.fillStyle = rankKey === 'director' || rankKey === 'manager' ? '#c23b3b' : '#3f6fd1'
   ctx.beginPath()
-  ctx.moveTo(cx - headR * 0.09, H * p.bodyTop)
-  ctx.lineTo(cx + headR * 0.09, H * p.bodyTop)
-  ctx.lineTo(cx + headR * 0.06, H)
-  ctx.lineTo(cx - headR * 0.06, H)
+  ctx.moveTo(cx - R * 0.1, shoulderY + R * 0.08)
+  ctx.lineTo(cx + R * 0.1, shoulderY + R * 0.08)
+  ctx.lineTo(cx + R * 0.07, shoulderY + R * 0.24)
+  ctx.lineTo(cx - R * 0.07, shoulderY + R * 0.24)
+  ctx.closePath()
+  ctx.fill()
+  ctx.beginPath()
+  ctx.moveTo(cx - R * 0.07, shoulderY + R * 0.24)
+  ctx.lineTo(cx + R * 0.07, shoulderY + R * 0.24)
+  ctx.lineTo(cx + R * 0.13, shoulderY + R * 0.8)
+  ctx.lineTo(cx, shoulderY + R * 0.95)
+  ctx.lineTo(cx - R * 0.13, shoulderY + R * 0.8)
   ctx.closePath()
   ctx.fill()
 
-  // Neck
-  ctx.fillStyle = '#ffd9b8'
-  ctx.fillRect(cx - headR * 0.3, headY + headR * 0.75, headR * 0.6, headR * 0.5)
-
-  // Back hair
-  ctx.fillStyle = hairHex
-  ctx.beginPath()
-  ctx.ellipse(cx, headY + headR * 0.1, headR * 1.05, headR * 1.2, 0, 0, Math.PI * 2)
-  ctx.fill()
-
-  // Face
-  ctx.fillStyle = '#ffd9b8'
-  ctx.beginPath()
-  ctx.arc(cx, headY, headR, 0, Math.PI * 2)
-  ctx.fill()
-
-  // Front hair / neat office cut
-  ctx.fillStyle = hairHex
-  ctx.beginPath()
-  ctx.moveTo(cx - headR, headY - headR * 0.05)
-  ctx.quadraticCurveTo(cx - headR * 0.6, headY - headR * 1.2, cx, headY - headR * 1.08)
-  ctx.quadraticCurveTo(cx + headR * 0.6, headY - headR * 1.2, cx + headR, headY - headR * 0.05)
-  ctx.quadraticCurveTo(cx, headY - headR * 0.58, cx - headR, headY - headR * 0.05)
-  ctx.fill()
-
-  // Glasses for manager/director ranks (looks more senior)
-  if (rankKey === 'manager' || rankKey === 'director') {
-    ctx.strokeStyle = 'rgba(40,40,40,0.75)'
-    ctx.lineWidth = Math.max(1, headR * 0.035)
-    const eyeY = headY + headR * 0.08
-    const eyeDX = headR * 0.38
-    for (const sx of [-1, 1]) {
-      ctx.beginPath()
-      ctx.ellipse(cx + sx * eyeDX, eyeY, headR * 0.22, headR * 0.17, 0, 0, Math.PI * 2)
-      ctx.stroke()
-    }
+  // lapels over the shirt
+  ctx.fillStyle = lapelColors[rankKey] || lapelColors.junior
+  for (const sx of [-1, 1]) {
     ctx.beginPath()
-    ctx.moveTo(cx - headR * 0.16, eyeY)
-    ctx.lineTo(cx + headR * 0.16, eyeY)
-    ctx.stroke()
+    ctx.moveTo(cx + sx * R * 0.42, shoulderY)
+    ctx.lineTo(cx + sx * R * 0.78, shoulderY + R * 0.2)
+    ctx.lineTo(cx + sx * R * 0.5, shoulderY + R * 0.5)
+    ctx.lineTo(cx + sx * R * 0.6, shoulderY + R * 0.62)
+    ctx.lineTo(cx, shoulderY + R * 0.95)
+    ctx.closePath()
+    ctx.fill()
   }
-
-  // Director's pin accent
-  if (rankKey === 'director') {
-    ctx.fillStyle = '#d4af37'
+  // shirt collar points
+  ctx.fillStyle = '#f2f5fb'
+  for (const sx of [-1, 1]) {
     ctx.beginPath()
-    ctx.arc(cx - W * p.shoulderW * 0.22, H * p.bodyTop + headR * 0.5, headR * 0.1, 0, Math.PI * 2)
+    ctx.moveTo(cx + sx * R * 0.42, shoulderY - R * 0.02)
+    ctx.lineTo(cx + sx * R * 0.02, shoulderY + R * 0.1)
+    ctx.lineTo(cx + sx * R * 0.3, shoulderY + R * 0.34)
+    ctx.closePath()
     ctx.fill()
   }
 
-  drawFaceDetail(ctx, cx, headY, headR, moodKey, { eyeHex: '#3a2a22', browHex: hairHex, lines: rankKey === 'director' ? 2 : rankKey === 'manager' ? 1 : 0 })
+  // Director's lapel pin
+  if (rankKey === 'director') {
+    ctx.fillStyle = '#d4af37'
+    ctx.beginPath()
+    ctx.arc(cx - R * 0.62, shoulderY + R * 0.36, R * 0.07, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // --- neck (with a soft shadow under the chin) ---
+  ctx.fillStyle = SKIN
+  ctx.fillRect(cx - R * 0.27, chinY - R * 0.2, R * 0.54, R * 0.44)
+  ctx.fillStyle = SKIN_SHADE
+  ctx.beginPath()
+  ctx.ellipse(cx, chinY + R * 0.02, R * 0.27, R * 0.12, 0, 0, Math.PI)
+  ctx.fill()
+
+  // --- ears ---
+  for (const sx of [-1, 1]) {
+    ctx.fillStyle = SKIN
+    ctx.beginPath()
+    ctx.ellipse(cx + sx * R * 0.95, headY + R * 0.12, R * 0.13, R * 0.2, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = SKIN_SHADE
+    ctx.beginPath()
+    ctx.ellipse(cx + sx * R * 0.97, headY + R * 0.12, R * 0.06, R * 0.11, 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // --- face ---
+  ctx.fillStyle = SKIN
+  ctx.beginPath()
+  ctx.ellipse(cx, headY, R * 0.93, R, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  // --- short, side-parted office haircut: covers the top and temples only,
+  //     so the forehead, brows, ears and jaw all stay visible ---
+  ctx.fillStyle = hairHex
+  ctx.beginPath()
+  ctx.moveTo(cx - R * 0.98, headY + R * 0.02)
+  ctx.arc(cx, headY - R * 0.04, R * 1.03, Math.PI * 0.98, Math.PI * 2.02)
+  ctx.lineTo(cx + R * 0.84, headY + R * 0.04) // right sideburn
+  ctx.lineTo(cx + R * 0.8, headY - R * 0.36)
+  ctx.quadraticCurveTo(cx + R * 0.35, headY - R * 0.5, cx - R * 0.3, headY - R * 0.7) // sweep to the part
+  ctx.quadraticCurveTo(cx - R * 0.62, headY - R * 0.62, cx - R * 0.8, headY - R * 0.36)
+  ctx.lineTo(cx - R * 0.84, headY + R * 0.04) // left sideburn
+  ctx.closePath()
+  ctx.fill()
+  // parting line + shine
+  ctx.strokeStyle = 'rgba(0,0,0,0.18)'
+  ctx.lineWidth = Math.max(1, R * 0.03)
+  ctx.beginPath()
+  ctx.moveTo(cx - R * 0.3, headY - R * 0.7)
+  ctx.quadraticCurveTo(cx - R * 0.36, headY - R * 0.9, cx - R * 0.26, headY - R * 1.05)
+  ctx.stroke()
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)'
+  ctx.lineWidth = Math.max(1.5, R * 0.05)
+  ctx.beginPath()
+  ctx.arc(cx, headY - R * 0.04, R * 0.82, Math.PI * 1.55, Math.PI * 1.8)
+  ctx.stroke()
+
+  drawFaceDetail(ctx, cx, headY, R, moodKey, { eyeHex: '#3a2a22', browHex: hairHex, lines: rankKey === 'director' ? 2 : rankKey === 'manager' ? 1 : 0 })
+
+  // Glasses for manager/director ranks, drawn over the eyes
+  if (rankKey === 'manager' || rankKey === 'director') {
+    const eyeY = headY + R * 0.08
+    const eyeDX = R * 0.38
+    ctx.strokeStyle = '#2c2c34'
+    ctx.lineWidth = Math.max(1.6, R * 0.045)
+    for (const sx of [-1, 1]) {
+      ctx.beginPath()
+      ctx.roundRect(cx + sx * eyeDX - R * 0.26, eyeY - R * 0.2, R * 0.52, R * 0.4, R * 0.1)
+      ctx.fillStyle = 'rgba(200,225,255,0.14)'
+      ctx.fill()
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(cx + sx * (eyeDX + R * 0.26), eyeY - R * 0.06)
+      ctx.lineTo(cx + sx * R * 0.93, eyeY - R * 0.02)
+      ctx.stroke()
+    }
+    ctx.beginPath()
+    ctx.moveTo(cx - eyeDX + R * 0.26, eyeY - R * 0.04)
+    ctx.quadraticCurveTo(cx, eyeY - R * 0.1, cx + eyeDX - R * 0.26, eyeY - R * 0.04)
+    ctx.stroke()
+  }
 
   // Sweat drop if sick
   if (moodKey === 'sick') {
     ctx.fillStyle = '#7fc4e8'
     ctx.beginPath()
-    ctx.moveTo(cx + headR * 0.85, headY - headR * 0.3)
-    ctx.quadraticCurveTo(cx + headR * 0.95, headY - headR * 0.05, cx + headR * 0.85, headY + headR * 0.05)
-    ctx.quadraticCurveTo(cx + headR * 0.75, headY - headR * 0.05, cx + headR * 0.85, headY - headR * 0.3)
+    ctx.moveTo(cx + R * 0.78, headY - R * 0.38)
+    ctx.quadraticCurveTo(cx + R * 0.9, headY - R * 0.12, cx + R * 0.78, headY - R * 0.02)
+    ctx.quadraticCurveTo(cx + R * 0.66, headY - R * 0.12, cx + R * 0.78, headY - R * 0.38)
     ctx.fill()
   }
 }
