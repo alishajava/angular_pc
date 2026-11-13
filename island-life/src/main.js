@@ -518,25 +518,170 @@ function drawShell(s) {
   ctx.restore()
 }
 
-function drawPerson(x, y, shirt, hair) {
+// One shared character painter for the player and every villager, so they
+// all get the same face detail: eyes with highlights, brows, nose, mouth,
+// cheeks, ears, a fringe, shading and a soft ground shadow. `facing` turns
+// the head (front / back-of-head / side profile).
+function drawCharacter(x, y, { shirt, hair, skin = '#f2c79b', eye = '#2b2430', facing = 'down', foot = 0, extra } = {}) {
   ctx.save()
   ctx.translate(x, y)
+
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'
+  ctx.beginPath()
+  ctx.ellipse(0, 12, 10, 3.2, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  // legs + shoes
+  ctx.fillStyle = '#3a4560'
+  ctx.fillRect(-6, 4 + foot * 0.5, 4, 5)
+  ctx.fillRect(2, 4 - foot * 0.5, 4, 5)
   ctx.fillStyle = '#2b2440'
-  ctx.fillRect(-7, 6, 4, 6)
-  ctx.fillRect(3, 6, 4, 6)
+  ctx.beginPath()
+  ctx.roundRect(-7, 8 + foot, 5, 4, 1.5)
+  ctx.roundRect(2, 8 - foot, 5, 4, 1.5)
+  ctx.fill()
+
+  // arms + hands
   ctx.fillStyle = shirt
   ctx.beginPath()
-  ctx.roundRect(-9, -9, 18, 18, 4)
+  ctx.roundRect(-12, -6 - foot * 0.4, 4, 9, 2)
+  ctx.roundRect(8, -6 + foot * 0.4, 4, 9, 2)
   ctx.fill()
-  ctx.fillStyle = '#f2c79b'
+  ctx.fillStyle = skin
   ctx.beginPath()
-  ctx.arc(0, 0, 6, 0, Math.PI * 2)
+  ctx.arc(-10, 4 - foot * 0.4, 2, 0, Math.PI * 2)
+  ctx.arc(10, 4 + foot * 0.4, 2, 0, Math.PI * 2)
   ctx.fill()
+
+  // torso with shading + collar
+  ctx.fillStyle = shirt
+  ctx.beginPath()
+  ctx.roundRect(-9, -8, 18, 16, 4)
+  ctx.fill()
+  ctx.fillStyle = 'rgba(0,0,0,0.16)'
+  ctx.beginPath()
+  ctx.roundRect(-9, 3, 18, 5, 3)
+  ctx.fill()
+  ctx.fillStyle = 'rgba(255,255,255,0.16)'
+  ctx.beginPath()
+  ctx.roundRect(-7, -7, 7, 4, 2)
+  ctx.fill()
+  if (facing !== 'up') {
+    ctx.fillStyle = skin
+    ctx.beginPath()
+    ctx.moveTo(-3, -8)
+    ctx.lineTo(0, -4)
+    ctx.lineTo(3, -8)
+    ctx.closePath()
+    ctx.fill()
+  }
+  if (extra === 'apron') {
+    ctx.fillStyle = 'rgba(255,255,255,0.8)'
+    ctx.beginPath()
+    ctx.roundRect(-6, -2, 12, 10, 2)
+    ctx.fill()
+  }
+
+  const side = facing === 'left' ? -1 : facing === 'right' ? 1 : 0
+  // ears
+  ctx.fillStyle = skin
+  if (!side) {
+    ctx.beginPath()
+    ctx.arc(-6.2, -1, 1.7, 0, Math.PI * 2)
+    ctx.arc(6.2, -1, 1.7, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // head
+  ctx.fillStyle = skin
+  ctx.beginPath()
+  ctx.arc(0, -2, 6.3, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(60,30,20,0.3)'
+  ctx.lineWidth = 0.7
+  ctx.stroke()
+
+  // hair
   ctx.fillStyle = hair
+  if (facing === 'up') {
+    ctx.beginPath()
+    ctx.arc(0, -2, 6.8, 0, Math.PI * 2)
+    ctx.fill()
+  } else {
+    ctx.beginPath()
+    ctx.arc(0, -4.2, 6.7, Math.PI, 0)
+    ctx.lineTo(6.2, -1.5)
+    ctx.lineTo(4, -3.6)
+    ctx.lineTo(1.8, -1.8)
+    ctx.lineTo(0, -3.8)
+    ctx.lineTo(-1.8, -1.8)
+    ctx.lineTo(-4, -3.6)
+    ctx.lineTo(-6.2, -1.5)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillRect(-6.8, -4.5, 1.6, 5)
+    ctx.fillRect(5.2, -4.5, 1.6, 5)
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.28)'
+  ctx.lineWidth = 0.9
   ctx.beginPath()
-  ctx.arc(0, -3, 6.5, Math.PI, 0)
-  ctx.fill()
+  ctx.arc(0, -4.2, 5, Math.PI * 1.15, Math.PI * 1.45)
+  ctx.stroke()
+
+  if (facing !== 'up') {
+    // eyes: white, iris, highlight, lid line (shifted toward the facing side)
+    const eyes = side ? [side * 1.2, side * 4.2] : [-2.6, 2.6]
+    for (const ex of eyes) {
+      ctx.fillStyle = '#ffffff'
+      ctx.beginPath()
+      ctx.ellipse(ex, -1.4, 1.7, 2, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = eye
+      ctx.beginPath()
+      ctx.ellipse(ex + side * 0.4, -1.3, 1.05, 1.5, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(ex + side * 0.4 + 0.1, -2.3, 0.8, 0.8)
+      ctx.strokeStyle = 'rgba(30,20,20,0.75)'
+      ctx.lineWidth = 0.6
+      ctx.beginPath()
+      ctx.moveTo(ex - 1.8, -3.5)
+      ctx.lineTo(ex + 1.8, -3.5)
+      ctx.stroke()
+    }
+    // cheeks, nose, mouth
+    ctx.fillStyle = 'rgba(255,120,120,0.3)'
+    ctx.beginPath()
+    if (side) ctx.ellipse(side * 3, 1.6, 1.5, 1, 0, 0, Math.PI * 2)
+    else {
+      ctx.ellipse(-4.2, 1.4, 1.5, 1, 0, 0, Math.PI * 2)
+      ctx.ellipse(4.2, 1.4, 1.5, 1, 0, 0, Math.PI * 2)
+    }
+    ctx.fill()
+    ctx.fillStyle = 'rgba(150,80,60,0.55)'
+    ctx.fillRect(side * 5.2 - 0.4, 0, 0.9, 1.2)
+    ctx.strokeStyle = '#8a3b3b'
+    ctx.lineWidth = 0.7
+    ctx.beginPath()
+    ctx.arc(side * 2.2, 1.2, 1.7, 0.2 * Math.PI, 0.8 * Math.PI)
+    ctx.stroke()
+  }
+
+  if (extra === 'hat') {
+    ctx.fillStyle = '#c9a86a'
+    ctx.beginPath()
+    ctx.ellipse(0, -7.2, 9, 2.2, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#b5742e'
+    ctx.beginPath()
+    ctx.roundRect(-5, -12, 10, 6, 2)
+    ctx.fill()
+  }
   ctx.restore()
+}
+
+function drawPerson(x, y, shirt, hair, opts = {}) {
+  drawCharacter(x, y, { shirt, hair, ...opts })
 }
 
 function drawBoard(x, y) {
@@ -571,7 +716,7 @@ function drawShop(x, y) {
   ctx.fillStyle = '#e3c88a'
   ctx.fillRect(-14, -6, 28, 14)
   ctx.restore()
-  drawPerson(x, y + 6, '#d1795a', '#4a3524')
+  drawPerson(x, y + 6, '#d1795a', '#4a3524', { eye: '#7a4a2a', extra: 'apron' })
 }
 
 function drawDoor(x, y) {
@@ -590,30 +735,8 @@ function drawDoor(x, y) {
 
 function drawPlayer() {
   const bob = player.walking ? Math.sin(player.walkPhase) * 1.5 : 0
-  ctx.save()
-  ctx.translate(player.x, player.y + bob)
   const footOffset = player.walking ? Math.sin(player.walkPhase) * 3 : 0
-  ctx.fillStyle = '#2b2440'
-  ctx.fillRect(-7, 6 + footOffset, 4, 5)
-  ctx.fillRect(3, 6 - footOffset, 4, 5)
-  ctx.fillStyle = '#3f9fd1'
-  ctx.beginPath()
-  ctx.roundRect(-9, -9, 18, 18, 4)
-  ctx.fill()
-  ctx.fillStyle = '#f2c79b'
-  ctx.beginPath()
-  ctx.arc(0, 0, 6, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = '#5c3a1e'
-  ctx.beginPath()
-  ctx.arc(0, -3, 6.5, Math.PI, 0)
-  ctx.fill()
-  const [fx, fy] = DIR_VEC[player.facing]
-  ctx.fillStyle = '#222'
-  ctx.beginPath()
-  ctx.arc(fx * 4, fy * 4, 1.6, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.restore()
+  drawCharacter(player.x, player.y + bob, { shirt: '#3f9fd1', hair: '#5c3a1e', eye: '#2f5fa0', facing: player.facing, foot: footOffset })
 }
 
 function drawHouse() {
@@ -814,8 +937,8 @@ function render() {
     for (const s of shells) drawShell(s)
     drawBoard(boardPos.x, boardPos.y)
     drawShop(shopPos.x, shopPos.y)
-    drawPerson(toriPos.x, toriPos.y, '#8c9bab', '#2b2440')
-    drawPerson(meiPos.x, meiPos.y, '#7fb06a', '#5c3a1e')
+    drawPerson(toriPos.x, toriPos.y, '#8c9bab', '#2b2440', { eye: '#4a6a8a' })
+    drawPerson(meiPos.x, meiPos.y, '#7fb06a', '#5c3a1e', { eye: '#3f8f5a', extra: 'hat' })
     drawDoor(tileCenter(3, 3).x, tileCenter(3, 3).y)
   } else {
     drawHouse()
