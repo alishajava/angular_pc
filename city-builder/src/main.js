@@ -1,3 +1,5 @@
+import { sfx, unlockSfx, toggleMute } from './sfx.js'
+
 // Small SimCity-style city builder: zone residential/commercial/industrial
 // blocks, connect them with roads, keep them powered and watered, and
 // balance the tax rate against upkeep. Zoned tiles grow into buildings on
@@ -86,6 +88,14 @@ state.camY = clamp(state.camY, 0, WORLD_H - VIEW_H)
 let toastText = ''
 let toastTimer = 0
 const TOAST_DURATION = 2.8
+let lastBadSfx = 0
+function sfxBad() {
+  const now = performance.now()
+  if (now - lastBadSfx < 700) return
+  lastBadSfx = now
+  sfx.bad()
+}
+
 function say(text) {
   toastText = text
   toastTimer = TOAST_DURATION
@@ -187,6 +197,7 @@ function tick() {
   for (const m of [50, 100, 250, 500, 1000]) {
     if (state.population >= m && !state.milestonesHit.has(m)) {
       state.milestonesHit.add(m)
+      sfx.fanfare()
       say(`인구 ${m}명을 달성했습니다!`)
     }
   }
@@ -205,10 +216,12 @@ function place(row, col, toolId) {
     if (t.type === 'empty') return
     if (state.treasury < BULLDOZE_COST) {
       say('자금이 부족해요.')
+      sfxBad()
       return
     }
     state.treasury -= BULLDOZE_COST
     tiles[row][col] = makeTile()
+    sfx.whoosh()
     return
   }
 
@@ -216,9 +229,11 @@ function place(row, col, toolId) {
   const tool = TOOLS.find((x) => x.id === toolId)
   if (state.treasury < tool.cost) {
     say('자금이 부족해요.')
+    sfxBad()
     return
   }
   state.treasury -= tool.cost
+  sfx.build()
   if (toolId === 'road') tiles[row][col] = { type: 'road', level: 0 }
   else if (toolId === 'res') tiles[row][col] = { type: 'res', level: 0 }
   else if (toolId === 'com') tiles[row][col] = { type: 'com', level: 0 }
@@ -242,25 +257,39 @@ function held(names) {
 window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase()
   heldKeys.add(key)
+  unlockSfx()
 
   if (state.phase === 'title') {
-    if (key === ' ' || key === 'enter') state.phase = 'intro'
+    if (key === ' ' || key === 'enter') {
+      state.phase = 'intro'
+      sfx.click()
+    }
     return
   }
   if (state.phase === 'intro') {
-    if (key === ' ' || key === 'enter') state.phase = 'play'
+    if (key === ' ' || key === 'enter') {
+      state.phase = 'play'
+      sfx.start()
+    }
     return
   }
 
   const toolByKey = TOOLS.find((t) => t.key === key)
-  if (toolByKey) state.tool = toolByKey.id
-  else if (key === ' ') {
+  if (toolByKey) {
+    state.tool = toolByKey.id
+    sfx.click()
+  } else if (key === ' ') {
     state.paused = !state.paused
     say(state.paused ? '일시정지' : '재개')
+    sfx.click()
   } else if (key === '-' || key === '_') {
     state.taxRate = clamp(state.taxRate - 1, 0, 20)
+    sfx.click()
   } else if (key === '=' || key === '+') {
     state.taxRate = clamp(state.taxRate + 1, 0, 20)
+    sfx.click()
+  } else if (key === 'm') {
+    say(toggleMute() ? '소리 끔 (M으로 다시 켜기)' : '소리 켬')
   }
 })
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
@@ -292,17 +321,23 @@ function toolbarIndexAt(x) {
 
 function handlePointerDown(e) {
   const { x, y } = eventPos(e)
+  unlockSfx()
   if (state.phase === 'title') {
     state.phase = 'intro'
+    sfx.click()
     return
   }
   if (state.phase === 'intro') {
     state.phase = 'play'
+    sfx.start()
     return
   }
   if (y >= VIEW_H) {
     const idx = toolbarIndexAt(x)
-    if (idx >= 0) state.tool = TOOLS[idx].id
+    if (idx >= 0) {
+      state.tool = TOOLS[idx].id
+      sfx.click()
+    }
     return
   }
   state.painting = true
@@ -509,16 +544,96 @@ function drawToolbar() {
   })
 }
 
+// Stable pseudo-random so the skyline and its lit windows don't reshuffle
+// every frame.
+function titleRand(n) {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453
+  return x - Math.floor(x)
+}
+
 function drawTitle() {
-  ctx.fillStyle = '#1b2420'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  const W = canvas.width
+  const H = canvas.height
+  const t = performance.now() / 1000
+
+  const sky = ctx.createLinearGradient(0, 0, 0, H)
+  sky.addColorStop(0, '#0d1230')
+  sky.addColorStop(0.6, '#2a2a5a')
+  sky.addColorStop(1, '#6a4a6a')
+  ctx.fillStyle = sky
+  ctx.fillRect(0, 0, W, H)
+
+  // stars + moon
+  for (let i = 0; i < 70; i++) {
+    const tw = 0.4 + 0.6 * Math.abs(Math.sin(t * (0.6 + titleRand(i) * 1.6) + i))
+    ctx.fillStyle = `rgba(255,255,255,${tw * 0.8})`
+    ctx.fillRect(titleRand(i + 1) * W, titleRand(i + 50) * H * 0.55, 1.6, 1.6)
+  }
+  ctx.fillStyle = 'rgba(255,246,200,0.18)'
+  ctx.beginPath()
+  ctx.arc(W - 120, 90, 54, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = '#fff6c8'
+  ctx.beginPath()
+  ctx.arc(W - 120, 90, 34, 0, Math.PI * 2)
+  ctx.fill()
+
+  // two skyline layers; the near one has twinkling windows
+  const ground = H - 70
+  for (const layer of [0, 1]) {
+    let x = -10
+    let i = layer * 100
+    while (x < W) {
+      const bw = 34 + titleRand(i) * 46
+      const bh = (layer ? 90 : 150) + titleRand(i + 7) * (layer ? 170 : 150)
+      ctx.fillStyle = layer ? '#141a33' : '#232a55'
+      ctx.fillRect(x, ground - bh, bw, bh)
+      if (titleRand(i + 3) > 0.6) ctx.fillRect(x + bw / 2 - 2, ground - bh - 16, 4, 16) // antenna
+      if (layer) {
+        for (let wy = ground - bh + 10; wy < ground - 10; wy += 14) {
+          for (let wx = x + 6; wx < x + bw - 8; wx += 11) {
+            const seed = titleRand(wx * 0.37 + wy * 1.91)
+            if (seed < 0.45) continue
+            const flick = Math.sin(t * (0.3 + seed) + seed * 40) > -0.92
+            ctx.fillStyle = flick ? (seed > 0.8 ? '#9fe8ff' : '#ffd97a') : '#2a3055'
+            ctx.fillRect(wx, wy, 6, 8)
+          }
+        }
+      }
+      x += bw + 3
+      i++
+    }
+  }
+
+  // road with moving headlights
+  ctx.fillStyle = '#0c0f1c'
+  ctx.fillRect(0, ground, W, H - ground)
+  ctx.fillStyle = 'rgba(255,255,255,0.25)'
+  for (let x = (t * 30) % 60 - 60; x < W; x += 60) ctx.fillRect(x, ground + 32, 28, 3)
+  for (const [sp, y, col] of [[120, 18, '#fff3b0'], [-90, 46, '#ff6b6b'], [70, 18, '#fff3b0']]) {
+    const cx = (((t * sp + y * 31) % (W + 120)) + (W + 120)) % (W + 120) - 60
+    ctx.fillStyle = col
+    ctx.fillRect(cx, ground + y, 16, 5)
+    ctx.fillStyle = 'rgba(255,255,255,0.08)'
+    ctx.fillRect(cx + (sp > 0 ? 16 : -40), ground + y - 3, 40, 11)
+  }
+
   ctx.textAlign = 'center'
+  ctx.font = 'bold 44px sans-serif'
+  ctx.lineJoin = 'round'
+  ctx.strokeStyle = 'rgba(8,10,30,0.85)'
+  ctx.lineWidth = 8
+  ctx.strokeText('미니시티 빌더', W / 2, 150)
   ctx.fillStyle = '#ffe066'
-  ctx.font = 'bold 32px sans-serif'
-  ctx.fillText('미니시티 빌더', canvas.width / 2, canvas.height / 2 - 20)
-  ctx.fillStyle = '#fff'
+  ctx.fillText('미니시티 빌더', W / 2, 150)
   ctx.font = '15px sans-serif'
-  ctx.fillText('클릭 또는 스페이스를 눌러 시작', canvas.width / 2, canvas.height / 2 + 24)
+  ctx.fillStyle = '#cfd8ff'
+  ctx.fillText('도로를 깔고 구역을 지정해 나만의 도시를 키워보세요', W / 2, 182)
+  ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
+  ctx.font = 'bold 16px sans-serif'
+  ctx.fillStyle = '#fff'
+  ctx.fillText('클릭 또는 스페이스를 눌러 시작', W / 2, 228)
+  ctx.globalAlpha = 1
 }
 
 function drawIntro() {
