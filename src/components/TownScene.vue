@@ -4,7 +4,7 @@ import { useTownStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT } from '../st
 import { useFlowStore } from '../stores/flow'
 import { PLAYER_MAX_HP, PLAYER_BASE_ATTACK } from '../stores/rpg'
 import { unlockAudio, playPickup, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
-import { drawHero, drawHeroine, drawVillager, drawElder, drawGate } from '../sprites'
+import { drawHero, drawHeroine, drawVillager, drawElder, drawGate, drawMonster, drawBoss } from '../sprites'
 import { wrapText } from '../canvasText'
 import { hasSave } from '../save'
 
@@ -161,28 +161,130 @@ const STORY_LINES = [
 ]
 
 function drawIntro(ctx) {
-  ctx.fillStyle = '#0d0a1a'
-  ctx.fillRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT)
+  const W = STAGE_WIDTH
+  const H = STAGE_HEIGHT
+  const t = performance.now() / 1000
 
+  // night sky fading into the ground
+  const sky = ctx.createLinearGradient(0, 0, 0, H)
+  sky.addColorStop(0, '#0b0818')
+  sky.addColorStop(0.6, '#1a1230')
+  sky.addColorStop(1, '#241a2e')
+  ctx.fillStyle = sky
+  ctx.fillRect(0, 0, W, H)
+  for (let i = 0; i < 60; i++) {
+    const sx = (Math.sin(i * 91.7) * 0.5 + 0.5) * W
+    const sy = (Math.sin(i * 47.3) * 0.5 + 0.5) * H * 0.5
+    ctx.fillStyle = `rgba(255,255,255,${0.3 + 0.5 * Math.abs(Math.sin(t * (0.5 + (i % 5) * 0.3) + i))})`
+    ctx.fillRect(sx, sy, 1.6, 1.6)
+  }
+
+  // mountain with the dungeon mouth
+  const gx = W / 2
+  const gy = H - 150
+  ctx.fillStyle = '#15101f'
+  ctx.beginPath()
+  ctx.moveTo(gx - 380, H - 90)
+  ctx.lineTo(gx - 150, gy - 190)
+  ctx.lineTo(gx - 40, gy - 130)
+  ctx.lineTo(gx + 60, gy - 230)
+  ctx.lineTo(gx + 380, H - 90)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = '#2a2236'
+  ctx.beginPath()
+  ctx.roundRect(gx - 76, gy - 108, 152, 150, [70, 70, 0, 0])
+  ctx.fill()
+  const glow = ctx.createRadialGradient(gx, gy - 20, 6, gx, gy - 20, 90)
+  glow.addColorStop(0, 'rgba(160,80,255,0.55)')
+  glow.addColorStop(1, 'rgba(20,10,30,1)')
+  ctx.fillStyle = glow
+  ctx.beginPath()
+  ctx.roundRect(gx - 58, gy - 90, 116, 132, [56, 56, 0, 0])
+  ctx.fill()
+  // eyes lurking inside
+  const blink = (t % 3.4) > 3.25 ? 0.15 : 1
+  for (const [ex, ey, s] of [[-22, -38, 1], [20, -10, 0.7], [-8, 6, 0.55]]) {
+    ctx.fillStyle = '#ff4d4d'
+    for (const d of [-7, 7]) {
+      ctx.beginPath()
+      ctx.ellipse(gx + ex + d * s, gy + ey, 3.4 * s, 2.6 * s * blink, 0, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  // torches with flickering flames
+  for (const s of [-1, 1]) {
+    const tx = gx + s * 108
+    ctx.fillStyle = '#5a3e1b'
+    ctx.fillRect(tx - 3, gy - 60, 6, 70)
+    const f = 1 + Math.sin(t * 11 + s) * 0.15
+    ctx.fillStyle = 'rgba(255,170,60,0.22)'
+    ctx.beginPath()
+    ctx.arc(tx, gy - 70, 42 * f, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#ff9a3c'
+    ctx.beginPath()
+    ctx.moveTo(tx - 9, gy - 60)
+    ctx.quadraticCurveTo(tx - 12, gy - 80, tx + Math.sin(t * 9 + s) * 3, gy - 60 - 30 * f)
+    ctx.quadraticCurveTo(tx + 12, gy - 80, tx + 9, gy - 60)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = '#ffe066'
+    ctx.beginPath()
+    ctx.ellipse(tx, gy - 66, 4, 8 * f, 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // ground
+  ctx.fillStyle = '#1c2a1e'
+  ctx.fillRect(0, H - 100, W, 100)
+  ctx.fillStyle = '#263326'
+  ctx.fillRect(0, H - 100, W, 6)
+
+  // the party (in-game sprites, enlarged) facing the gate
+  const big = (x, y, k, fn) => {
+    ctx.save()
+    ctx.translate(x, y)
+    ctx.scale(k, k)
+    fn()
+    ctx.restore()
+  }
+  const sway = Math.sin(t * 2.4) * 1.2
+  big(gx - 250, H - 128, 3.2, () => drawHero(ctx, 0, 0, 'right', sway))
+  big(gx - 330, H - 122, 2.8, () => drawHeroine(ctx, 0, 0, 'right', -sway))
+  big(gx + 250, H - 124, 2.6, () => drawMonster(ctx, 0, 0))
+  big(gx + 330, H - 150, 2.2, () => drawBoss(ctx, 0, 0))
+
+  // title + story
   ctx.textAlign = 'center'
+  ctx.lineJoin = 'round'
+  ctx.font = 'bold 54px serif'
+  ctx.shadowColor = 'rgba(255,200,80,0.55)'
+  ctx.shadowBlur = 18
+  ctx.strokeStyle = '#1a1024'
+  ctx.lineWidth = 8
+  ctx.strokeText('던전의 봉인', W / 2, 92)
   ctx.fillStyle = '#ffe066'
-  ctx.font = 'bold 28px sans-serif'
-  ctx.fillText('던전의 봉인', STAGE_WIDTH / 2, STAGE_HEIGHT / 2 - 90)
+  ctx.fillText('던전의 봉인', W / 2, 92)
+  ctx.shadowBlur = 0
 
-  ctx.fillStyle = '#ddd'
+  ctx.fillStyle = '#e6dff5'
   ctx.font = '15px sans-serif'
   STORY_LINES.forEach((line, i) => {
-    ctx.fillText(line, STAGE_WIDTH / 2, STAGE_HEIGHT / 2 - 30 + i * 24)
+    ctx.fillText(line, W / 2, 138 + i * 24)
   })
 
+  ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
   ctx.fillStyle = '#4fd1ff'
-  ctx.font = 'bold 15px sans-serif'
-  ctx.fillText('아무 키나 눌러 시작하세요', STAGE_WIDTH / 2, STAGE_HEIGHT / 2 + 90)
+  ctx.font = 'bold 17px sans-serif'
+  ctx.fillText('아무 키나 눌러 시작하세요', W / 2, H - 46)
+  ctx.globalAlpha = 1
 
   if (hasSave()) {
     ctx.fillStyle = '#ffe066'
     ctx.font = '13px sans-serif'
-    ctx.fillText('[L] 저장된 모험 불러오기', STAGE_WIDTH / 2, STAGE_HEIGHT / 2 + 120)
+    ctx.fillText('[L] 저장된 모험 불러오기', W / 2, H - 22)
   }
 }
 
