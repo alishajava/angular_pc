@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>메이드로봇 만들기 시뮬레이터</title>
+    <style>
+      :root {
+        --amber: #ff8fab;
+        --steel: #2a3038;
+        --steel-dark: #171b20;
+        --panel: #1e242b;
+        --ink: #e8edf2;
+        --soft: #343c46;
+      }
+      html, body {
+        margin: 0;
+        width: 100%;
+        min-height: 100%;
+        background: radial-gradient(circle at 50% 0%, #22282f 0%, #121519 70%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+        color: var(--ink);
+        padding: 1rem;
+        box-sizing: border-box;
+      }
+      #app {
+        width: 100%;
+        max-width: 900px;
+        min-height: 580px;
+        position: relative;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 143, 171, 0.14);
+        background: var(--steel-dark);
+      }
+
+      /* ---------- Title ---------- */
+      .title-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        height: 100%;
+        min-height: 580px;
+        padding: 2rem 1.5rem;
+        box-sizing: border-box;
+        background: radial-gradient(circle at 50% 12%, #262c33 0%, #121519 70%);
+      }
+      .title-wrap h1 { font-size: clamp(1.5rem, 5vw, 2.3rem); margin: 0 0 0.4rem; color: var(--amber); text-shadow: 0 0 14px rgba(255,159,63,0.4); letter-spacing: 0.02em; }
+      .title-wrap .subtitle { opacity: 0.75; font-size: clamp(0.78rem, 2vw, 0.92rem); margin-bottom: 1.6rem; line-height: 1.6; max-width: 480px; }
+      .field-row { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1.2rem; width: 100%; max-width: 320px; }
+      .field-row label { font-size: 0.82rem; font-weight: bold; text-align: left; }
+      .field-row input {
+        font-family: inherit;
+        font-size: 0.95rem;
+        padding: 0.55rem 0.8rem;
+        border-radius: 8px;
+        border: 1px solid var(--soft);
+        background: #0f1215;
+        color: var(--ink);
+      }
+      .primary-btn {
+        font-family: inherit;
+        padding: 0.75rem 2.2rem;
+        background: linear-gradient(180deg, #ffa8c0, #ec6f94);
+        color: #3a0e1f;
+        font-weight: bold;
+        border: none;
+        border-radius: 10px;
+        font-size: 1rem;
+        cursor: pointer;
+        box-shadow: 0 6px 18px rgba(255, 143, 171, 0.4);
+      }
+      .hint { font-size: 0.72rem; opacity: 0.6; margin-top: 0.8rem; max-width: 460px; line-height: 1.6; }
+
+      /* ---------- Build wizard ---------- */
+      .build-wrap { display: flex; flex-direction: column; height: 100%; min-height: 580px; }
+      .topbar {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0.7rem 1.1rem; background: linear-gradient(90deg, #2b2116, #171b20); color: var(--ink);
+        font-size: 0.85rem; font-weight: bold; border-bottom: 1px solid var(--soft);
+      }
+      .topbar .step-tag { color: var(--amber); }
+      .body-row { display: flex; flex: 1; min-height: 0; }
+      .preview-col {
+        flex: 0 0 280px;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        padding: 1rem 0.8rem; background: linear-gradient(180deg, #1c2127 0%, #121519 100%);
+        border-right: 1px solid var(--soft);
+      }
+      .preview-col canvas { width: 200px; height: 243px; }
+      .robot-name { font-size: 1.05rem; font-weight: bold; margin-top: 0.4rem; }
+      .stat-mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem 0.7rem; margin-top: 0.8rem; width: 100%; max-width: 220px; }
+      .stat-mini { font-size: 0.68rem; display: flex; justify-content: space-between; opacity: 0.85; }
+      .stat-mini b { color: var(--amber); }
+
+      .option-col { flex: 1; padding: 1.1rem 1.2rem; display: flex; flex-direction: column; gap: 0.6rem; overflow-y: auto; }
+      .option-col h2 { margin: 0 0 0.3rem; font-size: 1rem; color: var(--amber); }
+      .option-card {
+        font-family: inherit; text-align: left; padding: 0.65rem 0.85rem; border-radius: 10px;
+        border: 1px solid var(--soft); background: #1a1f25; cursor: pointer; color: var(--ink); width: 100%;
+      }
+      .option-card:hover { border-color: var(--amber); background: #221c14; }
+      .option-card.selected { border-color: var(--amber); background: #2a2014; box-shadow: 0 0 0 1px rgba(255,159,63,0.4) inset; }
+      .option-card .opt-name { font-weight: bold; display: block; margin-bottom: 0.15rem; font-size: 0.86rem; }
+      .option-card .opt-desc { opacity: 0.65; font-size: 0.72rem; }
+      .swatch-grid { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.3rem; }
+      .swatch {
+        width: 44px; height: 44px; border-radius: 10px; cursor: pointer;
+        border: 3px solid transparent; box-sizing: border-box;
+      }
+      .swatch.selected { border-color: var(--amber); }
+
+      .wizard-nav { display: flex; justify-content: space-between; margin-top: 0.8rem; }
+      .nav-btn {
+        font-family: inherit; padding: 0.55rem 1.3rem; border-radius: 9px; border: 1px solid var(--soft);
+        background: #1a1f25; color: var(--ink); font-size: 0.82rem; cursor: pointer;
+      }
+      .nav-btn.primary { background: linear-gradient(180deg, #ffa8c0, #ec6f94); color: #3a0e1f; font-weight: bold; border: none; }
+      .nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+      /* ---------- Result ---------- */
+      .result-wrap {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        text-align: center; height: 100%; min-height: 580px; padding: 2rem 1.6rem; box-sizing: border-box;
+        background: radial-gradient(circle at 50% 10%, #262c33 0%, #121519 100%);
+      }
+      .result-wrap canvas { margin-bottom: 0.8rem; width: 220px; height: 275px; }
+      .result-title { font-size: clamp(1.2rem, 4vw, 1.6rem); color: var(--amber); margin: 0 0 0.5rem; text-shadow: 0 0 10px rgba(255,159,63,0.35); }
+      .result-verdict { font-size: 0.9rem; line-height: 1.7; max-width: 480px; margin-bottom: 1rem; opacity: 0.92; }
+      .result-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.6rem; max-width: 520px; width: 100%; margin-bottom: 1.4rem; }
+      .result-stat { background: #1a1f25; border: 1px solid var(--soft); border-radius: 8px; padding: 0.5rem 0.3rem; }
+      .result-stat .label { font-size: 0.66rem; opacity: 0.7; }
+      .result-stat .value { font-size: 1.05rem; font-weight: bold; color: var(--amber); }
+      .restart-btn {
+        font-family: inherit; padding: 0.6rem 1.6rem; background: linear-gradient(180deg, #ffa8c0, #ec6f94); color: #3a0e1f;
+        font-weight: bold; border: none; border-radius: 9px; font-size: 0.88rem; cursor: pointer;
+      }
+
+      @media (max-width: 640px) {
+        .body-row { flex-direction: column; }
+        .preview-col { flex: 0 0 auto; border-right: none; border-bottom: 1px solid var(--soft); }
+        .preview-col canvas { width: 160px; height: 180px; }
+        .result-stats { grid-template-columns: repeat(2, 1fr); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

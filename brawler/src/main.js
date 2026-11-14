@@ -1,0 +1,1134 @@
+import { sfx, unlockSfx, toggleMute, isMuted } from './sfx.js'
+
+const canvas = document.getElementById('game')
+canvas.width = 960
+canvas.height = 560
+const ctx = canvas.getContext('2d')
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
+
+// The 2.5D illusion: x scrolls the camera (true side-scroller axis), while
+// y is a shallow "depth" band the player and enemies can also move within.
+// Nothing about y is scrolled - it maps straight to screen y - but entities
+// are drawn in y order (painter's algorithm) so a character standing
+// "further forward" (larger y) draws over one standing further back, and
+// depthScale makes them a little bigger too. That's the whole trick.
+const WORLD_WIDTH = 3400
+const DEPTH_TOP = 300
+const DEPTH_BOTTOM = 460
+const DEPTH_MID = (DEPTH_TOP + DEPTH_BOTTOM) / 2
+const GROUND_TOP = 270
+
+function depthScale(y) {
+  return 0.82 + ((y - DEPTH_TOP) / (DEPTH_BOTTOM - DEPTH_TOP)) * 0.3
+}
+
+const PLAYER_SPEED = 170
+const PLAYER_MAX_HP = 100
+
+// A jump is a straight-up hop (z), independent of the x/depth-y plane you
+// still steer mid-air. High enough off the ground, it also dodges grounded
+// enemy attacks - giving it a tactical reason to exist beyond looking nice.
+const JUMP_VELOCITY = 280
+const GRAVITY = 950
+const JUMP_DODGE_HEIGHT = 16
+
+const ATTACKS = {
+  punch: { startup: 0.08, active: 0.08, recovery: 0.14, range: 52, damage: 10, knockback: 36 },
+  kick: { startup: 0.14, active: 0.1, recovery: 0.22, range: 60, damage: 16, knockback: 80 },
+  ultimate: { startup: 0.15, active: 0.2, recovery: 0.35, range: 150, damage: 35, knockback: 90 },
+  // Not a simple knockback like the others - resolvePlayerThrow launches
+  // the grabbed enemy into its own little gravity arc (see the enemy
+  // 'thrown' state in updateEnemies), so `knockback` here is unused but
+  // kept for shape-consistency with the rest of this table.
+  throw: { startup: 0.12, active: 0.1, recovery: 0.35, range: 46, damage: 20, knockback: 0 },
+}
+
+// A quick burst forward on double-tapping a direction - classic fighting-
+// game "dash" input. Tracked by logical direction (not the exact key) so
+// tapping 'a' then quickly 'arrowleft' still counts; DOUBLE_TAP_WINDOW is
+// generous since this is a beat-em-up, not a frame-perfect fighter.
+const DASH_SPEED = 480
+const DASH_DURATION = 0.18
+const DOUBLE_TAP_WINDOW = 280
+let lastTapTime = { left: -9999, right: -9999 }
+
+// Punch and kick pressed together (within this window, in either order)
+// throws instead - see the keydown handler and canThrowOverride below.
+const THROW_WINDOW = 120
+let lastPunchPress = -9999
+let lastKickPress = -9999
+
+// Fills as the player lands hits (and a bit more when they get hit, so a
+// losing fight still builds toward a comeback). At max, L unleashes a big
+// 360-degree hit that also makes the player briefly invulnerable.
+const GAUGE_MAX = 100
+const GAUGE_PER_HIT = 6
+const GAUGE_PER_HURT = 15
+
+const ENEMY_TYPES = {
+  thug: { hp: 28, speed: 85, damage: 8, attackRange: 48, telegraph: 0.32, active: 0.14, cooldown: 0.85, color: '#c0564a' },
+  boss: { hp: 170, speed: 58, damage: 16, attackRange: 58, telegraph: 0.42, active: 0.2, cooldown: 1.0, color: '#7b3fa0' },
+}
+
+// Classic beat-em-up pacing: crossing a trigger spawns that wave and locks
+// the camera (see updateCamera's gateX clamp) until every enemy in it is
+// dead, so the player can't just outrun the fight. Enemies spawn just
+// off the right edge of the now-locked screen so they walk
+// in rather than popping up already in frame.
+const WAVES = [
+  { triggerX: 480, enemies: [{ dx: 0, dy: -50, type: 'thug' }, { dx: 40, dy: 45, type: 'thug' }] },
+  { triggerX: 1300, enemies: [{ dx: 0, dy: -55, type: 'thug' }, { dx: 30, dy: 0, type: 'thug' }, { dx: 60, dy: 55, type: 'thug' }] },
+  { triggerX: 2300, enemies: [{ dx: 0, dy: 0, type: 'boss' }] },
+]
+
+const HITSTUN_DURATION = 0.3
+// 경직이 풀린 직후 잠깐은 다시 경직되지 않는다 (약공격 연타로 보스까지 계속 묶어두는 것 방지)
+const STUN_IMMUNITY = 0.45
+const DEATH_FADE = 0.4
+
+function makePlayer() {
+  return {
+    x: 120,
+    y: DEPTH_MID,
+    hp: PLAYER_MAX_HP,
+    facing: 1,
+    moving: false,
+    walkPhase: 0,
+    attack: null, // { type, phase: 'startup' | 'active' | 'recovery', t, resolved }
+    hitstunTimer: 0,
+    flashTimer: 0,
+    gauge: 0,
+    invulnTimer: 0,
+    ultimateFlash: 0,
+    z: 0,
+    vz: 0,
+    jumping: false,
+    dashing: false,
+    dashTimer: 0,
+    dashDir: 1,
+  }
+}
+
+function makeEnemy(type, x, y) {
+  return {
+    type,
+    x,
+    y,
+    hp: ENEMY_TYPES[type].hp,
+    maxHp: ENEMY_TYPES[type].hp,
+    facing: -1,
+    state: 'approach', // approach | telegraph | attack | cooldown-is-implicit | hitstun | thrown | dead
+    t: 0,
+    cooldownTimer: 0,
+    hitstunTimer: 0,
+    stunImmunity: 0,
+    resolved: false,
+    walkPhase: Math.random() * 10,
+    deathTimer: 0,
+    flashTimer: 0,
+    thrown: null,
+  }
+}
+
+function makeInitialState() {
+  return {
+    phase: 'playing', // playing | gameover | cleared
+    player: makePlayer(),
+    enemies: [],
+    cameraX: 0,
+    gateX: null,
+    waveIndex: 0,
+  }
+}
+let state = makeInitialState()
+state.phase = 'title' // 첫 화면에서는 시작 입력을 기다린다 (R 재시작은 바로 플레이)
+let muteNoticeUntil = 0
+
+function canAct() {
+  const p = state.player
+  return !p.attack && !p.dashing && p.hitstunTimer <= 0
+}
+// A throw is allowed to cancel the *other* button's attack, but only while
+// that attack is still in its startup window (hasn't dealt damage or
+// committed to recovery yet) - otherwise mashing both buttons during an
+// active hit would let you cancel recovery frames for free.
+function canThrowOverride() {
+  const p = state.player
+  return !p.dashing && p.hitstunTimer <= 0 && (!p.attack || p.attack.phase === 'startup')
+}
+
+const heldKeys = new Set()
+window.addEventListener('keydown', (e) => {
+  const key = e.key.toLowerCase()
+  const isRepeat = heldKeys.has(key)
+  heldKeys.add(key)
+  unlockSfx()
+  if (state.phase === 'title') {
+    if (!isRepeat && (key.length === 1 || key === 'enter' || key.startsWith('arrow'))) {
+      e.preventDefault()
+      state.phase = 'playing'
+      sfx.start()
+    }
+    return
+  }
+  if (key === 'r') {
+    state = makeInitialState()
+    sfx.click()
+    return
+  }
+  if (key === 'm' && !isRepeat) {
+    toggleMute()
+    muteNoticeUntil = performance.now() + 1600
+  }
+  if (state.phase !== 'playing') return
+
+  if (!isRepeat) {
+    const now = performance.now()
+    if (MOVE_KEYS.left.includes(key)) {
+      if (now - lastTapTime.left < DOUBLE_TAP_WINDOW) startDash(-1)
+      lastTapTime.left = now
+    }
+    if (MOVE_KEYS.right.includes(key)) {
+      if (now - lastTapTime.right < DOUBLE_TAP_WINDOW) startDash(1)
+      lastTapTime.right = now
+    }
+  }
+
+  if (key === 'j') {
+    const now = performance.now()
+    const isThrow = now - lastKickPress <= THROW_WINDOW
+    lastPunchPress = now
+    if (isThrow && canThrowOverride()) startAttack('throw')
+    else if (canAct()) startAttack('punch')
+  }
+  if (key === 'k') {
+    const now = performance.now()
+    const isThrow = now - lastPunchPress <= THROW_WINDOW
+    lastKickPress = now
+    if (isThrow && canThrowOverride()) startAttack('throw')
+    else if (canAct()) startAttack('kick')
+  }
+  if (key === 'l' && canAct() && state.player.gauge >= GAUGE_MAX) {
+    startAttack('ultimate')
+  }
+  if (key === ' ' && !state.player.jumping && canAct()) {
+    e.preventDefault() // stop the page from scrolling on space
+    startJump()
+  }
+})
+window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
+// 창이 포커스를 잃으면 눌려 있던 키가 계속 눌린 것으로 남지 않게 한다
+window.addEventListener('blur', () => heldKeys.clear())
+window.addEventListener('pointerdown', () => {
+  unlockSfx()
+  if (state.phase === 'title') {
+    state.phase = 'playing'
+    sfx.start()
+  }
+})
+function held(names) { return names.some((k) => heldKeys.has(k)) }
+
+const MOVE_KEYS = {
+  left: ['a', 'arrowleft'],
+  right: ['d', 'arrowright'],
+  up: ['w', 'arrowup'],
+  down: ['s', 'arrowdown'],
+}
+
+function startAttack(type) {
+  const p = state.player
+  p.attack = { type, phase: 'startup', t: 0, resolved: false }
+  if (type !== 'ultimate') sfx.whoosh()
+  if (type === 'ultimate') {
+    sfx.heavy()
+    p.gauge = 0
+    p.ultimateFlash = 0.3
+    p.invulnTimer = ATTACKS.ultimate.startup + ATTACKS.ultimate.active
+  }
+}
+
+function startJump() {
+  const p = state.player
+  p.jumping = true
+  p.vz = JUMP_VELOCITY
+  sfx.jump()
+}
+
+function startDash(dir) {
+  const p = state.player
+  if (p.attack || p.hitstunTimer > 0 || p.dashing || p.jumping) return
+  p.dashing = true
+  p.dashTimer = DASH_DURATION
+  sfx.whoosh()
+  p.dashDir = dir
+  p.facing = dir
+}
+
+function playerMaxX() {
+  return state.gateX !== null ? state.gateX + canvas.width - 60 : WORLD_WIDTH - 40
+}
+
+function updatePlayer(dt) {
+  const p = state.player
+  if (p.flashTimer > 0) p.flashTimer -= dt
+  if (p.invulnTimer > 0) p.invulnTimer -= dt
+  if (p.ultimateFlash > 0) p.ultimateFlash -= dt
+
+  if (p.jumping) {
+    p.vz -= GRAVITY * dt
+    p.z += p.vz * dt
+    if (p.z <= 0) {
+      p.z = 0
+      p.vz = 0
+      p.jumping = false
+    }
+  }
+
+  if (p.dashing) {
+    p.dashTimer -= dt
+    p.moving = true
+    p.walkPhase += dt * 20 // fast leg blur, faster than the normal run cycle
+    p.x = clamp(p.x + p.dashDir * DASH_SPEED * dt, 40, playerMaxX())
+    if (p.dashTimer <= 0) p.dashing = false
+    return // skip the hitstun/attack/movement branch below entirely
+  }
+
+  if (p.hitstunTimer > 0) {
+    p.hitstunTimer -= dt
+    p.moving = false
+  } else if (!p.attack) {
+    let dx = 0
+    let dy = 0
+    if (held(MOVE_KEYS.left)) dx -= 1
+    if (held(MOVE_KEYS.right)) dx += 1
+    if (held(MOVE_KEYS.up)) dy -= 1
+    if (held(MOVE_KEYS.down)) dy += 1
+    p.moving = dx !== 0 || dy !== 0
+    if (p.moving) {
+      const len = Math.hypot(dx, dy)
+      dx /= len
+      dy /= len
+      p.x = clamp(p.x + dx * PLAYER_SPEED * dt, 40, playerMaxX())
+      p.y = clamp(p.y + dy * PLAYER_SPEED * dt, DEPTH_TOP, DEPTH_BOTTOM)
+      if (dx !== 0) p.facing = Math.sign(dx)
+      p.walkPhase += dt * 9
+    }
+  } else {
+    p.moving = false
+  }
+
+  if (p.attack) updatePlayerAttack(dt)
+}
+
+function updatePlayerAttack(dt) {
+  const p = state.player
+  const atk = p.attack
+  const def = ATTACKS[atk.type]
+  atk.t += dt
+  if (atk.phase === 'startup' && atk.t >= def.startup) {
+    atk.phase = 'active'
+    atk.t = 0
+    atk.resolved = false
+  } else if (atk.phase === 'active') {
+    // Resolved exactly once on entering the active window - not "while
+    // active", which would hit every frame of it instead of just once.
+    if (!atk.resolved) {
+      resolvePlayerHit(atk.type)
+      atk.resolved = true
+    }
+    if (atk.t >= def.active) {
+      atk.phase = 'recovery'
+      atk.t = 0
+    }
+  } else if (atk.phase === 'recovery') {
+    if (atk.t >= def.recovery) p.attack = null
+  }
+}
+
+function resolvePlayerHit(type) {
+  if (type === 'throw') return resolvePlayerThrow()
+  const p = state.player
+  const def = ATTACKS[type]
+  const omni = type === 'ultimate' // hits all around, not just in front
+  for (const en of state.enemies) {
+    if (en.state === 'dead') continue
+    const dx = en.x - p.x
+    const dy = en.y - p.y
+    if (!omni) {
+      const inFront = p.facing > 0 ? dx > -15 : dx < 15
+      if (!inFront) continue
+    }
+    if (Math.abs(dx) > def.range || Math.abs(dy) > (omni ? 70 : 50)) continue
+    damageEnemy(en, def.damage, Math.sign(dx || p.facing) * def.knockback)
+    if (!omni) p.gauge = Math.min(GAUGE_MAX, p.gauge + GAUGE_PER_HIT)
+  }
+}
+
+// Grabs the single nearest valid enemy in front (dead or already-thrown
+// enemies can't be grabbed) and launches it into a gravity arc rather than
+// a simple sideways knockback - see the 'thrown' state in updateEnemies for
+// the actual flight physics, and drawEnemySprite for how its height gets
+// rendered as lift, same trick as the player's own jump.
+const THROW_LAUNCH_VZ = 260
+const THROW_LAUNCH_VX = 220
+
+function resolvePlayerThrow() {
+  const p = state.player
+  const def = ATTACKS.throw
+  let best = null
+  let bestDist = Infinity
+  for (const en of state.enemies) {
+    if (en.state === 'dead' || en.state === 'thrown') continue
+    const dx = en.x - p.x
+    const dy = en.y - p.y
+    const inFront = p.facing > 0 ? dx > -15 : dx < 15
+    if (!inFront) continue
+    if (Math.abs(dx) > def.range || Math.abs(dy) > 50) continue
+    const dist = Math.hypot(dx, dy)
+    if (dist < bestDist) {
+      bestDist = dist
+      best = en
+    }
+  }
+  if (!best) return
+
+  const dir = Math.sign(best.x - p.x) || p.facing
+  best.hp -= def.damage
+  best.flashTimer = 0.12
+  sfx.heavy()
+  best.facing = -dir
+  p.gauge = Math.min(GAUGE_MAX, p.gauge + GAUGE_PER_HIT)
+  if (best.hp <= 0) {
+    best.state = 'dead'
+    best.deathTimer = DEATH_FADE
+    return
+  }
+  best.state = 'thrown'
+  best.thrown = { z: 0, vz: THROW_LAUNCH_VZ, vx: dir * THROW_LAUNCH_VX }
+}
+
+function damageEnemy(en, dmg, knockbackDx) {
+  en.hp -= dmg
+  if (dmg >= 30) sfx.heavy()
+  else sfx.hit()
+  en.flashTimer = 0.12
+  en.x = clamp(en.x + knockbackDx, 40, WORLD_WIDTH - 40)
+  if (en.hp <= 0) {
+    en.state = 'dead'
+    en.deathTimer = DEATH_FADE
+  } else if (en.stunImmunity <= 0) {
+    en.state = 'hitstun'
+    en.hitstunTimer = HITSTUN_DURATION
+    en.t = 0
+  }
+}
+
+function damagePlayer(dmg, knockbackDx) {
+  const p = state.player
+  if (p.hitstunTimer > 0) return // brief invulnerability while already reeling
+  if (p.invulnTimer > 0) return // mid-ultimate invulnerability window
+  if (p.jumping && p.z > JUMP_DODGE_HEIGHT) return // high enough to hop over a grounded attack
+  p.hp = Math.max(0, p.hp - dmg)
+  sfx.hurt()
+  p.hitstunTimer = HITSTUN_DURATION
+  p.flashTimer = 0.15
+  p.attack = null
+  p.dashing = false // otherwise next frame's dash branch would run before this stun and ignore it entirely
+  p.gauge = Math.min(GAUGE_MAX, p.gauge + GAUGE_PER_HURT)
+  p.x = clamp(p.x + knockbackDx, 40, playerMaxX())
+  if (p.hp <= 0) {
+    state.phase = 'gameover'
+    sfx.lose()
+  }
+}
+
+function updateEnemies(dt) {
+  const p = state.player
+  for (const en of state.enemies) {
+    if (en.flashTimer > 0) en.flashTimer -= dt
+    if (en.state === 'dead') {
+      en.deathTimer -= dt
+      continue
+    }
+    if (en.cooldownTimer > 0) en.cooldownTimer -= dt
+    if (en.stunImmunity > 0 && en.state !== 'hitstun') en.stunImmunity -= dt
+
+    if (en.state === 'hitstun') {
+      en.hitstunTimer -= dt
+      if (en.hitstunTimer <= 0) {
+        en.state = 'approach'
+        en.stunImmunity = STUN_IMMUNITY
+      }
+      continue
+    }
+
+    if (en.state === 'thrown') {
+      const th = en.thrown
+      th.vz -= GRAVITY * dt
+      th.z += th.vz * dt
+      en.x = clamp(en.x + th.vx * dt, 40, WORLD_WIDTH - 40)
+      if (th.z <= 0) {
+        th.z = 0
+        en.thrown = null
+        en.state = 'hitstun'
+        en.hitstunTimer = HITSTUN_DURATION * 1.5 // a beat longer than a normal hit - they just landed hard
+        en.t = 0
+      }
+      continue
+    }
+
+    const stats = ENEMY_TYPES[en.type]
+    const dx = p.x - en.x
+    const dy = p.y - en.y
+    const dist = Math.hypot(dx, dy)
+
+    if (en.state === 'approach') {
+      if (dx !== 0) en.facing = Math.sign(dx)
+      if (dist <= stats.attackRange && en.cooldownTimer <= 0) {
+        en.state = 'telegraph'
+        en.t = 0
+      } else if (dist > stats.attackRange * 0.8) {
+        const nx = dx / (dist || 1)
+        const ny = dy / (dist || 1)
+        en.x = clamp(en.x + nx * stats.speed * dt, 40, WORLD_WIDTH - 40)
+        en.y = clamp(en.y + ny * stats.speed * dt, DEPTH_TOP, DEPTH_BOTTOM)
+        en.walkPhase += dt * 8
+      }
+    } else if (en.state === 'telegraph') {
+      en.t += dt
+      if (en.t >= stats.telegraph) {
+        en.state = 'attack'
+        en.t = 0
+        en.resolved = false
+      }
+    } else if (en.state === 'attack') {
+      en.t += dt
+      if (!en.resolved) {
+        const d2 = Math.hypot(p.x - en.x, p.y - en.y)
+        if (d2 <= stats.attackRange + 10) damagePlayer(stats.damage, Math.sign(-en.facing) * 30)
+        en.resolved = true
+      }
+      if (en.t >= stats.active) {
+        en.state = 'approach'
+        en.t = 0
+        en.cooldownTimer = stats.cooldown
+      }
+    }
+  }
+
+  resolveEnemySeparation()
+  state.enemies = state.enemies.filter((en) => !(en.state === 'dead' && en.deathTimer <= 0))
+}
+
+// Keeps enemies from all stacking on exactly the player's position -
+// same circle push-out idea used for the 3D prototype's NPCs, just
+// between enemies only (the player can still be surrounded).
+function resolveEnemySeparation() {
+  const alive = state.enemies.filter((e) => e.state !== 'dead' && e.state !== 'thrown')
+  for (let i = 0; i < alive.length; i++) {
+    for (let j = i + 1; j < alive.length; j++) {
+      const a = alive[i]
+      const b = alive[j]
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const dist = Math.hypot(dx, dy)
+      const minDist = 36
+      if (dist >= minDist || dist < 0.001) continue
+      const push = (minDist - dist) / 2
+      const nx = dx / dist
+      const ny = dy / dist
+      a.x -= nx * push
+      a.y = clamp(a.y - ny * push, DEPTH_TOP, DEPTH_BOTTOM)
+      b.x += nx * push
+      b.y = clamp(b.y + ny * push, DEPTH_TOP, DEPTH_BOTTOM)
+    }
+  }
+}
+
+function checkWaveTriggers() {
+  if (state.gateX !== null) return
+  const idx = state.waveIndex
+  if (idx >= WAVES.length) return
+  const wave = WAVES[idx]
+  if (state.player.x < wave.triggerX) return
+
+  state.gateX = state.cameraX
+  // 고정된 화면의 오른쪽 바깥에서 걸어 들어오게 한다 (화면 안에서 갑자기 나타나지 않도록)
+  const spawnX = state.gateX + canvas.width + 40
+  for (const spec of wave.enemies) {
+    state.enemies.push(makeEnemy(spec.type, Math.min(WORLD_WIDTH - 40, spawnX + spec.dx), DEPTH_MID + spec.dy))
+  }
+}
+
+function checkWaveCleared() {
+  if (state.gateX === null) return
+  if (state.enemies.some((e) => e.state !== 'dead')) return
+  state.gateX = null
+  state.waveIndex += 1
+  if (state.waveIndex >= WAVES.length) {
+    state.phase = 'cleared'
+    sfx.fanfare()
+  } else {
+    sfx.good()
+  }
+}
+
+function updateCamera() {
+  const desired = state.player.x - canvas.width * 0.35
+  const maxCam = state.gateX !== null ? state.gateX : WORLD_WIDTH - canvas.width
+  state.cameraX = clamp(desired, 0, Math.max(0, maxCam))
+}
+
+function update(dt) {
+  if (state.phase !== 'playing') return
+  updatePlayer(dt)
+  updateEnemies(dt)
+  checkWaveTriggers()
+  checkWaveCleared()
+  updateCamera()
+}
+
+// --- Rendering ---
+
+function makeBuildings(count, xRange, hRange, wRange) {
+  const arr = []
+  for (let i = 0; i < count; i++) {
+    arr.push({
+      x: (i / count) * xRange,
+      w: wRange[0] + Math.random() * (wRange[1] - wRange[0]),
+      h: hRange[0] + Math.random() * (hRange[1] - hRange[0]),
+    })
+  }
+  return arr
+}
+const buildingsFar = makeBuildings(26, WORLD_WIDTH * 1.2, [90, 200], [60, 140])
+const buildingsMid = makeBuildings(34, WORLD_WIDTH * 1.2, [60, 140], [50, 110])
+
+function worldToScreenX(x) { return x - state.cameraX }
+
+function drawParallaxLayer(buildings, factor, color) {
+  ctx.fillStyle = color
+  const offset = state.cameraX * factor
+  for (const b of buildings) {
+    const sx = b.x - offset
+    if (sx < -b.w || sx > canvas.width + b.w) continue
+    ctx.fillRect(sx, GROUND_TOP - b.h, b.w, b.h)
+  }
+}
+
+function drawBackground() {
+  const grad = ctx.createLinearGradient(0, 0, 0, GROUND_TOP)
+  grad.addColorStop(0, '#2b1f4a')
+  grad.addColorStop(1, '#5d4a8a')
+  ctx.fillStyle = grad
+  ctx.fillRect(0, 0, canvas.width, GROUND_TOP)
+
+  drawParallaxLayer(buildingsFar, 0.25, '#20163a')
+  drawParallaxLayer(buildingsMid, 0.5, '#2e2050')
+
+  ctx.fillStyle = '#3a3a42'
+  ctx.fillRect(0, GROUND_TOP, canvas.width, canvas.height - GROUND_TOP)
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'
+  ctx.lineWidth = 2
+  for (let i = 0; i < 40; i++) {
+    const sx = i * 90 - state.cameraX
+    if (sx < -20 || sx > canvas.width + 20) continue
+    ctx.beginPath()
+    ctx.moveTo(sx, GROUND_TOP)
+    ctx.lineTo(sx - 30, canvas.height)
+    ctx.stroke()
+  }
+}
+
+function drawShadow(x, y, scale) {
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'
+  ctx.beginPath()
+  ctx.ellipse(worldToScreenX(x), y + 2, 22 * scale, 8 * scale, 0, 0, Math.PI * 2)
+  ctx.fill()
+}
+
+// Per-character look: skin/hair/pants/boots plus an optional face style.
+// `style` also picks the signature gear (player headband, thug bandana +
+// scar, boss horned helm + beard).
+const LOOKS = {
+  player: { skin: '#f2c79b', hair: '#2a1d1a', pants: '#243456', boots: '#1d1b26', trim: '#e04a4a', eye: '#2a1d1a' },
+  thug: { skin: '#e0b58a', hair: '#1c1512', pants: '#3a2a2a', boots: '#161214', trim: '#2b2b33', eye: '#2a1d1a' },
+  boss: { skin: '#b79ac9', hair: '#2a1535', pants: '#2c1a3a', boots: '#150d1c', trim: '#ffd24a', eye: '#ff3b3b' },
+}
+
+function hRound(x, y, w, h, r) {
+  ctx.beginPath()
+  ctx.roundRect(x, y, w, h, r)
+}
+
+function drawHumanoid(x, y, opts) {
+  const scale = depthScale(y) * (opts.size || 1)
+  const look = LOOKS[opts.style || 'player']
+  const t = performance.now() / 1000
+  ctx.save()
+  ctx.globalAlpha = opts.alpha ?? 1
+  ctx.translate(worldToScreenX(x), y - (opts.lift || 0))
+  ctx.scale(scale * opts.facing, scale)
+
+  const bodyColor = opts.flash ? '#ffffff' : opts.color
+  const legSwing = opts.moving ? Math.sin(opts.walkPhase) * 10 : 0
+  const kicking = opts.attacking && opts.attackType === 'kick'
+  const throwing = opts.attacking && opts.attackType === 'throw'
+  const punching = opts.attacking && !kicking && !throwing
+  const OUT = 'rgba(15,10,20,0.75)'
+  const boot = (bx, by, bw) => {
+    ctx.fillStyle = look.boots
+    hRound(bx - 1, by, bw + 2, 7, 2)
+    ctx.fill()
+    ctx.fillStyle = 'rgba(255,255,255,0.18)'
+    ctx.fillRect(bx, by + 5, bw, 1.4)
+  }
+
+  // ---- legs ----
+  ctx.fillStyle = look.pants
+  if (kicking) {
+    hRound(-10, -26, 7, 26, 2); ctx.fill()
+    boot(-10, -6, 7)
+    hRound(8, -22, 24, 9, 3); ctx.fill()
+    boot(28, -24, 6)
+  } else if (throwing) {
+    hRound(-9, -26, 7, 26, 2); ctx.fill()
+    hRound(6, -26, 7, 26, 2); ctx.fill()
+    boot(-9, -6, 7)
+    boot(6, -6, 7)
+  } else {
+    hRound(-10, -26 + legSwing * 0.2, 7, 26, 2); ctx.fill()
+    hRound(3, -26 - legSwing * 0.2, 7, 26, 2); ctx.fill()
+    boot(-10, -6 + legSwing * 0.2, 7)
+    boot(3, -6 - legSwing * 0.2, 7)
+  }
+
+  // ---- torso ----
+  ctx.fillStyle = bodyColor
+  hRound(-12, -56, 24, 32, 5); ctx.fill()
+  ctx.strokeStyle = OUT
+  ctx.lineWidth = 1.2
+  ctx.stroke()
+  if (!opts.flash) {
+    ctx.fillStyle = 'rgba(0,0,0,0.16)'
+    hRound(-12, -38, 24, 14, 5); ctx.fill()
+    ctx.fillStyle = 'rgba(255,255,255,0.16)'
+    hRound(-9, -54, 9, 9, 3); ctx.fill()
+  }
+  // belt + buckle
+  ctx.fillStyle = look.trim === '#ffd24a' ? '#3a2a10' : '#2a2018'
+  ctx.fillRect(-12, -31, 24, 4)
+  ctx.fillStyle = look.trim
+  ctx.fillRect(-3, -31, 6, 4)
+  if (opts.style === 'player') {
+    ctx.fillStyle = '#ffe066' // chest bolt emblem
+    ctx.beginPath()
+    ctx.moveTo(1, -50); ctx.lineTo(-4, -42); ctx.lineTo(-0.5, -42); ctx.lineTo(-2, -35); ctx.lineTo(4, -44); ctx.lineTo(0.5, -44)
+    ctx.closePath(); ctx.fill()
+  } else if (opts.style === 'thug') {
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)' // tank-top stripes
+    ctx.lineWidth = 2
+    ctx.beginPath(); ctx.moveTo(-6, -54); ctx.lineTo(-6, -32); ctx.moveTo(6, -54); ctx.lineTo(6, -32); ctx.stroke()
+  } else {
+    ctx.fillStyle = look.trim // boss armour plates + spiked shoulders
+    hRound(-13, -57, 26, 7, 3); ctx.fill()
+    for (const s of [-1, 1]) {
+      ctx.beginPath()
+      ctx.moveTo(s * 11, -56); ctx.lineTo(s * 20, -66); ctx.lineTo(s * 17, -52)
+      ctx.closePath(); ctx.fill()
+    }
+  }
+
+  // ---- arms (sleeve + fist) ----
+  const arm = (ax, ay, aw, ah) => {
+    ctx.fillStyle = bodyColor
+    hRound(ax, ay, aw, ah, 3); ctx.fill()
+    ctx.strokeStyle = OUT
+    ctx.lineWidth = 1
+    ctx.stroke()
+  }
+  const fist = (fx, fy) => {
+    ctx.fillStyle = look.skin
+    ctx.beginPath(); ctx.arc(fx, fy, 4.2, 0, Math.PI * 2); ctx.fill()
+    ctx.strokeStyle = OUT
+    ctx.lineWidth = 1
+    ctx.stroke()
+  }
+  if (punching) {
+    arm(8, -52, 18, 8); fist(29, -48)
+    arm(-14, -50, 10, 18); fist(-9, -30)
+  } else if (kicking) {
+    arm(8, -50, 8, 16); fist(12, -33)
+    arm(-16, -50, 8, 16); fist(-12, -33)
+  } else if (throwing) {
+    arm(8, -58, 22, 10); fist(33, -53)
+    arm(-16, -50, 10, 18); fist(-11, -30)
+  } else {
+    const armSwing = opts.moving ? Math.sin(opts.walkPhase + Math.PI) * 6 : 0
+    arm(10, -50 + armSwing * 0.3, 8, 18); fist(14, -30 + armSwing * 0.3)
+    arm(-18, -50 - armSwing * 0.3, 8, 18); fist(-14, -30 - armSwing * 0.3)
+  }
+
+  // ---- head ----
+  const hx = 0
+  const hy = -66
+  // headband tails flutter behind the player
+  if (opts.style === 'player') {
+    ctx.fillStyle = look.trim
+    const fl = Math.sin(t * 9 + (opts.walkPhase || 0)) * 3
+    ctx.beginPath(); ctx.moveTo(-10, -71); ctx.lineTo(-24, -68 + fl); ctx.lineTo(-22, -73 + fl); ctx.lineTo(-10, -74); ctx.closePath(); ctx.fill()
+    ctx.beginPath(); ctx.moveTo(-10, -70); ctx.lineTo(-22, -62 - fl); ctx.lineTo(-19, -67 - fl); ctx.closePath(); ctx.fill()
+  }
+  // ear
+  ctx.fillStyle = look.skin
+  ctx.beginPath(); ctx.arc(hx - 9, hy + 1, 2.8, 0, Math.PI * 2); ctx.fill()
+  // face
+  ctx.fillStyle = look.skin
+  ctx.beginPath(); ctx.arc(hx, hy, 11, 0, Math.PI * 2); ctx.fill()
+  ctx.strokeStyle = OUT
+  ctx.lineWidth = 1.2
+  ctx.stroke()
+  // jaw shading
+  ctx.fillStyle = 'rgba(0,0,0,0.08)'
+  ctx.beginPath(); ctx.arc(hx, hy, 11, 0.15 * Math.PI, 0.85 * Math.PI); ctx.fill()
+
+  // hair / headgear
+  ctx.fillStyle = look.hair
+  if (opts.style === 'player') {
+    ctx.beginPath()
+    ctx.arc(hx - 1, hy - 3, 11.5, Math.PI * 1.02, Math.PI * 1.98)
+    ctx.lineTo(10, hy - 6); ctx.lineTo(6, hy - 11); ctx.lineTo(2, hy - 7); ctx.lineTo(-2, hy - 13); ctx.lineTo(-6, hy - 7); ctx.lineTo(-10, hy - 10)
+    ctx.closePath(); ctx.fill()
+    ctx.fillStyle = look.trim // headband
+    ctx.fillRect(-11, hy - 7, 22, 4)
+  } else if (opts.style === 'thug') {
+    ctx.beginPath() // mohawk
+    ctx.moveTo(-8, hy - 8); ctx.lineTo(-4, hy - 18); ctx.lineTo(0, hy - 10); ctx.lineTo(4, hy - 19); ctx.lineTo(8, hy - 8)
+    ctx.closePath(); ctx.fill()
+    ctx.fillStyle = '#c24a3a' // bandana
+    ctx.fillRect(-11, hy - 7, 22, 4)
+  } else {
+    ctx.fillStyle = '#3b2a48' // horned helm
+    ctx.beginPath(); ctx.arc(hx, hy - 3, 12, Math.PI, 0); ctx.fill()
+    ctx.strokeStyle = OUT; ctx.lineWidth = 1.2; ctx.stroke()
+    ctx.fillStyle = '#f2efe0'
+    for (const s of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(s * 9, hy - 8); ctx.lineTo(s * 17, hy - 22); ctx.lineTo(s * 13, hy - 6); ctx.closePath(); ctx.fill()
+    }
+    ctx.fillStyle = look.trim
+    ctx.fillRect(-12, hy - 6, 24, 3)
+  }
+
+  // eyes (3/4 view: near eye bigger, far eye smaller)
+  const hurt = !!opts.hurt
+  const blink = (t % 3.6) > 3.48
+  const eyeSpec = [[3, 3.2], [8.5, 2.4]]
+  for (const [ex, er] of eyeSpec) {
+    if (hurt || blink) {
+      ctx.strokeStyle = look.eye === '#ff3b3b' ? '#ff3b3b' : '#1a1420'
+      ctx.lineWidth = 1.6
+      ctx.beginPath()
+      if (hurt) { ctx.moveTo(ex - er, hy - 2 - er * 0.8); ctx.lineTo(ex + er, hy - 2 + er * 0.8); ctx.moveTo(ex - er, hy - 2 + er * 0.8); ctx.lineTo(ex + er, hy - 2 - er * 0.8) }
+      else { ctx.moveTo(ex - er, hy - 1); ctx.lineTo(ex + er, hy - 1) }
+      ctx.stroke()
+      continue
+    }
+    ctx.fillStyle = opts.style === 'boss' ? '#ffe9a0' : '#ffffff'
+    ctx.beginPath(); ctx.ellipse(ex, hy - 1, er, er * 1.15, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.strokeStyle = OUT
+    ctx.lineWidth = 0.8
+    ctx.stroke()
+    ctx.fillStyle = look.eye
+    ctx.beginPath(); ctx.arc(ex + 0.8, hy - 0.8, er * 0.62, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#ffffff'
+    ctx.beginPath(); ctx.arc(ex + 1.5, hy - 1.8, er * 0.24, 0, Math.PI * 2); ctx.fill()
+  }
+  // brows: angry for enemies, determined for player
+  ctx.strokeStyle = opts.style === 'player' ? look.hair : '#120d12'
+  ctx.lineWidth = 2
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  const ang = opts.style === 'player' ? 1.6 : 3.4
+  ctx.moveTo(-0.5, hy - 6 - ang * 0.5); ctx.lineTo(5.5, hy - 5 + (opts.style === 'player' ? 0 : 1.5))
+  ctx.moveTo(6.5, hy - 5.5 + (opts.style === 'player' ? 0 : 1.2)); ctx.lineTo(11, hy - 6.5 - ang * 0.3)
+  ctx.stroke()
+  ctx.lineCap = 'butt'
+  // nose bump + mouth
+  ctx.fillStyle = look.skin
+  ctx.beginPath(); ctx.moveTo(10.5, hy); ctx.lineTo(14, hy + 3.5); ctx.lineTo(10.5, hy + 4.5); ctx.closePath(); ctx.fill()
+  ctx.strokeStyle = OUT
+  ctx.lineWidth = 0.9
+  ctx.stroke()
+  ctx.beginPath()
+  if (opts.attacking || hurt) {
+    ctx.ellipse(6.5, hy + 7, 3.2, 2.6, 0, 0, Math.PI * 2) // shouting / grimace
+    ctx.fillStyle = '#4a1218'
+    ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.fillRect(4, hy + 5.2, 5, 1.4)
+  } else if (opts.style === 'player') {
+    ctx.arc(6, hy + 5.5, 3, 0.15 * Math.PI, 0.8 * Math.PI) // confident grin
+    ctx.stroke()
+  } else {
+    ctx.moveTo(2.5, hy + 7.5); ctx.lineTo(10, hy + 6) // sneer
+    ctx.stroke()
+  }
+  // extras
+  if (opts.style === 'thug') {
+    ctx.strokeStyle = '#a23a3a' // scar
+    ctx.lineWidth = 1.4
+    ctx.beginPath(); ctx.moveTo(-1, hy + 2); ctx.lineTo(5, hy + 10); ctx.stroke()
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'
+    ctx.lineWidth = 0.7
+    for (const k of [0.3, 0.6]) { ctx.beginPath(); ctx.moveTo(-1 + 6 * k - 1.5, hy + 2 + 8 * k); ctx.lineTo(-1 + 6 * k + 1.5, hy + 2 + 8 * k); ctx.stroke() }
+  } else if (opts.style === 'boss') {
+    ctx.fillStyle = '#2a1535' // beard
+    ctx.beginPath(); ctx.moveTo(-6, hy + 7); ctx.quadraticCurveTo(2, hy + 22, 11, hy + 8); ctx.quadraticCurveTo(3, hy + 10, -6, hy + 7); ctx.fill()
+  }
+  ctx.restore()
+}
+
+function drawPlayerSprite() {
+  const p = state.player
+  const shadowShrink = clamp(1 - p.z / 160, 0.55, 1)
+  drawShadow(p.x, p.y, depthScale(p.y) * shadowShrink)
+
+  if (p.dashing) {
+    // Cheap afterimage trail: a few faint copies behind the dash direction,
+    // fading out with distance - no history buffer needed since the dash
+    // moves in a straight line, so a fixed offset per copy is enough.
+    for (let i = 3; i >= 1; i--) {
+      drawHumanoid(p.x - p.dashDir * i * 14, p.y, {
+        style: 'player',
+        color: '#3f7fd1',
+        facing: p.facing,
+        walkPhase: p.walkPhase,
+        moving: true,
+        alpha: 0.12 * (4 - i),
+      })
+    }
+  }
+
+  drawHumanoid(p.x, p.y, {
+    style: 'player',
+    hurt: p.hitstunTimer > 0,
+    color: '#3f7fd1',
+    facing: p.facing,
+    walkPhase: p.walkPhase,
+    moving: p.moving,
+    attacking: !!p.attack && p.attack.phase !== 'recovery',
+    attackType: p.attack && p.attack.type,
+    flash: p.hitstunTimer > 0 && Math.floor(p.hitstunTimer * 20) % 2 === 0,
+    lift: p.z,
+  })
+}
+
+function drawBossHealthBar(en) {
+  const sx = worldToScreenX(en.x)
+  const w = 70
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'
+  ctx.fillRect(sx - w / 2, en.y - 128, w, 6)
+  ctx.fillStyle = '#ff4d4d'
+  ctx.fillRect(sx - w / 2, en.y - 128, w * Math.max(0, en.hp / en.maxHp), 6)
+}
+
+function drawEnemySprite(en) {
+  const stats = ENEMY_TYPES[en.type]
+  const alpha = en.state === 'dead' ? Math.max(0, en.deathTimer / DEATH_FADE) : 1
+  const liftZ = en.thrown ? en.thrown.z : 0
+  const shadowShrink = clamp(1 - liftZ / 160, 0.55, 1)
+  drawShadow(en.x, en.y, depthScale(en.y) * shadowShrink)
+  drawHumanoid(en.x, en.y, {
+    style: en.type === 'boss' ? 'boss' : 'thug',
+    size: en.type === 'boss' ? 1.25 : 1,
+    hurt: en.state === 'hitstun',
+    color: en.state === 'telegraph' ? '#ffcf4d' : stats.color,
+    facing: en.facing,
+    walkPhase: en.walkPhase,
+    moving: en.state === 'approach',
+    attacking: en.state === 'attack',
+    flash: en.flashTimer > 0,
+    alpha,
+    lift: liftZ,
+  })
+  if (en.type === 'boss' && en.state !== 'dead') drawBossHealthBar(en)
+}
+
+function drawWorld() {
+  drawBackground()
+  const drawables = [{ y: state.player.y, draw: drawPlayerSprite }]
+  for (const en of state.enemies) drawables.push({ y: en.y, draw: () => drawEnemySprite(en) })
+  drawables.sort((a, b) => a.y - b.y)
+  for (const d of drawables) d.draw()
+  drawUltimateEffect()
+}
+
+function drawUltimateEffect() {
+  const p = state.player
+  const atk = p.attack
+  if (!atk || atk.type !== 'ultimate') return
+  const def = ATTACKS.ultimate
+  const progress = atk.phase === 'startup' ? atk.t / def.startup : atk.phase === 'active' ? 1 : null
+  if (progress === null) return
+  const sx = worldToScreenX(p.x)
+  const radius = def.range * (0.3 + progress * 0.7)
+  ctx.save()
+  ctx.strokeStyle = `rgba(255, 220, 90, ${0.9 - progress * 0.5})`
+  ctx.lineWidth = 4
+  ctx.beginPath()
+  ctx.ellipse(sx, p.y - 30, radius, radius * 0.55, 0, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.restore()
+}
+
+function drawUltimateFlash() {
+  const p = state.player
+  if (p.ultimateFlash <= 0) return
+  ctx.fillStyle = `rgba(255, 240, 180, ${(p.ultimateFlash / 0.3) * 0.35})`
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+}
+
+function drawHud() {
+  const p = state.player
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'
+  ctx.fillRect(16, 16, 220, 22)
+  ctx.fillStyle = '#4dff88'
+  ctx.fillRect(18, 18, 216 * Math.max(0, p.hp / PLAYER_MAX_HP), 18)
+  ctx.strokeStyle = '#fff'
+  ctx.lineWidth = 1
+  ctx.strokeRect(16, 16, 220, 22)
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 13px sans-serif'
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'top'
+  ctx.fillText('HP', 20, 17)
+
+  const ready = p.gauge >= GAUGE_MAX
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'
+  ctx.fillRect(16, 42, 220, 14)
+  ctx.fillStyle = ready && Math.floor(performance.now() / 150) % 2 === 0 ? '#ffe066' : '#9a5cff'
+  ctx.fillRect(18, 44, 216 * (p.gauge / GAUGE_MAX), 10)
+  ctx.strokeStyle = '#fff'
+  ctx.strokeRect(16, 42, 220, 14)
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 10px sans-serif'
+  ctx.fillText(ready ? '필살기 준비 완료! (L)' : '필살기', 20, 43)
+
+  const waveLabel =
+    state.waveIndex >= WAVES.length
+      ? 'CLEAR'
+      : state.waveIndex === WAVES.length - 1
+        ? 'BOSS'
+        : `WAVE ${state.waveIndex + 1}/${WAVES.length}`
+  ctx.fillText(waveLabel, 16, 62)
+}
+
+function drawTitleScreen() {
+  const W = canvas.width
+  const H = canvas.height
+  const t = performance.now() / 1000
+  ctx.textBaseline = 'alphabetic'
+  const shade = ctx.createLinearGradient(0, 0, 0, H)
+  shade.addColorStop(0, 'rgba(12,8,28,0.9)')
+  shade.addColorStop(1, 'rgba(12,8,28,0.6)')
+  ctx.fillStyle = shade
+  ctx.fillRect(0, 0, W, H)
+
+  // slanted action stripes behind the logo
+  ctx.save()
+  ctx.translate(W / 2, 128)
+  ctx.rotate(-0.06)
+  ctx.fillStyle = '#e04a4a'
+  ctx.fillRect(-330, -52, 660, 96)
+  ctx.fillStyle = '#ffd24a'
+  ctx.fillRect(-330, 44, 660, 8)
+  ctx.textAlign = 'center'
+  ctx.font = 'italic bold 66px sans-serif'
+  ctx.lineJoin = 'round'
+  ctx.strokeStyle = '#1a0f24'
+  ctx.lineWidth = 10
+  ctx.strokeText('횡스크롤 액션', 0, 22)
+  ctx.fillStyle = '#fff'
+  ctx.fillText('횡스크롤 액션', 0, 22)
+  ctx.restore()
+
+  // the cast, big: hero mid-punch facing a thug and the boss
+  const big = (cx, cy, k, opts) => {
+    ctx.save()
+    ctx.translate(cx, cy)
+    ctx.scale(k, k)
+    ctx.fillStyle = 'rgba(0,0,0,0.4)'
+    ctx.beginPath()
+    ctx.ellipse(0, 2, 26, 7, 0, 0, Math.PI * 2)
+    ctx.fill()
+    drawHumanoid(state.cameraX, 0, { size: 1 / depthScale(0), walkPhase: t * 6, ...opts })
+    ctx.restore()
+  }
+  const jab = Math.sin(t * 5) > 0.2
+  big(W / 2 - 150, 430, 2.4, { style: 'player', color: '#3f7fd1', facing: 1, attacking: jab, attackType: 'punch' })
+  big(W / 2 + 60, 426, 2.1, { style: 'thug', color: ENEMY_TYPES.thug.color, facing: -1, hurt: jab })
+  big(W / 2 + 220, 436, 2.7, { style: 'boss', color: ENEMY_TYPES.boss.color, facing: -1 })
+  if (jab) {
+    ctx.fillStyle = '#ffe066'
+    ctx.beginPath()
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2
+      const r = i % 2 ? 12 : 26
+      ctx.lineTo(W / 2 - 46 + Math.cos(a) * r, 312 + Math.sin(a) * r)
+    }
+    ctx.closePath()
+    ctx.fill()
+  }
+
+  ctx.textAlign = 'center'
+  ctx.font = '14px sans-serif'
+  ctx.fillStyle = 'rgba(255,255,255,0.9)'
+  ctx.fillText('A/D 이동 · W/S 앞뒤 · 스페이스 점프 · J 펀치 · K 킥 · J+K 던지기 · L 필살기 · M 소리', W / 2, H - 62)
+  ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
+  ctx.font = 'bold 20px sans-serif'
+  ctx.fillStyle = '#ffe066'
+  ctx.fillText('아무 키나 누르거나 클릭해서 시작', W / 2, H - 26)
+  ctx.globalAlpha = 1
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'top'
+}
+
+function drawOverlay() {
+  if (performance.now() < muteNoticeUntil) {
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'top'
+    ctx.font = 'bold 13px sans-serif'
+    ctx.fillStyle = '#fff'
+    ctx.fillText(isMuted() ? '소리 끔 (M)' : '소리 켬 (M)', canvas.width - 16, 16)
+    ctx.textAlign = 'left'
+  }
+  if (state.phase === 'title') {
+    drawTitleScreen()
+    return
+  }
+  if (state.phase === 'playing') return
+  ctx.fillStyle = 'rgba(10,8,20,0.75)'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 36px sans-serif'
+  ctx.fillText(state.phase === 'cleared' ? 'STAGE CLEAR!' : 'GAME OVER', canvas.width / 2, canvas.height / 2 - 30)
+  ctx.font = '18px sans-serif'
+  ctx.fillText('R 키를 눌러 다시 시작', canvas.width / 2, canvas.height / 2 + 20)
+}
+
+let lastTime = performance.now()
+function loop(time) {
+  const dt = Math.min(0.05, (time - lastTime) / 1000)
+  lastTime = time
+
+  update(dt)
+  drawWorld()
+  drawUltimateFlash()
+  drawHud()
+  drawOverlay()
+
+  requestAnimationFrame(loop)
+}
+requestAnimationFrame(loop)
