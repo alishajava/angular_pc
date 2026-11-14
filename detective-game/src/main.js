@@ -1,12 +1,25 @@
-// 모순 탐정 - a case begins, the detective and the cast investigate the scene,
-// the witness is cross-examined, and the contradiction exposes the culprit.
-// Own story and characters; the *format* (investigate -> deduce -> reveal) is
-// the only thing borrowed from the genre.
+// 모순 탐정 - a three-act case: collect evidence at the scene, cross-examine
+// two witnesses statement by statement, and present the evidence that exposes
+// each lie. Own story and characters; only the *format* (investigate ->
+// cross-examine -> present evidence) is borrowed from the genre.
 
 import { drawCharacter, drawBust, CAST } from './characters.js'
+import {
+  INTRO,
+  CLUES,
+  EVIDENCE,
+  CLUE_EVIDENCE,
+  TALK,
+  BEFORE_KIM,
+  EXAM_KIM,
+  KIM_CLEAR,
+  EXAM_CHOI,
+  CHOI_CLEAR,
+} from './story.js'
 
 const CANVAS_W = 900
 const CANVAS_H = 600
+const MAX_HEARTS = 5
 
 const canvas = document.getElementById('game')
 canvas.width = CANVAS_W
@@ -84,117 +97,68 @@ function playCorrectSound() {
 function playStarSound(i) {
   playTone({ freqFrom: 880 * (1 + i * 0.25), freqTo: 880 * (1 + i * 0.25), duration: 0.22, type: 'triangle', gain: 0.4, delay: i * 0.18 })
 }
+function playEvidenceSound() {
+  playTone({ freqFrom: 660, freqTo: 990, duration: 0.12, type: 'triangle', gain: 0.45 })
+  playTone({ freqFrom: 990, freqTo: 1320, duration: 0.12, type: 'triangle', gain: 0.4, delay: 0.1 })
+  playTone({ freqFrom: 1320, freqTo: 1980, duration: 0.22, type: 'triangle', gain: 0.35, delay: 0.2 })
+}
+function playBuzzSound() {
+  playTone({ freqFrom: 220, freqTo: 110, duration: 0.3, type: 'sawtooth', gain: 0.5 })
+  playTone({ freqFrom: 165, freqTo: 82, duration: 0.34, type: 'square', gain: 0.3, delay: 0.04 })
+}
+function playLoseSound() {
+  for (const [i, f] of [392, 330, 262, 196].entries()) playTone({ freqFrom: f, freqTo: f * 0.98, duration: 0.3, type: 'triangle', gain: 0.45, delay: i * 0.22 })
+}
 function playClickSound() {
   playTone({ freqFrom: 520, freqTo: 520, duration: 0.05, type: 'triangle', gain: 0.25 })
 }
 
-// ---------- Case data ----------
-// The story is told as lines spoken by the cast. `mood` picks the speaker's
-// expression in the dialogue portrait and on stage.
-const INTRO = [
-  { who: 'hana', mood: 'worried', text: '탐정님, 큰일이에요! 새벽에 최도윤 사장님의 사무실에 누군가 침입했대요!' },
-  { who: 'seojin', mood: 'determined', text: '침입이라... 일단 현장부터 보자, 하나. 사소한 단서도 놓치면 안 돼.' },
-  { who: 'park', mood: 'neutral', text: '오, 한 탐정 왔군. 금고는 멀쩡한데 서류만 헤집어 놨어. 목격자도 한 명 있으니 현장을 본 뒤에 이야기해 보게.' },
-  { who: 'seojin', mood: 'determined', text: '거짓말은 반드시 어딘가에 모순을 남기는 법이지... 시작하자.' },
-]
+// ---------- Case state ----------
+const EXAMS = { kim: EXAM_KIM, choi: EXAM_CHOI }
 
+// Where the clickable clues sit in the office (the art is in drawHotspots).
 const HOTSPOTS = [
-  {
-    id: 'desk',
-    label: '책상',
-    rect: { x: 560, y: 380, w: 220, h: 110 },
-    text: '서류가 어지럽게 흩어져 있다. 몸싸움이 있었던 흔적일까?',
-    examined: false,
-  },
-  {
-    id: 'window',
-    label: '창문',
-    rect: { x: 110, y: 120, w: 160, h: 150 },
-    text: '창문이 살짝 열려 있다. 바깥으로는 골목길과 편의점 불빛이 보인다.',
-    examined: false,
-  },
-  {
-    id: 'cctv',
-    label: 'CCTV 모니터',
-    rect: { x: 640, y: 90, w: 130, h: 80 },
-    text: '보안 카메라 영상을 되돌려 보니, 사건 당일 밤 10시 15분경 편의점 앞을 지나가는 한 남자가 찍혀 있다. 왠지 낯이 익다...',
-    examined: false,
-    givesEvidence: true,
-  },
-  {
-    id: 'umbrella',
-    label: '우산',
-    rect: { x: 300, y: 310, w: 70, h: 130 },
-    text: '문 옆에 젖은 우산이 세워져 있다. 편의점 가격표가 아직 붙어 있다. 사건 당일 밤에 산 것일까?',
-    examined: false,
-  },
+  { id: 'desk', label: '책상', rect: { x: 560, y: 380, w: 220, h: 110 }, examined: false },
+  { id: 'window', label: '창문', rect: { x: 110, y: 120, w: 160, h: 150 }, examined: false },
+  { id: 'cctv', label: 'CCTV 모니터', rect: { x: 640, y: 90, w: 130, h: 80 }, examined: false },
+  { id: 'umbrella', label: '우산', rect: { x: 300, y: 310, w: 70, h: 130 }, examined: false },
+  { id: 'keycard', label: '출입 단말기', rect: { x: 300, y: 190, w: 56, h: 84 }, examined: false },
+  { id: 'safe', label: '금고', rect: { x: 520, y: 130, w: 90, h: 90 }, examined: false },
 ]
 
-// The people at the scene. Talking to them is optional but adds to the final
-// deduction score; each click moves on to what they say next.
+// The people at the scene. Talking to them is optional but adds to the score;
+// each click moves on to what they say next.
 const PEOPLE = [
   { id: 'minji', x: 60, scale: 0.95, talked: false, next: 0, mood: 'smile' },
   { id: 'park', x: 215, scale: 0.95, talked: false, next: 0, mood: 'neutral' },
   { id: 'hana', x: 410, scale: 0.95, talked: false, next: 0, mood: 'smile' },
   { id: 'seojin', x: 505, scale: 0.95, talked: false, next: 0, mood: 'determined', isPlayer: true },
-  { id: 'choi', x: 845, scale: 0.95, talked: false, next: 0, mood: 'worried' },
+  { id: 'choi', x: 858, scale: 0.95, talked: false, next: 0, mood: 'worried' },
 ]
 const PEOPLE_BASE_Y = 448
-
-const TALK = {
-  minji: [
-    { mood: 'smile', text: '그날 밤요? 10시 15분쯤이었어요. 한 아저씨가 급하게 들어와서 우산을 사 갔어요. 비가 막 쏟아질 때라서요.' },
-    { mood: 'cheer', text: '사진 속 분이 맞는 것 같아요! 계산하면서 계속 시계만 쳐다보더라고요. 뭔가 쫓기는 사람처럼요.' },
-  ],
-  park: [
-    { mood: 'neutral', text: '새벽 2시경 침입이 있었네. 물건을 훔치려는 게 아니라... 뭔가를 찾으려던 것 같아. 서류 더미가 전부 뒤집혀 있었거든.' },
-    { mood: 'neutral', text: '용의자는 아직 없어. 다만 사건 전날 밤 이 근처에서 서성이던 남자가 있었다는 제보는 있었지.' },
-  ],
-  hana: [
-    { mood: 'cheer', text: '탐정님! 수상한 곳은 노랗게 빛나고 있어요. 하나씩 눌러서 조사해 봐요!' },
-    { mood: 'smile', text: '저는 수첩에 다 적고 있어요. 책상, 창문, CCTV, 그리고 우산... 하나도 놓치지 마세요!' },
-  ],
-  hanaDone: { mood: 'cheer', text: '단서는 다 모인 것 같아요! 이제 목격자 김수한 씨를 심문하러 가요!' },
-  choi: [
-    { mood: 'worried', text: '제 사무실이... 엉망이 됐어요. 이마는 몸싸움 중에 다쳤습니다. 어두워서 얼굴은 보지 못했어요.' },
-    { mood: 'worried', text: '그러고 보니... 얼마 전 김수한 그 친구와 돈 문제로 크게 다퉜습니다. 설마 그 사람이...?' },
-  ],
-  seojin: [
-    { mood: 'determined', text: '...사건 당일 밤의 동선만 밝혀내면 된다. 거짓말은 시간표를 어긋나게 만들지.' },
-    { mood: 'determined', text: '단서는 이미 이 방 안에 있어. 남은 건 모순을 찾아내는 것뿐이야.' },
-  ],
-}
-
-const WITNESS_ID = 'suhan'
-const TESTIMONY = '저는 사건이 일어난 밤 10시, 계속 집에서 혼자 TV를 보고 있었습니다. 아무 데도 나가지 않았어요.'
-const EVIDENCE = {
-  name: '편의점 CCTV 사진',
-  desc: '사건 당일 밤 10시 15분, 현장 근처 편의점에서 찍힌 사진. 김수한이 우산을 사고 있다.',
-}
-
-// After the objection: the deduction, the confession, and the cast's reactions.
-const RESULT = [
-  { who: 'seojin', mood: 'determined', text: '하지만 이 사진에는 사건 당일 밤 10시 15분, 현장 근처 편의점에 있는 당신이 찍혀 있습니다.\n"계속 집에 있었다"는 증언과 맞지 않습니다!' },
-  { who: 'seojin', mood: 'determined', text: '당신의 알리바이는 거짓이었습니다. 사건 현장 근처에 있었다는 사실이 이제 증거로 드러났습니다.\n범인은 바로 당신, 김수한입니다!' },
-  { who: 'suhan', mood: 'defeated', text: '...그래요, 제가 그랬습니다. 최 사장에게 빚 독촉을 받다가, 사무실에서 차용증을 없애려고... 우산은 비를 피하려고 급하게 산 거였어요.' },
-  { who: 'park', mood: 'angry', text: '수한 씨, 서까지 동행하시죠. 한 탐정, 이번에도 신세를 졌네.' },
-  { who: 'minji', mood: 'cheer', text: '제가 본 그 아저씨가 맞았네요! 도움이 됐다니 다행이에요!' },
-  { who: 'hana', mood: 'cheer', text: '역시 우리 탐정님! 모순을 딱 짚어내셨어요! 오늘도 사건 해결이에요!' },
-]
+const IDLE_LINE = '현장을 둘러보자. 수상한 곳이나 사람을 클릭해보자.'
 
 const state = {
-  phase: 'title', // title | intro | investigate | testimony | evidencePick | objection | result
-  introLine: 0,
-  resultLine: 0,
-  line: { who: 'seojin', mood: 'determined', text: '현장을 둘러보자. 수상한 곳이나 사람을 클릭해보자.', shown: 999 },
-  objectionTimer: 0,
+  phase: 'title', // title | seq | investigate | exam | objection | gameover | ending
+  line: { who: 'seojin', mood: 'determined', text: IDLE_LINE, shown: 999 },
   hover: false,
-  stars: 0,
+  popup: null, // { id, until } - "evidence acquired" banner
+  filePanel: null, // { sel } while the evidence file is open in the investigation
+  evidence: [], // collected evidence ids, in the order they were found
+  seq: null, // { lines, index, scene, onEnd }
+  exam: null, // see startExam
+  hearts: MAX_HEARTS,
+  objection: { timer: 0, witness: 'suhan' },
+  flash: 0,
   starTimer: 0,
+  muteNoticeUntil: 0,
 }
 
 function say(who, text, mood = 'neutral') {
   state.line = { who, mood, text, shown: 0 }
+}
+function sayFull(who, text, mood = 'neutral') {
+  state.line = { who, mood, text, shown: text.length }
 }
 function lineDone() {
   return state.line.shown >= state.line.text.length
@@ -202,7 +166,6 @@ function lineDone() {
 function finishLine() {
   state.line.shown = state.line.text.length
 }
-const IDLE_LINE = '현장을 둘러보자. 수상한 곳이나 사람을 클릭해보자.'
 
 function allHotspotsExamined() {
   return HOTSPOTS.every((h) => h.examined)
@@ -210,13 +173,20 @@ function allHotspotsExamined() {
 function talkedCount() {
   return PEOPLE.filter((p) => p.talked && !p.isPlayer).length
 }
+function talkTargets() {
+  return PEOPLE.filter((p) => !p.isPlayer).length
+}
+
 function resetCase() {
   state.phase = 'title'
-  state.introLine = 0
-  state.resultLine = 0
   state.line = { who: 'seojin', mood: 'determined', text: IDLE_LINE, shown: 999 }
-  state.objectionTimer = 0
-  state.stars = 0
+  state.popup = null
+  state.filePanel = null
+  state.evidence = []
+  state.seq = null
+  state.exam = null
+  state.hearts = MAX_HEARTS
+  state.flash = 0
   state.starTimer = 0
   for (const h of HOTSPOTS) h.examined = false
   for (const p of PEOPLE) {
@@ -225,14 +195,164 @@ function resetCase() {
   }
 }
 
-// ---------- Input ----------
-function canvasPoint(e) {
-  const rect = canvas.getBoundingClientRect()
-  return {
-    mx: ((e.clientX - rect.left) * canvas.width) / rect.width,
-    my: ((e.clientY - rect.top) * canvas.height) / rect.height,
+function giveEvidence(id) {
+  if (!id || state.evidence.includes(id)) return
+  state.evidence.push(id)
+  state.popup = { id, until: performance.now() + 2800 }
+  playEvidenceSound()
+}
+
+// ---------- Sequences (scripted dialogue over a stage) ----------
+function startSequence(lines, scene, onEnd) {
+  state.phase = 'seq'
+  state.seq = { lines, index: 0, scene, onEnd }
+  const l = lines[0]
+  say(l.who, l.text, l.mood)
+}
+function advanceSequence() {
+  const s = state.seq
+  if (!lineDone()) {
+    finishLine()
+    return
+  }
+  playClickSound()
+  if (s.index < s.lines.length - 1) {
+    s.index += 1
+    const l = s.lines[s.index]
+    say(l.who, l.text, l.mood)
+  } else {
+    s.onEnd()
   }
 }
+
+// ---------- Cross-examination ----------
+function startExam(id) {
+  const def = EXAMS[id]
+  state.phase = 'exam'
+  state.exam = {
+    id,
+    def,
+    idx: 0,
+    broken: new Set(),
+    mode: 'listen', // listen | react | picker
+    after: null, // what happens when the current reaction line is read
+    sel: null,
+    pressCount: def.statements.map(() => 0),
+  }
+  showStatement()
+}
+function currentStatement() {
+  return state.exam.def.statements[state.exam.idx]
+}
+function showStatement(full = false) {
+  const ex = state.exam
+  const st = currentStatement()
+  if (full) sayFull(ex.def.witness, st.text, 'nervous')
+  else say(ex.def.witness, st.text, 'nervous')
+}
+function gotoStatement(i) {
+  const ex = state.exam
+  const n = ex.def.statements.length
+  ex.idx = (i + n) % n
+  showStatement()
+  playClickSound()
+}
+function pressStatement() {
+  const ex = state.exam
+  const st = currentStatement()
+  const lines = st.press
+  const line = lines[ex.pressCount[ex.idx] % lines.length]
+  ex.pressCount[ex.idx] += 1
+  say(ex.def.witness, line.text, line.mood)
+  ex.mode = 'react'
+  ex.after = 'restore'
+  playTalkSound()
+  if (st.unlock && !state.evidence.includes(st.unlock)) giveEvidence(st.unlock)
+}
+function presentEvidence(evId) {
+  const ex = state.exam
+  const st = currentStatement()
+  ex.mode = 'listen'
+  ex.sel = null
+  if (st.valid.includes(evId)) {
+    if (ex.broken.has(ex.idx)) {
+      say('hana', '그 모순은 이미 짚어냈어요, 탐정님! 다른 증언을 살펴봐요.', 'smile')
+      ex.mode = 'react'
+      ex.after = 'restore'
+      return
+    }
+    ex.broken.add(ex.idx)
+    state.phase = 'objection'
+    state.objection = { timer: 1.15, witness: ex.def.witness }
+    playObjectionSound()
+    return
+  }
+  // wrong evidence: the witness shrugs it off and the court's trust drops
+  state.hearts -= 1
+  state.flash = 0.45
+  playBuzzSound()
+  const w = ex.def.wrong[Math.floor(Math.random() * ex.def.wrong.length)]
+  say(ex.def.witness, w.text, w.mood)
+  ex.mode = 'react'
+  ex.after = state.hearts <= 0 ? 'gameover' : 'restore'
+}
+function afterObjection() {
+  const ex = state.exam
+  const st = currentStatement()
+  state.phase = 'exam'
+  say(ex.def.witness, st.react.text, st.react.mood)
+  ex.mode = 'react'
+  ex.after = ex.broken.size >= ex.def.needed ? 'clear' : 'restore'
+}
+function finishReaction() {
+  const ex = state.exam
+  const after = ex.after
+  ex.mode = 'listen'
+  ex.after = null
+  if (after === 'restore') showStatement(true)
+  else if (after === 'gameover') {
+    state.phase = 'gameover'
+    playLoseSound()
+  } else if (after === 'clear') {
+    playCorrectSound()
+    if (ex.id === 'kim') startSequence(KIM_CLEAR, 'courtKim', () => startExam('choi'))
+    else
+      startSequence(CHOI_CLEAR, 'finale', () => {
+        state.phase = 'ending'
+        state.starTimer = 0
+      })
+  }
+}
+function retryExam() {
+  state.hearts = MAX_HEARTS
+  startExam(state.exam.id)
+}
+
+function startInvestigation() {
+  state.phase = 'investigate'
+  state.line = { who: 'seojin', mood: 'determined', text: IDLE_LINE, shown: 999 }
+}
+
+function talkTo(p) {
+  const hanaDone = p.id === 'hana' && allHotspotsExamined()
+  const entry = hanaDone ? TALK.hanaDone : TALK[p.id][p.next % TALK[p.id].length]
+  if (!hanaDone) p.next += 1
+  const first = !p.talked
+  p.talked = true
+  say(p.id, entry.text, entry.mood)
+  if (first && !p.isPlayer) playTalkSound()
+  else playClickSound()
+}
+
+function examineHotspot(h) {
+  const first = !h.examined
+  h.examined = true
+  say('seojin', CLUES[h.id].text, 'determined')
+  playClueSound()
+  if (first) giveEvidence(CLUE_EVIDENCE[h.id])
+}
+
+// ---------- Layout ----------
 function inRect(mx, my, r) {
   return mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h
 }
@@ -246,37 +366,107 @@ function personAt(mx, my) {
 function hotspotAt(mx, my) {
   return HOTSPOTS.find((h) => inRect(mx, my, h.rect))
 }
+function proceedButtonRect() {
+  return { x: CANVAS_W - 250, y: 196, w: 220, h: 42 }
+}
+function fileButtonRect() {
+  return { x: CANVAS_W - 138, y: 10, w: 126, h: 30 }
+}
+function examButtons() {
+  return {
+    prev: { x: 40, y: 404, w: 56, h: 38 },
+    next: { x: 104, y: 404, w: 56, h: 38 },
+    press: { x: 566, y: 404, w: 130, h: 38 },
+    present: { x: 706, y: 404, w: 160, h: 38 },
+  }
+}
+// The evidence file / "present evidence" overlay.
+function pickerLayout() {
+  const cols = 4
+  const cw = 150
+  const ch = 96
+  const gap = 12
+  const x0 = (CANVAS_W - (cols * cw + (cols - 1) * gap)) / 2
+  const cards = state.evidence.map((id, i) => ({
+    id,
+    x: x0 + (i % cols) * (cw + gap),
+    y: 92 + Math.floor(i / cols) * (ch + gap),
+    w: cw,
+    h: ch,
+  }))
+  return {
+    cards,
+    close: { x: x0, y: 460, w: 120, h: 40 },
+    submit: { x: x0 + cols * cw + (cols - 1) * gap - 150, y: 460, w: 150, h: 40 },
+  }
+}
+function pickerOpen() {
+  return !!state.filePanel || (state.phase === 'exam' && state.exam && state.exam.mode === 'picker')
+}
+function pickerSel() {
+  return state.filePanel ? state.filePanel.sel : state.exam.sel
+}
+function setPickerSel(id) {
+  if (state.filePanel) state.filePanel.sel = id
+  else state.exam.sel = id
+}
+function closePicker() {
+  if (state.filePanel) state.filePanel = null
+  else if (state.exam) {
+    state.exam.mode = 'listen'
+    state.exam.sel = null
+  }
+}
+
+// ---------- Input ----------
+function canvasPoint(e) {
+  const rect = canvas.getBoundingClientRect()
+  return {
+    mx: ((e.clientX - rect.left) * canvas.width) / rect.width,
+    my: ((e.clientY - rect.top) * canvas.height) / rect.height,
+  }
+}
 
 canvas.addEventListener('mousemove', (e) => {
   const { mx, my } = canvasPoint(e)
   let hover = false
-  if (state.phase === 'investigate') {
-    hover = !!personAt(mx, my) || !!hotspotAt(mx, my) || (allHotspotsExamined() && inRect(mx, my, proceedButtonRect()))
-  } else if (state.phase === 'testimony') {
-    hover = lineDone() && inRect(mx, my, presentButtonRect())
-  } else if (state.phase === 'evidencePick') {
-    hover = inRect(mx, my, evidenceCardRect())
-  } else if (state.phase === 'title' || state.phase === 'intro' || state.phase === 'result') {
+  if (pickerOpen()) {
+    const lay = pickerLayout()
+    const present = !state.filePanel
+    hover = lay.cards.some((c) => inRect(mx, my, c)) || inRect(mx, my, lay.close) || (present && !!pickerSel() && inRect(mx, my, lay.submit))
+  } else if (state.phase === 'investigate') {
+    hover =
+      !!personAt(mx, my) ||
+      !!hotspotAt(mx, my) ||
+      inRect(mx, my, fileButtonRect()) ||
+      (allHotspotsExamined() && inRect(mx, my, proceedButtonRect()))
+  } else if (state.phase === 'exam' && state.exam.mode === 'listen') {
+    const b = examButtons()
+    hover = Object.values(b).some((r) => inRect(mx, my, r)) || inRect(mx, my, fileButtonRect())
+  } else if (['title', 'seq', 'ending', 'gameover'].includes(state.phase)) {
     hover = true
   }
   state.hover = hover
   canvas.style.cursor = hover ? 'pointer' : 'default'
 })
 
-function talkTo(p) {
-  const hanaDone = p.id === 'hana' && allHotspotsExamined()
-  const entry = hanaDone ? TALK.hanaDone : TALK[p.id][p.next % TALK[p.id].length]
-  if (!hanaDone) p.next += 1
-  const first = !p.talked
-  p.talked = true
-  say(p.id, entry.text, entry.mood)
-  if (first && !p.isPlayer) playTalkSound()
-  else playClickSound()
-}
-
-function startTestimony() {
-  state.phase = 'testimony'
-  say(WITNESS_ID, TESTIMONY, 'nervous')
+function clickPicker(mx, my) {
+  const lay = pickerLayout()
+  const card = lay.cards.find((c) => inRect(mx, my, c))
+  if (card) {
+    setPickerSel(card.id)
+    playClickSound()
+    return
+  }
+  if (inRect(mx, my, lay.close)) {
+    closePicker()
+    playClickSound()
+    return
+  }
+  if (!state.filePanel && pickerSel() && inRect(mx, my, lay.submit)) {
+    const id = pickerSel()
+    presentEvidence(id)
+  }
 }
 
 canvas.addEventListener('click', (e) => {
@@ -284,35 +474,28 @@ canvas.addEventListener('click', (e) => {
   const { mx, my } = canvasPoint(e)
 
   if (state.phase === 'title') {
-    state.phase = 'intro'
-    state.introLine = 0
-    const l = INTRO[0]
-    say(l.who, l.text, l.mood)
     playClickSound()
+    startSequence(INTRO, 'intro', startInvestigation)
     return
   }
-  if (state.phase === 'intro') {
-    if (!lineDone()) {
-      finishLine()
-      return
-    }
-    if (state.introLine < INTRO.length - 1) {
-      state.introLine += 1
-      const l = INTRO[state.introLine]
-      say(l.who, l.text, l.mood)
-      playClickSound()
-    } else {
-      state.phase = 'investigate'
-      state.line = { who: 'seojin', mood: 'determined', text: IDLE_LINE, shown: 999 }
-      playClickSound()
-    }
+  if (pickerOpen()) {
+    clickPicker(mx, my)
+    return
+  }
+  if (state.phase === 'seq') {
+    advanceSequence()
     return
   }
   if (state.phase === 'investigate') {
+    if (inRect(mx, my, fileButtonRect())) {
+      if (state.evidence.length) state.filePanel = { sel: state.evidence[0] }
+      playClickSound()
+      return
+    }
     if (!lineDone()) finishLine() // skip the typing, but still handle the click below
     if (allHotspotsExamined() && inRect(mx, my, proceedButtonRect())) {
-      startTestimony()
       playClickSound()
+      startSequence(BEFORE_KIM, 'courtKim', () => startExam('kim'))
       return
     }
     const person = personAt(mx, my)
@@ -321,43 +504,39 @@ canvas.addEventListener('click', (e) => {
       return
     }
     const hit = hotspotAt(mx, my)
-    if (hit) {
-      hit.examined = true
-      say('seojin', hit.text, 'determined')
-      playClueSound()
-    }
+    if (hit) examineHotspot(hit)
     return
   }
-  if (state.phase === 'testimony') {
-    if (!lineDone()) {
-      finishLine()
+  if (state.phase === 'exam') {
+    const ex = state.exam
+    if (ex.mode === 'react') {
+      if (!lineDone()) finishLine()
+      else finishReaction()
       return
     }
-    if (inRect(mx, my, presentButtonRect())) {
-      state.phase = 'evidencePick'
+    if (inRect(mx, my, fileButtonRect())) {
+      if (state.evidence.length) state.filePanel = { sel: state.evidence[0] }
+      playClickSound()
+      return
+    }
+    const b = examButtons()
+    if (!lineDone()) {
+      finishLine()
+      if (!Object.values(b).some((r) => inRect(mx, my, r))) return
+    }
+    if (inRect(mx, my, b.prev)) gotoStatement(ex.idx - 1)
+    else if (inRect(mx, my, b.next)) gotoStatement(ex.idx + 1)
+    else if (inRect(mx, my, b.press)) pressStatement()
+    else if (inRect(mx, my, b.present)) {
+      ex.mode = 'picker'
+      ex.sel = state.evidence[0] || null
       playClickSound()
     }
     return
   }
-  if (state.phase === 'evidencePick') {
-    if (inRect(mx, my, evidenceCardRect())) {
-      state.phase = 'objection'
-      state.objectionTimer = 1.1
-      playObjectionSound()
-    }
-    return
-  }
-  if (state.phase === 'result') {
-    if (!lineDone()) {
-      finishLine()
-      return
-    }
-    if (state.resultLine < RESULT.length - 1) {
-      state.resultLine += 1
-      const l = RESULT[state.resultLine]
-      say(l.who, l.text, l.mood)
-      playClickSound()
-    }
+  if (state.phase === 'gameover') {
+    retryExam()
+    playClickSound()
   }
 })
 
@@ -368,17 +547,12 @@ window.addEventListener('keydown', (e) => {
     toggleMute()
     state.muteNoticeUntil = performance.now() + 1600
   }
+  if (key === 'escape' && pickerOpen()) closePicker()
+  if (state.phase === 'exam' && state.exam.mode === 'listen') {
+    if (key === 'arrowleft') gotoStatement(state.exam.idx - 1)
+    if (key === 'arrowright') gotoStatement(state.exam.idx + 1)
+  }
 })
-
-function presentButtonRect() {
-  return { x: CANVAS_W - 220, y: CANVAS_H - 30 - 118 - 52, w: 180, h: 40 }
-}
-function evidenceCardRect() {
-  return { x: CANVAS_W / 2 - 170, y: CANVAS_H / 2 - 130, w: 340, h: 250 }
-}
-function proceedButtonRect() {
-  return { x: CANVAS_W - 250, y: 196, w: 220, h: 42 }
-}
 
 // ---------- Backdrops ----------
 function drawCourtroomBackdrop(t) {
@@ -638,6 +812,13 @@ function drawIntroBackdrop(t) {
 }
 
 // ---------- Hotspots ----------
+function lgrad(y0, y1, c0, c1) {
+  const g = ctx.createLinearGradient(0, y0, 0, y1)
+  g.addColorStop(0, c0)
+  g.addColorStop(1, c1)
+  return g
+}
+
 function drawHotspots(t) {
   for (const h of HOTSPOTS) {
     const { x, y, w, h: hh } = h.rect
@@ -655,28 +836,28 @@ function drawHotspots(t) {
       ctx.fillStyle = '#d4af37'
       ctx.fillRect(x + 42, y + 66, 12, 4)
       ctx.fillRect(x + w - 54, y + 66, 12, 4)
-      // scattered papers + a lamp
-      for (const [px, py, rot] of [[x + 24, y + 10, -0.1], [x + 80, y + 14, 0.18], [x + 128, y + 8, -0.05]]) {
+      // papers swept to one side, the way the clue says
+      for (const [px, py, rot] of [[x + 118, y + 10, 0.22], [x + 142, y + 8, 0.12], [x + 162, y + 6, 0.05]]) {
         ctx.save()
         ctx.translate(px, py)
         ctx.rotate(rot)
         ctx.fillStyle = '#efe6c8'
-        ctx.fillRect(0, 0, 54, 24)
+        ctx.fillRect(0, 0, 50, 24)
         ctx.strokeStyle = '#2a1c10'
         ctx.lineWidth = 1.4
-        ctx.strokeRect(0, 0, 54, 24)
+        ctx.strokeRect(0, 0, 50, 24)
         ctx.fillStyle = '#9c8a5c'
-        ctx.fillRect(6, 6, 34, 2)
-        ctx.fillRect(6, 12, 24, 2)
+        ctx.fillRect(6, 6, 30, 2)
+        ctx.fillRect(6, 12, 22, 2)
         ctx.restore()
       }
       ctx.fillStyle = '#2a2a33'
-      ctx.fillRect(x + w - 36, y - 24, 4, 26)
+      ctx.fillRect(x + 26, y - 24, 4, 26)
       ctx.beginPath()
-      ctx.moveTo(x + w - 50, y - 22)
-      ctx.lineTo(x + w - 20, y - 22)
-      ctx.lineTo(x + w - 28, y - 38)
-      ctx.lineTo(x + w - 42, y - 38)
+      ctx.moveTo(x + 12, y - 22)
+      ctx.lineTo(x + 42, y - 22)
+      ctx.lineTo(x + 34, y - 38)
+      ctx.lineTo(x + 20, y - 38)
       ctx.closePath()
       ctx.fillStyle = '#3fae5c'
       ctx.fill()
@@ -688,7 +869,6 @@ function drawHotspots(t) {
       pane.addColorStop(1, h.examined ? '#15202f' : '#26405f')
       ctx.fillStyle = pane
       ctx.fillRect(x, y, w, hh)
-      // convenience-store glow outside
       ctx.fillStyle = 'rgba(120,255,180,0.55)'
       ctx.fillRect(x + 100, y + 96, 50, 26)
       ctx.fillStyle = 'rgba(255,255,255,0.7)'
@@ -702,7 +882,9 @@ function drawHotspots(t) {
       ctx.moveTo(x, y + hh / 2)
       ctx.lineTo(x + w, y + hh / 2)
       ctx.stroke()
-      // rain streaks on the glass
+      // the latch is intact - a small brass hook on the inside
+      ctx.fillStyle = '#d4af37'
+      ctx.fillRect(x + w / 2 - 12, y + hh / 2 - 4, 8, 8)
       ctx.strokeStyle = 'rgba(190,215,255,0.4)'
       ctx.lineWidth = 1.2
       for (let i = 0; i < 10; i++) {
@@ -721,14 +903,13 @@ function drawHotspots(t) {
       ctx.strokeRect(x, y, w, hh)
       ctx.fillStyle = h.examined ? '#1f4a30' : '#2f8a4a'
       ctx.fillRect(x + 8, y + 8, w - 16, hh - 22)
-      // scanlines + a blinking REC
       ctx.fillStyle = 'rgba(0,0,0,0.18)'
       for (let ly = y + 8; ly < y + hh - 14; ly += 4) ctx.fillRect(x + 8, ly, w - 16, 1.5)
       ctx.fillStyle = 'rgba(220,255,230,0.75)'
       ctx.beginPath()
       ctx.arc(x + 24, y + 28, 7, 0, Math.PI * 2)
-      ctx.fillRect(x + 18, y + 36, 12, 18)
       ctx.fill()
+      ctx.fillRect(x + 18, y + 36, 12, 18)
       if (Math.floor(t * 2) % 2 === 0) {
         ctx.fillStyle = '#ff3b3b'
         ctx.beginPath()
@@ -762,11 +943,81 @@ function drawHotspots(t) {
       ctx.fillRect(ux + 8, y + 44, 14, 10)
       ctx.lineWidth = 1.5
       ctx.strokeRect(ux + 8, y + 44, 14, 10)
-      // water puddle under it
       ctx.fillStyle = 'rgba(120,170,230,0.35)'
       ctx.beginPath()
       ctx.ellipse(ux, y + hh + 4, 30, 6, 0, 0, Math.PI * 2)
       ctx.fill()
+    } else if (h.id === 'keycard') {
+      // wall-mounted access terminal: little screen, card slot, status light
+      ctx.fillStyle = '#2b2f3a'
+      ctx.beginPath()
+      ctx.roundRect(x, y, w, hh, 6)
+      ctx.fill()
+      ctx.strokeStyle = '#11131a'
+      ctx.lineWidth = 3
+      ctx.stroke()
+      ctx.fillStyle = h.examined ? '#1d4a3a' : '#2f8a6a'
+      ctx.fillRect(x + 7, y + 8, w - 14, 28)
+      ctx.fillStyle = '#c8ffe8'
+      ctx.font = 'bold 10px monospace'
+      ctx.textAlign = 'center'
+      ctx.fillText('01:58', x + w / 2, y + 20)
+      ctx.font = '8px monospace'
+      ctx.fillText('ACCESS OK', x + w / 2, y + 31)
+      ctx.fillStyle = '#0c0e14'
+      ctx.fillRect(x + 10, y + 46, w - 20, 5)
+      for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) {
+        ctx.fillStyle = '#4a4f5e'
+        ctx.fillRect(x + 10 + c * 13, y + 58 + r * 11, 10, 8)
+      }
+      ctx.fillStyle = Math.floor(t * 1.5) % 2 ? '#3fe08a' : '#1f6a43'
+      ctx.beginPath()
+      ctx.arc(x + w - 11, y + hh - 9, 3, 0, Math.PI * 2)
+      ctx.fill()
+    } else if (h.id === 'safe') {
+      ctx.fillStyle = lgrad(y, y + hh, '#7b8190', '#4d5260')
+      ctx.beginPath()
+      ctx.roundRect(x, y, w, hh, 6)
+      ctx.fill()
+      ctx.strokeStyle = '#1a1d26'
+      ctx.lineWidth = 3
+      ctx.stroke()
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)'
+      ctx.lineWidth = 2
+      ctx.strokeRect(x + 8, y + 8, w - 16, hh - 16)
+      if (h.examined) {
+        // door swung open, a policy sticking out
+        ctx.fillStyle = '#12141c'
+        ctx.fillRect(x + 10, y + 10, w - 20, hh - 20)
+        ctx.fillStyle = '#f2ead0'
+        ctx.fillRect(x + 20, y + 20, 38, 46)
+        ctx.strokeStyle = '#2a2017'
+        ctx.lineWidth = 1.4
+        ctx.strokeRect(x + 20, y + 20, 38, 46)
+        ctx.fillStyle = '#9c3a3a'
+        ctx.fillRect(x + 25, y + 26, 28, 5)
+        ctx.fillStyle = '#9c8a5c'
+        ctx.fillRect(x + 25, y + 36, 24, 2)
+        ctx.fillRect(x + 25, y + 42, 18, 2)
+      } else {
+        // dial + handle + a key left in the lock
+        ctx.fillStyle = '#c9ccd6'
+        ctx.beginPath()
+        ctx.arc(x + w / 2, y + hh / 2 - 6, 17, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.strokeStyle = '#1a1d26'
+        ctx.lineWidth = 2.4
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.moveTo(x + w / 2, y + hh / 2 - 6)
+        ctx.lineTo(x + w / 2 + 11, y + hh / 2 - 14)
+        ctx.stroke()
+        ctx.fillStyle = '#d4af37'
+        ctx.fillRect(x + w - 24, y + hh - 24, 6, 14)
+        ctx.beginPath()
+        ctx.arc(x + w - 21, y + hh - 26, 5, 0, Math.PI * 2)
+        ctx.fill()
+      }
     }
 
     if (!h.examined) {
@@ -781,13 +1032,6 @@ function drawHotspots(t) {
       ctx.fillText('✓', x + w - 10, y + 16)
     }
   }
-}
-
-function lgrad(y0, y1, c0, c1) {
-  const g = ctx.createLinearGradient(0, y0, 0, y1)
-  g.addColorStop(0, c0)
-  g.addColorStop(1, c1)
-  return g
 }
 
 // ---------- Dialogue ----------
@@ -815,16 +1059,17 @@ function drawDialogueBox(boxH = 118) {
   ctx.textAlign = 'left'
   ctx.fillStyle = meta.color
   ctx.font = 'bold 16px sans-serif'
+  const nameW = ctx.measureText(meta.name).width
   ctx.fillText(meta.name, tx, boxY + 28)
   ctx.fillStyle = 'rgba(255,255,255,0.5)'
   ctx.font = '12px sans-serif'
-  ctx.fillText(meta.role, tx + ctx.measureText(meta.name).width * 1.12 + 10, boxY + 28)
+  ctx.fillText(meta.role, tx + nameW + 10, boxY + 28)
 
   ctx.fillStyle = '#fff'
   ctx.font = '15px sans-serif'
   wrapText(line.text.slice(0, Math.floor(line.shown)), tx, boxY + 54, boxW - (tx - boxX) - 22, 22)
 
-  if (lineDone() && (state.phase === 'intro' || state.phase === 'result')) {
+  if (lineDone() && (state.phase === 'seq' || (state.phase === 'exam' && state.exam && state.exam.mode === 'react'))) {
     ctx.fillStyle = `rgba(255,211,107,${0.5 + Math.sin(t * 5) * 0.4})`
     ctx.font = '13px sans-serif'
     ctx.textAlign = 'right'
@@ -865,7 +1110,9 @@ function tickLine() {
   }
 }
 
-function drawButton(rect, label, fill) {
+function drawButton(rect, label, fill, { enabled = true, font = 'bold 15px sans-serif' } = {}) {
+  ctx.save()
+  ctx.globalAlpha = enabled ? 1 : 0.45
   ctx.fillStyle = fill
   ctx.beginPath()
   ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 10)
@@ -874,12 +1121,290 @@ function drawButton(rect, label, fill) {
   ctx.lineWidth = 2
   ctx.stroke()
   ctx.fillStyle = '#fff'
-  ctx.font = 'bold 15px sans-serif'
+  ctx.font = font
   ctx.textAlign = 'center'
   ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 5)
+  ctx.restore()
 }
 
-// ---------- Scenes ----------
+// ---------- Evidence art ----------
+// Little pictograms for each kind of evidence, centred on (cx, cy) in a
+// roughly 64px box. Used by the evidence file and the "acquired" banner.
+function drawEvidenceIcon(kind, cx, cy, s = 1) {
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.scale(s, s)
+  ctx.lineJoin = 'round'
+  const ol = () => {
+    ctx.lineWidth = 2.2
+    ctx.strokeStyle = '#1f1620'
+    ctx.stroke()
+  }
+  if (kind === 'photo') {
+    ctx.fillStyle = '#f2ead0'
+    ctx.beginPath()
+    ctx.roundRect(-26, -22, 52, 44, 3)
+    ctx.fill()
+    ol()
+    ctx.fillStyle = '#2a3a4e'
+    ctx.fillRect(-21, -17, 42, 28)
+    ctx.fillStyle = '#38b27c'
+    ctx.fillRect(-21, -17, 42, 7)
+    ctx.fillStyle = '#d6f2e2'
+    ctx.fillRect(-16, -8, 32, 17)
+    ctx.fillStyle = '#2c3a5a'
+    ctx.beginPath()
+    ctx.arc(0, -2, 4, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillRect(-4, 2, 8, 8)
+    ctx.fillStyle = '#d24a43'
+    ctx.fillRect(9, 0, 3, 10)
+  } else if (kind === 'receipt') {
+    ctx.fillStyle = '#fbf6e6'
+    ctx.beginPath()
+    ctx.moveTo(-17, -26)
+    ctx.lineTo(17, -26)
+    ctx.lineTo(17, 24)
+    for (let i = 0; i < 6; i++) ctx.lineTo(17 - (i + 1) * 5.6, i % 2 ? 24 : 29)
+    ctx.lineTo(-17, 24)
+    ctx.closePath()
+    ctx.fill()
+    ol()
+    ctx.fillStyle = '#6a5a3a'
+    for (const [i, w] of [[0, 24], [1, 18], [2, 24], [3, 14]]) ctx.fillRect(-12, -18 + i * 8, w, 2.4)
+    ctx.fillStyle = '#d24a43'
+    ctx.font = 'bold 9px monospace'
+    ctx.textAlign = 'center'
+    ctx.fillText('22:15', 0, 20)
+  } else if (kind === 'papers') {
+    for (const [dx, dy, r] of [[-8, 2, -0.2], [2, 0, 0.1], [10, -2, 0.28]]) {
+      ctx.save()
+      ctx.translate(dx, dy)
+      ctx.rotate(r)
+      ctx.fillStyle = '#f2ead0'
+      ctx.fillRect(-14, -20, 28, 38)
+      ol()
+      ctx.strokeRect(-14, -20, 28, 38)
+      ctx.fillStyle = '#9c8a5c'
+      ctx.fillRect(-9, -13, 18, 2)
+      ctx.fillRect(-9, -7, 14, 2)
+      ctx.restore()
+    }
+    ctx.strokeStyle = '#c0392f'
+    ctx.lineWidth = 3
+    ctx.lineCap = 'round'
+    ctx.beginPath()
+    ctx.moveTo(-26, 20)
+    ctx.lineTo(24, 20)
+    ctx.moveTo(18, 14)
+    ctx.lineTo(24, 20)
+    ctx.lineTo(18, 26)
+    ctx.stroke()
+    ctx.lineCap = 'butt'
+  } else if (kind === 'window') {
+    ctx.fillStyle = '#5c4630'
+    ctx.fillRect(-24, -26, 48, 52)
+    ol()
+    ctx.fillStyle = '#4d6f95'
+    ctx.fillRect(-19, -21, 38, 42)
+    ctx.fillStyle = '#2a1c10'
+    ctx.fillRect(-1, -21, 2, 42)
+    ctx.fillRect(-19, -1, 38, 2)
+    ctx.fillStyle = '#d4af37'
+    ctx.fillRect(-9, -4, 7, 7)
+    ctx.strokeStyle = '#1f1620'
+    ctx.lineWidth = 1.2
+    ctx.strokeRect(-9, -4, 7, 7)
+  } else if (kind === 'card') {
+    ctx.fillStyle = '#e8ecf4'
+    ctx.beginPath()
+    ctx.roundRect(-28, -17, 56, 36, 5)
+    ctx.fill()
+    ol()
+    ctx.fillStyle = '#3a4a78'
+    ctx.fillRect(-28, -9, 56, 8)
+    ctx.fillStyle = '#d4af37'
+    ctx.fillRect(-22, 6, 14, 10)
+    ctx.fillStyle = '#6a7080'
+    ctx.fillRect(0, 7, 22, 3)
+    ctx.fillRect(0, 13, 14, 3)
+    ctx.fillStyle = '#1f6a43'
+    ctx.font = 'bold 9px monospace'
+    ctx.textAlign = 'left'
+    ctx.fillText('01:58', -22, -13)
+  } else if (kind === 'policy') {
+    ctx.fillStyle = '#f2ead0'
+    ctx.fillRect(-20, -26, 40, 52)
+    ol()
+    ctx.strokeStyle = '#9c3a3a'
+    ctx.lineWidth = 2.4
+    ctx.strokeRect(-16, -22, 32, 44)
+    ctx.fillStyle = '#9c3a3a'
+    ctx.fillRect(-11, -16, 22, 5)
+    ctx.fillStyle = '#9c8a5c'
+    ctx.fillRect(-11, -6, 22, 2)
+    ctx.fillRect(-11, 0, 16, 2)
+    ctx.fillStyle = '#d4af37'
+    ctx.beginPath()
+    ctx.arc(8, 14, 7, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+    ctx.fillStyle = '#7a5a10'
+    ctx.font = 'bold 9px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('₩', 8, 17)
+  } else if (kind === 'phone') {
+    ctx.fillStyle = '#23262f'
+    ctx.beginPath()
+    ctx.roundRect(-15, -27, 30, 54, 6)
+    ctx.fill()
+    ol()
+    ctx.fillStyle = '#bfe2ff'
+    ctx.fillRect(-11, -20, 22, 36)
+    ctx.fillStyle = '#2f6fd1'
+    ctx.beginPath()
+    ctx.roundRect(-9, -17, 17, 8, 3)
+    ctx.fill()
+    ctx.fillStyle = '#e8ecf4'
+    ctx.beginPath()
+    ctx.roundRect(-3, -6, 13, 8, 3)
+    ctx.fill()
+    ctx.fillStyle = '#2f6fd1'
+    ctx.beginPath()
+    ctx.roundRect(-9, 5, 17, 8, 3)
+    ctx.fill()
+  }
+  ctx.restore()
+}
+
+function drawHearts(rightX, y) {
+  for (let i = 0; i < MAX_HEARTS; i++) {
+    const x = rightX - (MAX_HEARTS - i) * 26 + 12
+    const alive = i < state.hearts
+    ctx.save()
+    ctx.translate(x, y)
+    const pulse = alive && state.hearts === 1 ? 1 + Math.sin(performance.now() / 120) * 0.12 : 1
+    ctx.scale(pulse, pulse)
+    ctx.beginPath()
+    ctx.moveTo(0, 7)
+    ctx.bezierCurveTo(-13, -2, -7, -11, 0, -4)
+    ctx.bezierCurveTo(7, -11, 13, -2, 0, 7)
+    ctx.fillStyle = alive ? '#ff5a7a' : 'rgba(255,255,255,0.14)'
+    ctx.fill()
+    ctx.lineWidth = 2
+    ctx.strokeStyle = alive ? '#7a1830' : 'rgba(255,255,255,0.3)'
+    ctx.stroke()
+    ctx.restore()
+  }
+}
+
+function drawFileButton() {
+  const r = fileButtonRect()
+  drawButton(r, `증거 파일 ${state.evidence.length}`, '#3a4258', { font: 'bold 13px sans-serif', enabled: state.evidence.length > 0 })
+}
+
+// "Evidence acquired!" banner that slides down for a moment.
+function drawPopup() {
+  const p = state.popup
+  if (!p) return
+  const left = p.until - performance.now()
+  if (left <= 0) {
+    state.popup = null
+    return
+  }
+  const k = Math.min(1, (2800 - left) / 260, left / 260)
+  const ev = EVIDENCE[p.id]
+  const w = 380
+  const h = 70
+  const x = CANVAS_W / 2 - w / 2
+  const y = -h + (h + 56) * clamp(k, 0, 1)
+  ctx.fillStyle = 'rgba(14, 11, 20, 0.96)'
+  ctx.beginPath()
+  ctx.roundRect(x, y, w, h, 12)
+  ctx.fill()
+  ctx.strokeStyle = '#ffd36b'
+  ctx.lineWidth = 2.5
+  ctx.stroke()
+  ctx.fillStyle = 'rgba(255,255,255,0.08)'
+  ctx.beginPath()
+  ctx.roundRect(x + 10, y + 8, 54, 54, 8)
+  ctx.fill()
+  drawEvidenceIcon(ev.icon, x + 37, y + 35, 0.9)
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#ffd36b'
+  ctx.font = 'bold 13px sans-serif'
+  ctx.fillText('증거 입수!', x + 78, y + 28)
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 17px sans-serif'
+  ctx.fillText(ev.name, x + 78, y + 52)
+}
+
+// The evidence file (investigation) or the "present evidence" chooser (cross-examination).
+function drawPicker(t) {
+  const present = !state.filePanel
+  ctx.fillStyle = 'rgba(8, 6, 12, 0.84)'
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
+
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#ffd36b'
+  ctx.font = 'bold 20px sans-serif'
+  ctx.fillText(present ? '제출할 증거를 선택하세요' : '증거 파일', CANVAS_W / 2, 56)
+  if (present) {
+    ctx.fillStyle = '#cfd8ff'
+    ctx.font = '13px sans-serif'
+    ctx.fillText('증언과 모순되는 증거를 골라 제출합니다. 틀리면 신뢰도가 깎여요.', CANVAS_W / 2, 78)
+  }
+
+  const lay = pickerLayout()
+  const sel = pickerSel()
+  for (const c of lay.cards) {
+    const ev = EVIDENCE[c.id]
+    const on = c.id === sel
+    ctx.fillStyle = on ? '#f4e9c4' : '#e0d3ad'
+    ctx.beginPath()
+    ctx.roundRect(c.x, c.y, c.w, c.h, 8)
+    ctx.fill()
+    ctx.strokeStyle = on ? '#ffd36b' : '#2a2017'
+    ctx.lineWidth = on ? 4 : 2.5
+    ctx.stroke()
+    drawEvidenceIcon(ev.icon, c.x + c.w / 2, c.y + 40, 0.95)
+    ctx.fillStyle = '#2b2317'
+    ctx.font = 'bold 12px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(ev.name, c.x + c.w / 2, c.y + c.h - 9)
+  }
+
+  // detail panel for the selected item
+  const dx = lay.cards.length ? lay.cards[0].x : 130
+  const dw = CANVAS_W - dx * 2
+  const dy = 364
+  ctx.fillStyle = 'rgba(14, 11, 20, 0.96)'
+  ctx.beginPath()
+  ctx.roundRect(dx, dy, dw, 82, 10)
+  ctx.fill()
+  ctx.strokeStyle = '#c9a85c'
+  ctx.lineWidth = 2
+  ctx.stroke()
+  if (sel) {
+    const ev = EVIDENCE[sel]
+    ctx.textAlign = 'left'
+    ctx.fillStyle = '#ffd36b'
+    ctx.font = 'bold 15px sans-serif'
+    ctx.fillText(ev.name, dx + 16, dy + 26)
+    ctx.fillStyle = '#fff'
+    ctx.font = '14px sans-serif'
+    wrapText(ev.desc, dx + 16, dy + 50, dw - 32, 20)
+  } else {
+    ctx.textAlign = 'center'
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'
+    ctx.font = '14px sans-serif'
+    ctx.fillText('증거를 선택하세요', CANVAS_W / 2, dy + 46)
+  }
+
+  drawButton(lay.close, present ? '취소' : '닫기', '#3a4258')
+  if (present) drawButton(lay.submit, '이 증거를 제출!', '#7a2e2e', { enabled: !!sel })
+}
+
 function drawTitle(t) {
   const W = CANVAS_W
   const H = CANVAS_H
@@ -996,48 +1521,103 @@ function drawTitle(t) {
   ctx.globalAlpha = 1
 }
 
-function drawIntroScene(t) {
-  drawIntroBackdrop(t)
-  const l = INTRO[state.introLine]
-  const cast = [
-    { id: 'seojin', x: 300, pose: 'pockets' },
-    { id: 'hana', x: 160, pose: 'idle' },
-    { id: 'park', x: 640, pose: 'idle' },
-  ]
+// ---------- Scenes ----------
+// Casts standing in the courtroom around the witness stand.
+const COURT_CASTS = {
+  kim: [
+    { id: 'seojin', x: 160, s: 1.15, mood: 'determined', pose: 'pockets' },
+    { id: 'hana', x: 290, s: 1.05, mood: 'worried' },
+    { id: 'park', x: 740, s: 1.1, mood: 'neutral' },
+    { id: 'choi', x: 850, s: 1.0, mood: 'worried' },
+  ],
+  choi: [
+    { id: 'seojin', x: 160, s: 1.15, mood: 'determined', pose: 'pockets' },
+    { id: 'hana', x: 290, s: 1.05, mood: 'worried' },
+    { id: 'park', x: 740, s: 1.1, mood: 'neutral' },
+    { id: 'suhan', x: 850, s: 1.0, mood: 'defeated' },
+  ],
+}
+const FINALE_CAST = [
+  { id: 'minji', x: 70, s: 1.1, mood: 'cheer', pose: 'idle' },
+  { id: 'seojin', x: 215, s: 1.28, mood: 'determined', pose: 'point' },
+  { id: 'choi', x: 430, s: 1.3, mood: 'defeated', pose: 'idle' },
+  { id: 'park', x: 610, s: 1.2, mood: 'angry', pose: 'idle' },
+  { id: 'suhan', x: 735, s: 1.1, mood: 'cheer', pose: 'idle' },
+  { id: 'hana', x: 835, s: 1.1, mood: 'cheer', pose: 'cheer' },
+]
+
+function drawCast(cast, t, baseY) {
   for (const c of cast) {
-    const speaking = c.id === l.who
-    ctx.globalAlpha = speaking ? 1 : 0.78
-    drawCharacter(ctx, c.id, c.x, 440, {
-      scale: speaking ? 1.62 : 1.5,
-      mood: speaking ? l.mood : undefined,
-      pose: speaking && c.id === 'hana' && l.mood === 'cheer' ? 'cheer' : c.pose,
-      t,
-    })
-    ctx.globalAlpha = 1
-    if (speaking) {
-      ctx.fillStyle = CAST[c.id].color
-      const ay = 440 - 190 * 1.62 - 6 + Math.sin(t * 6) * 3
-      ctx.beginPath()
-      ctx.moveTo(c.x - 8, ay)
-      ctx.lineTo(c.x + 8, ay)
-      ctx.lineTo(c.x, ay + 10)
-      ctx.closePath()
-      ctx.fill()
+    const speaking = state.line.who === c.id && state.line.shown < 999
+    drawCharacter(ctx, c.id, c.x, baseY, { scale: c.s, mood: speaking ? state.line.mood : c.mood, pose: c.pose, t })
+  }
+}
+
+function drawExamStage(t, witnessId, witnessMood) {
+  drawCourtroomBackdrop(t)
+  const ex = state.exam
+  drawCast(COURT_CASTS[ex ? ex.id : 'kim'], t, 395)
+  drawCharacter(ctx, witnessId, CANVAS_W / 2, 412, { scale: 1.5, mood: witnessMood, t })
+  drawWitnessStand(CANVAS_W / 2, 412)
+}
+
+function drawSeqScene(t) {
+  const s = state.seq
+  const l = s.lines[s.index]
+  if (s.scene === 'intro') {
+    drawIntroBackdrop(t)
+    const cast = [
+      { id: 'seojin', x: 300, pose: 'pockets' },
+      { id: 'hana', x: 160, pose: 'idle' },
+      { id: 'park', x: 640, pose: 'idle' },
+    ]
+    for (const c of cast) {
+      const speaking = c.id === l.who
+      ctx.globalAlpha = speaking ? 1 : 0.78
+      drawCharacter(ctx, c.id, c.x, 440, {
+        scale: speaking ? 1.62 : 1.5,
+        mood: speaking ? l.mood : undefined,
+        pose: speaking && c.id === 'hana' && l.mood === 'cheer' ? 'cheer' : c.pose,
+        t,
+      })
+      ctx.globalAlpha = 1
+      if (speaking) {
+        ctx.fillStyle = CAST[c.id].color
+        const ay = 440 - 190 * 1.62 - 6 + Math.sin(t * 6) * 3
+        ctx.beginPath()
+        ctx.moveTo(c.x - 8, ay)
+        ctx.lineTo(c.x + 8, ay)
+        ctx.lineTo(c.x, ay + 10)
+        ctx.closePath()
+        ctx.fill()
+      }
     }
+  } else if (s.scene === 'courtKim') {
+    // the witness already on the stand
+    const kimTurn = s.lines === BEFORE_KIM || s.lines === KIM_CLEAR
+    drawCourtroomBackdrop(t)
+    drawCast(COURT_CASTS.kim, t, 395)
+    const who = s.lines === KIM_CLEAR ? 'suhan' : 'suhan'
+    const speaking = l.who === who
+    drawCharacter(ctx, who, CANVAS_W / 2, 412, { scale: 1.5, mood: speaking ? l.mood : s.lines === KIM_CLEAR ? 'defeated' : 'nervous', t })
+    drawWitnessStand(CANVAS_W / 2, 412)
+    void kimTurn
+  } else if (s.scene === 'finale') {
+    drawCourtroomBackdrop(t)
+    drawCast(FINALE_CAST, t, 392)
   }
   drawDialogueBox()
   ctx.textAlign = 'left'
   ctx.fillStyle = 'rgba(255,255,255,0.5)'
   ctx.font = '12px sans-serif'
-  ctx.fillText(`${state.introLine + 1} / ${INTRO.length}`, 36, 30)
+  ctx.fillText(`${s.index + 1} / ${s.lines.length}`, 36, 30)
 }
 
 function drawInvestigateScene(t) {
   drawRoomBackdrop(t)
   drawHotspots(t)
-  // everybody stands along the floor line; the speaker gets a name tag marker
   for (const p of PEOPLE) {
-    const speaking = state.line.who === p.id && !(state.line.shown >= 999)
+    const speaking = state.line.who === p.id && state.line.shown < 999
     drawCharacter(ctx, p.id, p.x, PEOPLE_BASE_Y, {
       scale: p.scale,
       mood: speaking ? state.line.mood : p.mood,
@@ -1073,7 +1653,8 @@ function drawInvestigateScene(t) {
   ctx.font = 'bold 14px sans-serif'
   ctx.fillText(`조사한 단서: ${examinedCount}/${HOTSPOTS.length}`, 20, 30)
   ctx.fillStyle = '#9fe0c0'
-  ctx.fillText(`나눈 대화: ${talkedCount()}/${PEOPLE.length - 1}`, 20, 52)
+  ctx.fillText(`나눈 대화: ${talkedCount()}/${talkTargets()}`, 20, 52)
+  drawFileButton()
 
   drawDialogueBox()
 
@@ -1086,155 +1667,84 @@ function drawInvestigateScene(t) {
   }
 }
 
-function drawTestimonyScene(t) {
-  drawCourtroomBackdrop(t)
-  // the courtroom audience, small, behind the witness
-  drawCharacter(ctx, 'seojin', 160, 410, { scale: 1.15, mood: 'determined', pose: 'pockets', t })
-  drawCharacter(ctx, 'hana', 290, 408, { scale: 1.05, mood: 'worried', t })
-  drawCharacter(ctx, 'park', 740, 410, { scale: 1.1, mood: 'neutral', t })
-  drawCharacter(ctx, 'choi', 850, 408, { scale: 1.0, mood: 'worried', t })
-  drawCharacter(ctx, WITNESS_ID, CANVAS_W / 2, 412, { scale: 1.5, mood: 'nervous', t })
-  drawWitnessStand(CANVAS_W / 2, 412)
-  drawDialogueBox()
+function drawExamScene(t) {
+  const ex = state.exam
+  const def = ex.def
+  const st = currentStatement()
+  const speaking = state.line.who === def.witness
+  drawExamStage(t, def.witness, speaking ? state.line.mood : 'nervous')
 
-  if (lineDone()) drawButton(presentButtonRect(), '증거 제출', '#7a2e2e')
-}
-
-// The evidence photo: a grainy night shot of the witness buying an umbrella.
-function drawEvidencePhoto(x, y, w, h, t) {
-  ctx.save()
-  ctx.beginPath()
-  ctx.rect(x, y, w, h)
-  ctx.clip()
-  const bg = ctx.createLinearGradient(0, y, 0, y + h)
-  bg.addColorStop(0, '#1b2a3c')
-  bg.addColorStop(1, '#2d3a4c')
-  ctx.fillStyle = bg
-  ctx.fillRect(x, y, w, h)
-  // store front
-  ctx.fillStyle = '#2a3a4e'
-  ctx.fillRect(x + 12, y + 16, w - 24, h - 30)
-  ctx.fillStyle = '#d6f2e2'
-  ctx.fillRect(x + 22, y + 44, w - 44, h - 74)
-  ctx.fillStyle = '#38b27c'
-  ctx.fillRect(x + 12, y + 16, w - 24, 22)
-  ctx.fillStyle = '#fff'
-  ctx.font = 'bold 13px sans-serif'
-  ctx.textAlign = 'center'
-  ctx.fillText('24 MART', x + w / 2, y + 32)
-  // shelves in the window
-  ctx.fillStyle = 'rgba(0,0,0,0.12)'
-  for (let i = 0; i < 3; i++) ctx.fillRect(x + 22, y + 66 + i * 26, w - 44, 3)
-  // the culprit, mid-purchase
-  drawCharacter(ctx, WITNESS_ID, x + w / 2 - 6, y + h - 6, { scale: 0.62, mood: 'nervous', t })
-  // the umbrella in his hand
-  const ux = x + w / 2 + 40
-  ctx.lineCap = 'round'
-  ctx.strokeStyle = '#1f1620'
-  ctx.lineWidth = 9
-  ctx.beginPath()
-  ctx.moveTo(ux - 4, y + h - 82)
-  ctx.lineTo(ux + 12, y + h - 36)
-  ctx.stroke()
-  ctx.strokeStyle = '#d24a43'
-  ctx.lineWidth = 6
-  ctx.beginPath()
-  ctx.moveTo(ux - 4, y + h - 82)
-  ctx.lineTo(ux + 12, y + h - 36)
-  ctx.stroke()
-  ctx.strokeStyle = '#1f1620'
-  ctx.lineWidth = 2.4
-  ctx.beginPath()
-  ctx.moveTo(ux + 12, y + h - 36)
-  ctx.arc(ux + 18, y + h - 36, 6, Math.PI, 0, true)
-  ctx.stroke()
-  ctx.lineCap = 'butt'
-  // film grain + tint + vignette
-  ctx.fillStyle = 'rgba(80,120,160,0.12)'
-  ctx.fillRect(x, y, w, h)
-  for (let i = 0; i < 90; i++) {
-    ctx.fillStyle = `rgba(255,255,255,${0.04 + ((i * 7) % 10) * 0.008})`
-    ctx.fillRect(x + ((i * 53 + Math.floor(t * 10) * 17) % w), y + ((i * 91 + Math.floor(t * 10) * 29) % h), 2, 2)
-  }
-  const v = ctx.createRadialGradient(x + w / 2, y + h / 2, h * 0.3, x + w / 2, y + h / 2, h * 0.9)
-  v.addColorStop(0, 'rgba(0,0,0,0)')
-  v.addColorStop(1, 'rgba(0,0,0,0.5)')
-  ctx.fillStyle = v
-  ctx.fillRect(x, y, w, h)
-  // timestamp
-  ctx.fillStyle = '#ffb347'
-  ctx.font = 'bold 12px monospace'
-  ctx.textAlign = 'right'
-  ctx.fillText('22:15:08  CAM-02', x + w - 8, y + h - 8)
-  ctx.restore()
-  ctx.strokeStyle = '#2a2017'
-  ctx.lineWidth = 3
-  ctx.strokeRect(x, y, w, h)
-}
-
-function drawEvidencePickScene(t) {
-  drawCourtroomBackdrop(t)
-  drawCharacter(ctx, WITNESS_ID, CANVAS_W / 2, 412, { scale: 1.5, mood: 'nervous', t })
-  drawWitnessStand(CANVAS_W / 2, 412)
-  ctx.fillStyle = 'rgba(10, 8, 6, 0.72)'
-  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
-
-  ctx.textAlign = 'center'
+  // header: whose testimony, which statement, how far the cross-examination has come
+  ctx.textAlign = 'left'
   ctx.fillStyle = '#ffd36b'
-  ctx.font = 'bold 17px sans-serif'
-  ctx.fillText('증거품을 선택해 제출하세요', CANVAS_W / 2, CANVAS_H / 2 - 150)
-
-  const card = evidenceCardRect()
-  const hover = state.hover
-  ctx.save()
-  ctx.translate(card.x + card.w / 2, card.y + card.h / 2)
-  const wob = Math.sin(t * 2.2) * 0.012
-  ctx.rotate(wob)
-  ctx.translate(-(card.x + card.w / 2), -(card.y + card.h / 2))
-  ctx.fillStyle = '#e8dcbb'
-  ctx.beginPath()
-  ctx.roundRect(card.x, card.y, card.w, card.h, 8)
-  ctx.fill()
-  ctx.strokeStyle = hover ? '#ffd36b' : '#2a2017'
-  ctx.lineWidth = 3
-  ctx.stroke()
-  drawEvidencePhoto(card.x + 16, card.y + 16, card.w - 32, 150, t)
-  ctx.textAlign = 'center'
-  ctx.fillStyle = '#2b2317'
-  ctx.font = 'bold 15px sans-serif'
-  ctx.fillText(EVIDENCE.name, card.x + card.w / 2, card.y + card.h - 52)
-  ctx.font = '11px sans-serif'
-  ctx.fillStyle = '#5a4a30'
-  wrapTextCentered(EVIDENCE.desc, card.x + card.w / 2, card.y + card.h - 34, card.w - 36, 15)
-  ctx.restore()
-}
-
-function wrapTextCentered(text, cx, y, maxWidth, lineHeight) {
-  let line = ''
-  let cy = y
-  for (const ch of text) {
-    const test = line + ch
-    if (ctx.measureText(test).width > maxWidth && line.length > 0) {
-      ctx.fillText(line, cx, cy)
-      line = ch
-      cy += lineHeight
-    } else {
-      line = test
-    }
+  ctx.font = 'bold 16px sans-serif'
+  ctx.fillText(def.title, 20, 30)
+  for (let i = 0; i < def.statements.length; i++) {
+    const cx = 28 + i * 24
+    const broken = ex.broken.has(i)
+    const cur = i === ex.idx
+    ctx.beginPath()
+    ctx.arc(cx, 52, 8, 0, Math.PI * 2)
+    ctx.fillStyle = broken ? '#3fae5c' : 'rgba(255,255,255,0.16)'
+    ctx.fill()
+    ctx.lineWidth = cur ? 3 : 1.5
+    ctx.strokeStyle = cur ? '#ffd36b' : 'rgba(255,255,255,0.4)'
+    ctx.stroke()
+    ctx.fillStyle = '#fff'
+    ctx.font = 'bold 10px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(broken ? '✓' : String(i + 1), cx, 56)
   }
-  ctx.fillText(line, cx, cy)
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#cfd8ff'
+  ctx.font = '12px sans-serif'
+  ctx.fillText(`모순 지적 ${ex.broken.size}/${def.needed}`, 20, 80)
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'
+  ctx.fillRect(20, 86, 120, 6)
+  ctx.fillStyle = '#3fae5c'
+  ctx.fillRect(20, 86, 120 * clamp(ex.broken.size / def.needed, 0, 1), 6)
+
+  drawHearts(CANVAS_W - 12, 62)
+  ctx.textAlign = 'right'
+  ctx.fillStyle = 'rgba(255,255,255,0.55)'
+  ctx.font = '11px sans-serif'
+  ctx.fillText('신뢰도', CANVAS_W - 12, 82)
+  drawFileButton()
+
+  drawDialogueBox()
+  // statement tag over the dialogue box
+  const label = `증언 ${ex.idx + 1}/${def.statements.length}${ex.broken.has(ex.idx) ? '  ✓ 모순 지적 완료' : ''}`
+  ctx.textAlign = 'right'
+  ctx.fillStyle = ex.broken.has(ex.idx) ? '#7fe0a0' : '#ffd36b'
+  ctx.font = 'bold 13px sans-serif'
+  ctx.fillText(label, CANVAS_W - 46, CANVAS_H - 30 - 118 + 22)
+
+  // controls
+  const b = examButtons()
+  const idle = ex.mode === 'listen'
+  const hasEv = state.evidence.length > 0
+  drawButton(b.prev, '◀', '#3a4258', { enabled: idle })
+  drawButton(b.next, '▶', '#3a4258', { enabled: idle })
+  drawButton(b.press, '추궁!', '#2f5fa0', { enabled: idle })
+  drawButton(b.present, '증거 제출', '#7a2e2e', { enabled: idle && hasEv })
+  if (idle) {
+    ctx.textAlign = 'left'
+    ctx.fillStyle = 'rgba(255,255,255,0.6)'
+    ctx.font = '12px sans-serif'
+    ctx.fillText('← → 키로도 증언을 넘길 수 있어요', 172, 428)
+  }
+  void st
 }
 
 function drawObjectionScene(t) {
-  const p = 1 - clamp(state.objectionTimer / 1.1, 0, 1)
+  const o = state.objection
+  const p = 1 - clamp(o.timer / 1.15, 0, 1)
   ctx.save()
-  // a short screen shake as the objection lands
   if (p < 0.35) ctx.translate((Math.random() - 0.5) * 10 * (1 - p / 0.35), (Math.random() - 0.5) * 8 * (1 - p / 0.35))
   drawCourtroomBackdrop(t)
   drawCharacter(ctx, 'seojin', 200, 420, { scale: 1.6, mood: 'determined', pose: 'point', t })
-  drawCharacter(ctx, WITNESS_ID, 640, 420, { scale: 1.6, mood: 'shocked', t })
+  drawCharacter(ctx, o.witness, 640, 420, { scale: 1.6, mood: 'shocked', t })
 
-  // flash + speed lines
   if (p < 0.2) {
     ctx.fillStyle = `rgba(255,255,255,${0.7 * (1 - p / 0.2)})`
     ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
@@ -1259,13 +1769,21 @@ function drawObjectionScene(t) {
   ctx.restore()
 }
 
-function drawStars() {
-  const total = 1 + (talkedCount() >= 2 ? 1 : 0) + (talkedCount() >= PEOPLE.length - 1 ? 1 : 0)
-  const panelW = 330
-  const panelH = 150
+function starTotal() {
+  const score = Math.max(0, state.hearts) + talkedCount()
+  return score >= 7 ? 3 : score >= 4 ? 2 : 1
+}
+
+function drawEnding(t) {
+  drawCourtroomBackdrop(t)
+  drawCast(FINALE_CAST, t, 392)
+
+  const total = starTotal()
+  const panelW = 380
+  const panelH = 168
   const px = CANVAS_W / 2 - panelW / 2
   const py = CANVAS_H - 30 - panelH
-  ctx.fillStyle = 'rgba(14,11,20,0.93)'
+  ctx.fillStyle = 'rgba(14,11,20,0.94)'
   ctx.beginPath()
   ctx.roundRect(px, py, panelW, panelH, 14)
   ctx.fill()
@@ -1275,7 +1793,7 @@ function drawStars() {
   ctx.textAlign = 'center'
   ctx.fillStyle = '#ffd36b'
   ctx.font = 'bold 24px sans-serif'
-  ctx.fillText('사건 해결!', CANVAS_W / 2, py + 38)
+  ctx.fillText('사건 해결!', CANVAS_W / 2, py + 36)
   for (let i = 0; i < 3; i++) {
     const sx = CANVAS_W / 2 + (i - 1) * 54
     const sy = py + 78
@@ -1301,35 +1819,36 @@ function drawStars() {
   }
   ctx.fillStyle = '#cfd8ff'
   ctx.font = '13px sans-serif'
-  const grade = total === 3 ? '완벽한 추리!' : total === 2 ? '훌륭한 추리' : '사건은 해결했지만... 증언을 더 들어볼걸!'
-  ctx.fillText(`${grade}  (단서 ${HOTSPOTS.length}/${HOTSPOTS.length} · 대화 ${talkedCount()}/${PEOPLE.length - 1})`, CANVAS_W / 2, py + 122)
-  ctx.fillStyle = 'rgba(255,255,255,0.55)'
-  ctx.font = '12px sans-serif'
-  ctx.fillText('R 키: 처음부터 다시', CANVAS_W / 2, py + 140)
-}
-
-function drawResultScene(t) {
-  drawCourtroomBackdrop(t)
-  const l = RESULT[state.resultLine]
-  // curtain call: the whole cast around the exposed culprit
-  const cast = [
-    { id: 'minji', x: 90, mood: 'cheer', pose: 'idle', scale: 1.1 },
-    { id: 'seojin', x: 250, mood: 'determined', pose: 'point', scale: 1.28 },
-    { id: 'suhan', x: 470, mood: 'defeated', pose: 'idle', scale: 1.3 },
-    { id: 'park', x: 660, mood: 'angry', pose: 'idle', scale: 1.2 },
-    { id: 'hana', x: 800, mood: 'cheer', pose: 'cheer', scale: 1.1 },
-  ]
-  for (const c of cast) {
-    const speaking = c.id === l.who
-    drawCharacter(ctx, c.id, c.x, 392, { scale: c.scale, mood: speaking ? l.mood : c.mood, pose: c.pose, t })
-  }
-  // once the last line has been read, the score card takes the dialogue box's place
-  if (state.resultLine >= RESULT.length - 1 && lineDone()) drawStars()
-  else drawDialogueBox()
-  ctx.textAlign = 'left'
+  const grade = total === 3 ? '완벽한 추리!' : total === 2 ? '훌륭한 추리' : '해결은 했지만... 조금 아슬아슬했어요'
+  ctx.fillText(grade, CANVAS_W / 2, py + 120)
+  ctx.fillStyle = 'rgba(255,255,255,0.7)'
+  ctx.fillText(`남은 신뢰도 ${Math.max(0, state.hearts)}/${MAX_HEARTS}  ·  나눈 대화 ${talkedCount()}/${talkTargets()}  ·  증거 ${state.evidence.length}/${Object.keys(EVIDENCE).length}`, CANVAS_W / 2, py + 142)
   ctx.fillStyle = 'rgba(255,255,255,0.5)'
   ctx.font = '12px sans-serif'
-  ctx.fillText(`${state.resultLine + 1} / ${RESULT.length}`, 36, 30)
+  ctx.fillText('R 키: 처음부터 다시', CANVAS_W / 2, py + 160)
+}
+
+function drawGameOver(t) {
+  drawExamStage(t, state.exam.def.witness, 'smile')
+  ctx.fillStyle = 'rgba(8,6,12,0.82)'
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
+  ctx.textAlign = 'center'
+  ctx.lineJoin = 'round'
+  ctx.font = 'bold 48px sans-serif'
+  ctx.strokeStyle = '#1f1620'
+  ctx.lineWidth = 8
+  ctx.strokeText('추리 실패...', CANVAS_W / 2, 230)
+  ctx.fillStyle = '#ff7a8a'
+  ctx.fillText('추리 실패...', CANVAS_W / 2, 230)
+  ctx.fillStyle = '#cfd8ff'
+  ctx.font = '16px sans-serif'
+  ctx.fillText('법정의 신뢰를 모두 잃고 말았다. 증거를 다시 살펴보고 도전해 보자.', CANVAS_W / 2, 280)
+  drawHearts(CANVAS_W / 2 + 70, 330)
+  ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 18px sans-serif'
+  ctx.fillText('클릭하여 이 증언부터 다시 도전', CANVAS_W / 2, 400)
+  ctx.globalAlpha = 1
 }
 
 function drawMuteNotice() {
@@ -1337,7 +1856,7 @@ function drawMuteNotice() {
     ctx.textAlign = 'right'
     ctx.font = 'bold 13px sans-serif'
     ctx.fillStyle = '#fff'
-    ctx.fillText(muted ? '소리 끔 (M)' : '소리 켬 (M)', CANVAS_W - 16, 24)
+    ctx.fillText(muted ? '소리 끔 (M)' : '소리 켬 (M)', CANVAS_W - 16, 56)
   }
 }
 
@@ -1347,32 +1866,30 @@ function render() {
   tickLine()
 
   if (state.phase === 'title') drawTitle(t)
-  else if (state.phase === 'intro') drawIntroScene(t)
+  else if (state.phase === 'seq') drawSeqScene(t)
   else if (state.phase === 'investigate') drawInvestigateScene(t)
-  else if (state.phase === 'testimony') drawTestimonyScene(t)
-  else if (state.phase === 'evidencePick') drawEvidencePickScene(t)
+  else if (state.phase === 'exam') drawExamScene(t)
   else if (state.phase === 'objection') {
     drawObjectionScene(t)
-    state.objectionTimer -= 1 / 60
-    if (state.objectionTimer <= 0) {
-      state.phase = 'result'
-      state.resultLine = 0
-      const l = RESULT[0]
-      say(l.who, l.text, l.mood)
-      state.starTimer = 0
-      playCorrectSound()
+    state.objection.timer -= 1 / 60
+    if (state.objection.timer <= 0) afterObjection()
+  } else if (state.phase === 'gameover') drawGameOver(t)
+  else if (state.phase === 'ending') {
+    drawEnding(t)
+    const before = state.starTimer
+    state.starTimer += 1 / 60
+    for (let i = 0; i < 3; i++) {
+      const at = 0.4 + i * 0.4
+      if (before < at && state.starTimer >= at && i < starTotal()) playStarSound(i)
     }
-  } else if (state.phase === 'result') {
-    drawResultScene(t)
-    if (state.resultLine >= RESULT.length - 1 && lineDone()) {
-      const before = state.starTimer
-      state.starTimer += 1 / 60
-      for (let i = 0; i < 3; i++) {
-        const at = 0.4 + i * 0.4
-        const earned = i < 1 + (talkedCount() >= 2 ? 1 : 0) + (talkedCount() >= PEOPLE.length - 1 ? 1 : 0)
-        if (before < at && state.starTimer >= at && earned) playStarSound(i)
-      }
-    }
+  }
+
+  if (pickerOpen()) drawPicker(t)
+  if (!pickerOpen()) drawPopup()
+  if (state.flash > 0) {
+    ctx.fillStyle = `rgba(255,40,60,${clamp(state.flash, 0, 0.45) * 0.9})`
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
+    state.flash -= 1 / 60
   }
   drawMuteNotice()
 }
