@@ -1,3 +1,5 @@
+import { sfx, unlockSfx, toggleMute } from './sfx.js'
+
 const app = document.getElementById('app')
 
 const STAT_KEYS = ['chore', 'speed', 'durability', 'precision', 'charm']
@@ -225,6 +227,7 @@ function drawDressBody(ctx, key, cx, topY, bottomY, paint, W) {
   return { topW, bottomW, x1t, x2t, x1b, x2b, waistY }
 }
 
+let eyesClosed = false
 function drawHead(ctx, key, cx, cy, paint) {
   const r = 32
 
@@ -251,14 +254,24 @@ function drawHead(ctx, key, cx, cy, paint) {
   ctx.arc(cx, cy, r, 0, Math.PI * 2)
   flatPath(ctx, paint)
 
-  // eyes
+  // eyes (closed arcs while blinking / before power-on)
   const eyeDX = r * 0.4, eyeY = cy + r * 0.06, eyeR = r * 0.25
   for (const sx of [-1, 1]) {
+    if (eyesClosed) {
+      ctx.strokeStyle = OUTLINE
+      ctx.lineCap = 'round'
+      ctx.lineWidth = DETAIL_W + 0.6
+      ctx.beginPath()
+      ctx.arc(cx + sx * eyeDX, eyeY + eyeR * 0.15, eyeR * 0.78, 0.15 * Math.PI, 0.85 * Math.PI)
+      ctx.stroke()
+      continue
+    }
     ctx.fillStyle = OUTLINE
     ctx.beginPath()
     ctx.ellipse(cx + sx * eyeDX, eyeY, eyeR * 0.78, eyeR, 0, 0, Math.PI * 2)
     ctx.fill()
     shineDot(ctx, cx + sx * eyeDX - eyeR * 0.3, eyeY - eyeR * 0.4, eyeR * 0.32)
+    shineDot(ctx, cx + sx * eyeDX + eyeR * 0.28, eyeY + eyeR * 0.35, eyeR * 0.16)
   }
 
   // mouth
@@ -375,10 +388,43 @@ function drawCore(ctx, key, cx, coreY, scale = 1) {
   ctx.restore()
 }
 
-function drawRobot(canvas, build) {
+function drawStage(ctx, W, H, t, glowColor) {
+  const g = ctx.createRadialGradient(W / 2, H * 0.6, 10, W / 2, H * 0.6, W * 0.48)
+  g.addColorStop(0, glowColor)
+  g.addColorStop(1, 'rgba(255,143,171,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, W, H)
+  // floor pad with a slowly rotating dashed ring
+  ctx.save()
+  ctx.translate(W / 2, H * 0.935)
+  ctx.scale(1, 0.17)
+  ctx.strokeStyle = 'rgba(255,170,195,0.5)'
+  ctx.lineWidth = 3
+  ctx.beginPath()
+  ctx.arc(0, 0, W * 0.4, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.setLineDash([10, 10])
+  ctx.lineDashOffset = -t * 20
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+  ctx.beginPath()
+  ctx.arc(0, 0, W * 0.34, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.restore()
+}
+
+function drawRobot(canvas, build, fx = {}) {
   const ctx = canvas.getContext('2d')
   const W = canvas.width, H = canvas.height
   ctx.clearRect(0, 0, W, H)
+  const t = fx.t || 0
+  drawStage(ctx, W, H, t, 'rgba(255,143,171,0.22)')
+  eyesClosed = !!fx.blink
+  const bob = fx.bob || 0
+  const squash = fx.squash || 0 // >0 right after a part is fitted: a little hop
+  ctx.save()
+  ctx.translate(W / 2, H * 0.95)
+  ctx.scale(1 + squash * 0.06, 1 - squash * 0.05)
+  ctx.translate(-W / 2, -H * 0.95 + bob)
   const cx = W / 2
   const headCenterY = H * 0.18
   const bodyTopY = H * 0.36
@@ -412,8 +458,21 @@ function drawRobot(canvas, build) {
     placeholderSlot(ctx, cx + bodyHalfTopW + 8, bodyTopY + 2, 16, 30)
   }
 
-  if (build.headKey) drawHead(ctx, build.headKey, cx, headCenterY, paint)
+  if (build.headKey) drawHead(ctx, build.headKey, cx, headCenterY + Math.sin(t * 2.2 + 1) * 1.2, paint)
   else placeholderSlot(ctx, cx - 32, headCenterY - 32, 64, 64)
+  ctx.restore()
+}
+
+// Where each part sits on the canvas, for sparkle bursts when it is fitted.
+function slotPoint(slot, W, H) {
+  return {
+    head: [W / 2, H * 0.18],
+    chassis: [W / 2, H * 0.51],
+    arm: [W / 2, H * 0.45],
+    leg: [W / 2, H * 0.8],
+    core: [W / 2, H * 0.55],
+    color: [W / 2, H * 0.5],
+  }[slot] || [W / 2, H / 2]
 }
 
 // --- Stats --------------------------------------------------------------------
@@ -461,11 +520,108 @@ function freshState() {
   }
 }
 let state = freshState()
-let animFrameId = null
+function stopResultAnimation() {}
 
-function stopResultAnimation() {
-  if (animFrameId) cancelAnimationFrame(animFrameId)
-  animFrameId = null
+// --- Animation engine: one loop draws whichever robot canvas is on screen ---
+const fx = { squash: 0, particles: [], resultT0: 0, lastHeart: 0 }
+const DEMO_BUILD = { chassisKey: 'standard', headKey: 'ribbon', armKey: 'tray', legKey: 'apronskirt', coreKey: 'heart', colorKey: 'pink' }
+
+function burst(slot, canvas, kind = 'spark') {
+  const [x, y] = slotPoint(slot, canvas.width, canvas.height)
+  const colors = ['#ffd76a', '#ff9fb6', '#fff', '#c9a6ff', '#a8e0cb']
+  for (let i = 0; i < 18; i++) {
+    const a = Math.random() * Math.PI * 2
+    const v = 40 + Math.random() * 110
+    fx.particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 30, life: 0.9, max: 0.9, color: colors[i % colors.length], size: 2 + Math.random() * 3, kind })
+  }
+}
+function confetti(canvas) {
+  const colors = ['#ff9fb6', '#ffd76a', '#a8e0cb', '#c9a6ff', '#9fd4f0', '#fff']
+  for (let i = 0; i < 80; i++) {
+    fx.particles.push({
+      x: Math.random() * canvas.width,
+      y: -10 - Math.random() * 60,
+      vx: (Math.random() - 0.5) * 60,
+      vy: 60 + Math.random() * 120,
+      life: 2.6,
+      max: 2.6,
+      color: colors[i % colors.length],
+      size: 4 + Math.random() * 4,
+      kind: 'confetti',
+      rot: Math.random() * 6,
+    })
+  }
+}
+function drawParticles(ctx) {
+  for (const p of fx.particles) {
+    ctx.globalAlpha = Math.max(0, Math.min(1, p.life / p.max * 1.4))
+    ctx.fillStyle = p.color
+    if (p.kind === 'heart') {
+      heartPath(ctx, p.x, p.y, p.size)
+      ctx.fill()
+    } else if (p.kind === 'confetti') {
+      ctx.save()
+      ctx.translate(p.x, p.y)
+      ctx.rotate(p.rot + p.life * 4)
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2)
+      ctx.restore()
+    } else {
+      starPath(ctx, p.x, p.y, p.size, p.size * 0.45)
+      ctx.fill()
+    }
+  }
+  ctx.globalAlpha = 1
+}
+function stepParticles(dt) {
+  for (const p of fx.particles) {
+    p.x += p.vx * dt
+    p.y += p.vy * dt
+    if (p.kind !== 'confetti') p.vy += 90 * dt
+    p.vx *= Math.pow(0.4, dt)
+    p.life -= dt
+  }
+  fx.particles = fx.particles.filter((p) => p.life > 0)
+}
+
+let lastFrame = performance.now()
+function animationLoop(now) {
+  const dt = Math.min(0.05, (now - lastFrame) / 1000)
+  lastFrame = now
+  const t = now / 1000
+  if (fx.squash > 0) fx.squash = Math.max(0, fx.squash - dt * 4)
+  const blink = (t * 0.8) % 4 > 3.82
+  const bob = Math.sin(t * 2.2) * 2.2
+  const preview = document.getElementById('preview-canvas')
+  const result = document.getElementById('result-canvas')
+  const title = document.getElementById('title-canvas')
+  if (preview) {
+    drawRobot(preview, state.build, { t, blink, bob, squash: fx.squash })
+    drawParticles(preview.getContext('2d'))
+  } else if (result) {
+    const since = (now - fx.resultT0) / 1000
+    const booting = since < 0.9
+    const pulse = booting ? 1 : 0.85 + Math.sin(since * 4) * 0.22
+    drawRobot(result, { ...state.build, poweredOn: !booting, pulse }, { t, blink: booting || blink, bob: booting ? 0 : bob * 1.4, squash: fx.squash })
+    if (!booting && now - fx.lastHeart > 700) {
+      fx.lastHeart = now
+      const hx = result.width / 2 + (Math.random() - 0.5) * 90
+      fx.particles.push({ x: hx, y: result.height * 0.2, vx: (Math.random() - 0.5) * 20, vy: -50, life: 1.5, max: 1.5, color: '#ff8fab', size: 5 + Math.random() * 3, kind: 'heart' })
+    }
+    drawParticles(result.getContext('2d'))
+  } else if (title) {
+    drawRobot(title, DEMO_BUILD, { t, blink, bob })
+  }
+  stepParticles(dt)
+  requestAnimationFrame(animationLoop)
+}
+requestAnimationFrame(animationLoop)
+window.addEventListener('pointerdown', unlockSfx)
+window.addEventListener('keydown', (e) => {
+  unlockSfx()
+  if (e.key.toLowerCase() === 'm' && !(e.target instanceof HTMLInputElement)) toggleMute()
+})
+function statBar(v) {
+  return `<span class="bar"><i style="width:${Math.min(100, v * 2.2)}%"></i></span>`
 }
 
 // --- Render -----------------------------------------------------------------
@@ -479,6 +635,7 @@ function renderTitle() {
   stopResultAnimation()
   app.innerHTML = `
     <div class="title-wrap">
+      <canvas id="title-canvas" width="230" height="280" style="width:150px;height:183px"></canvas>
       <h1>메이드로봇 만들기 시뮬레이터</h1>
       <div class="subtitle">바디부터 코어까지, 단계별로 부품을 골라 나만의 귀여운 메이드로봇을 직접 조립해 보세요.<br/>고른 부품은 그 자리에서 바로 장착됩니다.</div>
       <div class="field-row">
@@ -492,6 +649,7 @@ function renderTitle() {
   document.getElementById('start-btn').onclick = () => {
     const nameInput = document.getElementById('name-input')
     state.name = nameInput.value.trim() || '리본'
+    sfx.start()
     state.phase = 'build'
     state.stepIndex = 0
     render()
@@ -501,7 +659,7 @@ function renderTitle() {
 function miniStatGrid(stats) {
   return `
     <div class="stat-mini-grid">
-      ${STAT_KEYS.map((k) => `<div class="stat-mini"><span>${STAT_LABELS[k]}</span><b>${stats[k]}</b></div>`).join('')}
+      ${STAT_KEYS.map((k) => `<div class="stat-mini"><span>${STAT_LABELS[k]}</span><b>${stats[k]}</b>${statBar(stats[k])}</div>`).join('')}
     </div>
   `
 }
@@ -560,11 +718,16 @@ function renderBuild() {
   document.querySelectorAll(selectors).forEach((el) => {
     el.onclick = () => {
       state.build[step.key + 'Key'] = el.dataset.key
+      sfx.build()
+      setTimeout(() => sfx.pickup(), 90)
+      fx.squash = 1
       render()
+      burst(step.key, document.getElementById('preview-canvas'))
     }
   })
   document.getElementById('prev-btn').onclick = () => {
     if (state.stepIndex > 0) {
+      sfx.click()
       state.stepIndex -= 1
       render()
     }
@@ -572,11 +735,16 @@ function renderBuild() {
   document.getElementById('next-btn').onclick = () => {
     if (!state.build[step.key + 'Key']) return
     if (state.stepIndex < STEPS.length - 1) {
+      sfx.click()
       state.stepIndex += 1
       render()
     } else {
       state.phase = 'result'
+      fx.resultT0 = performance.now()
+      fx.particles.length = 0
+      sfx.fanfare()
       render()
+      confetti(document.getElementById('result-canvas'))
     }
   }
 }
@@ -590,23 +758,13 @@ function renderResult() {
       <h2 class="result-title">${state.name} 가동 시작</h2>
       <div class="result-verdict">${verdict}</div>
       <div class="result-stats">
-        ${STAT_KEYS.map((k) => `<div class="result-stat"><div class="label">${STAT_LABELS[k]}</div><div class="value">${stats[k]}</div></div>`).join('')}
+        ${STAT_KEYS.map((k) => `<div class="result-stat"><div class="label">${STAT_LABELS[k]}</div><div class="value">${stats[k]}</div>${statBar(stats[k])}</div>`).join('')}
       </div>
       <button class="restart-btn" id="restart-btn">새 로봇 만들기</button>
     </div>
   `
-  const canvas = document.getElementById('result-canvas')
-  const start = performance.now()
-  function loop(t) {
-    const elapsed = (t - start) / 1000
-    const pulse = 0.85 + Math.sin(elapsed * 2.2) * 0.2
-    drawRobot(canvas, { ...state.build, poweredOn: true, pulse })
-    animFrameId = requestAnimationFrame(loop)
-  }
-  animFrameId = requestAnimationFrame(loop)
-
   document.getElementById('restart-btn').onclick = () => {
-    stopResultAnimation()
+    sfx.click()
     state = freshState()
     render()
   }
