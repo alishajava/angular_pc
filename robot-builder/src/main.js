@@ -9,11 +9,13 @@ const STAT_LABELS = { chore: '가사력', speed: '속도', durability: '내구�
 const CHASSIS_OPTIONS = [
   { key: 'slim', label: '슬림형 바디', desc: '가볍고 날렵한 몸체', wFrac: 0.3, flare: 1.3, stats: { chore: 6, speed: 16, durability: 4, precision: 10, charm: 8 } },
   { key: 'standard', label: '스탠다드형 바디', desc: '균형 잡힌 기본형 몸체', wFrac: 0.36, flare: 1.5, stats: { chore: 10, speed: 10, durability: 10, precision: 10, charm: 10 } },
+  { key: 'classic', label: '클래식 롱 드레스', desc: '발목까지 내려오는 정통 빅토리안 메이드복', wFrac: 0.34, flare: 1.75, hemY: 224, stats: { chore: 14, speed: 4, durability: 10, precision: 10, charm: 10 } },
   { key: 'round', label: '볼륨형 바디', desc: '통통하고 안정적인 몸체', wFrac: 0.42, flare: 1.85, stats: { chore: 8, speed: 2, durability: 16, precision: 4, charm: 18 } },
 ]
 const HEAD_OPTIONS = [
   { key: 'ribbon', label: '리본 헤드', desc: '큼직한 리본이 포인트', stats: { charm: 16, precision: 4, chore: 0, speed: 0, durability: 0 } },
   { key: 'headband', label: '메이드 헤어밴드 헤드', desc: '단정한 클래식 메이드 룩', stats: { chore: 12, precision: 8, charm: 0, speed: 0, durability: 0 } },
+  { key: 'longhair', label: '롱헤어 메이드 헤드', desc: '허리까지 내려오는 긴 머리와 프릴 머리장식', stats: { charm: 12, chore: 10, precision: 4, speed: 0, durability: 0 } },
   { key: 'catear', label: '캣이어 안테나 헤드', desc: '장난기 가득한 고양이 귀 안테나', stats: { speed: 8, charm: 10, chore: 0, precision: 0, durability: 0 } },
 ]
 const ARM_OPTIONS = [
@@ -32,6 +34,7 @@ const CORE_OPTIONS = [
   { key: 'ribbonbow', label: '리본 코어', desc: '매듭 모양으로 빛나는 동력원', color: '#c9a6ff', shape: 'bow', stats: { chore: 10, charm: 8, speed: 0, precision: 0, durability: 0 } },
 ]
 const COLOR_OPTIONS = [
+  { key: 'navy', label: '클래식 네이비', hex: '#3d4f80' },
   { key: 'pink', label: '페일 핑크', hex: '#f7b8c6' },
   { key: 'mint', label: '민트 그린', hex: '#a8e0cb' },
   { key: 'lavender', label: '라벤더', hex: '#c9b8e8' },
@@ -231,6 +234,35 @@ function bodyHalfWidth(chassisKey, W, atBottom) {
 
 const BODY = { neck: 118, shoulder: 126, waist: 160 }
 
+// Long hair falling down the back, behind the dress.
+function hairColorFor(paint) {
+  const HAIR = { navy: '#9db8e0', pink: '#c9607e', mint: '#3f9a86', lavender: '#7a5fb4', cream: '#b98a58', sky: '#4a82c4', lemon: '#d9a02e' }
+  return HAIR[COLOR_OPTIONS.find((c) => c.hex === paint)?.key] || '#c9607e'
+}
+function drawBackHair(ctx, cx, paint) {
+  const base = hairColorFor(paint)
+  const hair = tint(base, -0.12)
+  const hi = tint(base, 0.22)
+  ctx.beginPath()
+  ctx.moveTo(cx - 46, 70)
+  ctx.lineTo(cx - 52, 168)
+  ctx.quadraticCurveTo(cx - 52, 190, cx - 36, 186)
+  ctx.quadraticCurveTo(cx - 20, 196, cx, 188)
+  ctx.quadraticCurveTo(cx + 20, 196, cx + 36, 186)
+  ctx.quadraticCurveTo(cx + 52, 190, cx + 52, 168)
+  ctx.lineTo(cx + 46, 70)
+  ctx.closePath()
+  paintShape(ctx, lgrad(ctx, cx - 52, 0, cx + 52, 0, hi, hair))
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)'
+  ctx.lineWidth = 2
+  for (const dx of [-26, -8, 14, 32]) {
+    ctx.beginPath()
+    ctx.moveTo(cx + dx, 120)
+    ctx.quadraticCurveTo(cx + dx * 1.15, 150, cx + dx * 1.1, 184)
+    ctx.stroke()
+  }
+}
+
 // A small porcelain neck so the head is always joined to the body.
 function drawNeck(ctx, cx) {
   ctx.beginPath()
@@ -298,7 +330,7 @@ function drawDressBody(ctx, key, cx, paint, accent) {
   const topW = 230 * spec.wFrac
   const hemW = topW * spec.flare
   const waistW = topW * 0.78
-  const hemY = 206
+  const hemY = spec.hemY || 206
   const { shoulder, waist } = BODY
   const light = tint(paint, 0.2)
   const dark = tint(paint, -0.14)
@@ -468,8 +500,7 @@ function drawArms(ctx, key, cx, topW, paint, accent, t) {
   }
 }
 
-function drawLegs(ctx, key, cx, hemW, paint, accent, t) {
-  const hemY = 206
+function drawLegs(ctx, key, cx, hemW, paint, accent, t, hemY = 206) {
   if (key === 'apronskirt') {
     // a second, longer tier of skirt with its own frill and tiny shoes
     const w = hemW * 1.12
@@ -557,15 +588,18 @@ function drawLegs(ctx, key, cx, hemW, paint, accent, t) {
 }
 
 function drawHead(ctx, key, cx, cy, paint, accent) {
-  const HAIR = { pink: '#c9607e', mint: '#3f9a86', lavender: '#7a5fb4', cream: '#b98a58', sky: '#4a82c4', lemon: '#d9a02e' }
+  const HAIR = { navy: '#9db8e0', pink: '#c9607e', mint: '#3f9a86', lavender: '#7a5fb4', cream: '#b98a58', sky: '#4a82c4', lemon: '#d9a02e' }
   const hairBase = HAIR[COLOR_OPTIONS.find((c) => c.hex === paint)?.key] || '#c9607e'
   const hair = tint(hairBase, -0.12)
   const hairHi = tint(hairBase, 0.2)
-  const face = lgrad(ctx, cx - 36, cy - 30, cx + 36, cy + 34, '#fffbf9', tint(paint, 0.78))
+  const face = lgrad(ctx, cx - 36, cy - 30, cx + 36, cy + 34, '#fffbf9', tint(paint, 0.9))
 
-  // back hair: a bob that falls past the jaw
+  // back hair: a bob that falls past the jaw (long hair is drawn behind the dress instead)
   ctx.beginPath()
   ctx.ellipse(cx, cy - 2, 47, 43, 0, 0, Math.PI * 2)
+  if (key === 'longhair') {
+    paintShape(ctx, lgrad(ctx, cx - 47, 0, cx + 47, 0, hairHi, hair))
+  } else {
   ctx.moveTo(cx - 47, cy)
   ctx.lineTo(cx - 47, cy + 40)
   ctx.quadraticCurveTo(cx - 42, cy + 50, cx - 30, cy + 44)
@@ -575,6 +609,7 @@ function drawHead(ctx, key, cx, cy, paint, accent) {
   ctx.quadraticCurveTo(cx + 42, cy + 50, cx + 47, cy + 40)
   ctx.lineTo(cx + 47, cy)
   paintShape(ctx, lgrad(ctx, cx - 47, 0, cx + 47, 0, hairHi, hair))
+  }
 
   // cat-ear antennae sit behind the fringe
   if (key === 'catear') {
@@ -727,10 +762,23 @@ function drawHead(ctx, key, cx, cy, paint, accent) {
   ctx.arc(cx - 6, cy - 4, 36, Math.PI * 1.12, Math.PI * 1.45)
   ctx.stroke()
 
+  // long front locks falling over the shoulders, tied with little ribbons
+  if (key === 'longhair') {
+    for (const sg of [-1, 1]) {
+      ctx.beginPath()
+      ctx.moveTo(cx + sg * 44, cy + 6)
+      ctx.quadraticCurveTo(cx + sg * 49, cy + 50, cx + sg * 44, cy + 88)
+      ctx.quadraticCurveTo(cx + sg * 39, cy + 96, cx + sg * 34, cy + 88)
+      ctx.quadraticCurveTo(cx + sg * 31, cy + 52, cx + sg * 33, cy + 22)
+      ctx.closePath()
+      paintShape(ctx, lgrad(ctx, cx + sg * 30, 0, cx + sg * 50, 0, hairHi, hair))
+      satinBow(ctx, cx + sg * 39, cy + 70, 5.4, accent, sg * 0.3)
+    }
+  }
   // head accessories
   if (key === 'ribbon') {
     satinBow(ctx, cx + 24, cy - 36, 16, accent, 0.35)
-  } else if (key === 'headband') {
+  } else if (key === 'headband' || key === 'longhair') {
     // frilled maid headdress
     ctx.beginPath()
     ctx.moveTo(cx - 40, cy - 8)
@@ -804,7 +852,9 @@ function drawRobot(canvas, build, fx = {}) {
   const topW = W * spec.wFrac
   const hemW = topW * spec.flare
 
-  if (build.legKey) drawLegs(ctx, build.legKey, cx, hemW, paint, accent, t)
+  const hemY = spec.hemY || 206
+  if (build.headKey === 'longhair') drawBackHair(ctx, cx, paint)
+  if (build.legKey) drawLegs(ctx, build.legKey, cx, hemW, paint, accent, t, hemY)
   else placeholderSlot(ctx, cx - 34, 214, 68, 40)
 
   if (build.chassisKey) drawDressBody(ctx, build.chassisKey, cx, paint, accent)
