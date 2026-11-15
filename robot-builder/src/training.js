@@ -1157,7 +1157,14 @@ export function createTraining(api) {
 
   // ------------------------------------------------------------- entry ----
   function start(name, build, saved) {
-    T = saved || fresh(name, build)
+    // Re-entering with the same robot (e.g. after peeking at the result screen)
+    // must keep its progress instead of starting a new training.
+    const same = (x) => x && x.name === name && JSON.stringify(x.build) === JSON.stringify(build)
+    const stored = readSave()
+    if (saved) T = saved
+    else if (same(T)) T = T
+    else if (same(stored)) T = stored
+    else T = fresh(name, build)
     T.build = build
     T.lastLevel = level()
     run.tab = 'teach'
@@ -1217,5 +1224,12 @@ export function createTraining(api) {
     run.say = null
   }
 
-  return { start, render, frame, leave, hasSave, readSave }
+  function reset() {
+    T = null
+    try {
+      localStorage.removeItem(SAVE_KEY)
+    } catch {}
+  }
+
+  return { start, render, frame, leave, reset, hasSave, readSave }
 }

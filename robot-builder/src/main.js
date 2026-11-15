@@ -969,6 +969,7 @@ const training = createTraining({
   starPath,
   onNew: () => {
     sfx.click()
+    training.reset()
     state = freshState()
     render()
   },
@@ -1250,6 +1251,7 @@ function renderResult() {
   }
   document.getElementById('restart-btn').onclick = () => {
     sfx.click()
+    training.reset()
     state = freshState()
     render()
   }
