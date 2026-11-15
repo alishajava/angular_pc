@@ -1,4 +1,5 @@
 import { sfx, unlockSfx, toggleMute } from './sfx.js'
+import { createTraining, hasSave, readSave } from './training.js'
 
 const app = document.getElementById('app')
 
@@ -165,6 +166,7 @@ function outlinedBand(ctx, cx, cy, r, w, startA, endA, color) {
 }
 
 let eyesClosed = false
+let mouthOpen = false
 // ---- Maid robot art -------------------------------------------------------
 // Logical canvas is 230x280 (the real canvas is 2x for crisp edges). Soft
 // two-tone shading, thin outlines, frills and big anime eyes.
@@ -415,7 +417,7 @@ function drawCollarAndBow(ctx, cx, accent, topW) {
   satinBow(ctx, cx, BODY.shoulder + 4, 9, accent)
 }
 
-function drawArms(ctx, key, cx, topW, paint, accent, t) {
+function drawArms(ctx, key, cx, topW, paint, accent, t, fx = {}) {
   const sw = Math.sin(t * 2.2)
   for (const sg of [-1, 1]) {
     const sx = cx + sg * (topW / 2 + 3)
@@ -423,7 +425,8 @@ function drawArms(ctx, key, cx, topW, paint, accent, t) {
     const swing = sw * 0.05 * sg
     ctx.save()
     ctx.translate(sx, sy)
-    ctx.rotate(sg * 0.16 + swing)
+    const raise = (sg > 0 ? fx.armR : fx.armL) || 0
+    ctx.rotate(sg * 0.16 + swing - sg * raise * 2.5)
     // upper sleeve: a puffed ball with a frilled cuff
     ctx.beginPath()
     ctx.ellipse(0, 4, 12.5, 12, 0, 0, Math.PI * 2)
@@ -731,13 +734,27 @@ function drawHead(ctx, key, cx, cy, paint, accent) {
       ctx.stroke()
     }
   }
-  ctx.strokeStyle = '#a8445a'
-  ctx.lineWidth = 1.9
-  ctx.beginPath()
-  ctx.moveTo(cx - 6, cy + 27)
-  ctx.quadraticCurveTo(cx - 3, cy + 31, cx, cy + 27)
-  ctx.quadraticCurveTo(cx + 3, cy + 31, cx + 6, cy + 27)
-  ctx.stroke()
+  if (mouthOpen) {
+    ctx.beginPath()
+    ctx.ellipse(cx, cy + 29, 5, 4.2, 0, 0, Math.PI * 2)
+    ctx.fillStyle = '#8a2e44'
+    ctx.fill()
+    ctx.strokeStyle = '#a8445a'
+    ctx.lineWidth = 1.6
+    ctx.stroke()
+    ctx.fillStyle = '#ff8fa8'
+    ctx.beginPath()
+    ctx.ellipse(cx, cy + 31, 3, 1.8, 0, 0, Math.PI * 2)
+    ctx.fill()
+  } else {
+    ctx.strokeStyle = '#a8445a'
+    ctx.lineWidth = 1.9
+    ctx.beginPath()
+    ctx.moveTo(cx - 6, cy + 27)
+    ctx.quadraticCurveTo(cx - 3, cy + 31, cx, cy + 27)
+    ctx.quadraticCurveTo(cx + 3, cy + 31, cx + 6, cy + 27)
+    ctx.stroke()
+  }
   ctx.fillStyle = 'rgba(160,100,110,0.5)'
   ctx.fillRect(cx - 0.8, cy + 21, 1.6, 1.6)
 
@@ -828,8 +845,9 @@ function drawRobot(canvas, build, fx = {}) {
   ctx.clearRect(0, 0, canvas.width, canvas.height)
   ctx.setTransform(S, 0, 0, S, 0, 0)
   const t = fx.t || 0
-  drawStage(ctx, W, H, t, 'rgba(255,143,171,0.22)')
+  if (!fx.noStage) drawStage(ctx, W, H, t, 'rgba(255,143,171,0.22)')
   eyesClosed = !!fx.blink
+  mouthOpen = !!fx.talk
   const bob = fx.bob || 0
   const squash = fx.squash || 0
   const cx = W / 2
@@ -838,13 +856,16 @@ function drawRobot(canvas, build, fx = {}) {
   const accent = coreSpec ? coreSpec.color : '#ff8fab'
 
   // contact shadow stays on the floor while the body bobs
-  ctx.fillStyle = 'rgba(0,0,0,0.2)'
-  ctx.beginPath()
-  ctx.ellipse(cx, H * 0.94, W * (build.legKey === 'hoverbase' ? 0.2 : 0.3), 6, 0, 0, Math.PI * 2)
-  ctx.fill()
+  if (!fx.noStage) {
+    ctx.fillStyle = 'rgba(0,0,0,0.2)'
+    ctx.beginPath()
+    ctx.ellipse(cx, H * 0.94, W * (build.legKey === 'hoverbase' ? 0.2 : 0.3), 6, 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
 
   ctx.save()
   ctx.translate(cx, H * 0.94)
+  ctx.rotate(fx.lean || 0)
   ctx.scale(1 + squash * 0.06, 1 - squash * 0.05)
   ctx.translate(-cx, -H * 0.94 + bob)
 
@@ -864,8 +885,8 @@ function drawRobot(canvas, build, fx = {}) {
 
   if (build.coreKey && build.chassisKey) drawCore(ctx, build.coreKey, cx, 143, build.poweredOn ? build.pulse ?? 1 : 1)
 
-  if (build.armKey && build.chassisKey) drawArms(ctx, build.armKey, cx, topW, paint, accent, t)
-  else if (build.armKey) drawArms(ctx, build.armKey, cx, 83, paint, accent, t)
+  if (build.armKey && build.chassisKey) drawArms(ctx, build.armKey, cx, topW, paint, accent, t, fx)
+  else if (build.armKey) drawArms(ctx, build.armKey, cx, 83, paint, accent, t, fx)
   else {
     placeholderSlot(ctx, cx - topW / 2 - 24, 128, 18, 40)
     placeholderSlot(ctx, cx + topW / 2 + 6, 128, 18, 40)
@@ -936,6 +957,38 @@ function freshState() {
 let state = freshState()
 function stopResultAnimation() {}
 
+// After assembly the robot can be taught to move, speak and do chores.
+const training = createTraining({
+  app,
+  sfx,
+  drawRobot,
+  computeStats,
+  STAT_KEYS,
+  STAT_LABELS,
+  heartPath,
+  starPath,
+  onNew: () => {
+    sfx.click()
+    state = freshState()
+    render()
+  },
+  onBack: () => {
+    sfx.click()
+    state.phase = 'result'
+    fx.resultT0 = performance.now()
+    render()
+  },
+})
+function beginTraining(saved) {
+  if (saved) {
+    state.name = saved.name
+    state.build = saved.build
+  }
+  training.start(state.name, state.build, saved || null)
+  state.phase = 'train'
+  render()
+}
+
 // --- Animation engine: one loop draws whichever robot canvas is on screen ---
 const fx = { squash: 0, particles: [], resultT0: 0, lastHeart: 0 }
 const DEMO_BUILD = { chassisKey: 'standard', headKey: 'ribbon', armKey: 'tray', legKey: 'apronskirt', coreKey: 'heart', colorKey: 'pink' }
@@ -1005,10 +1058,13 @@ function animationLoop(now) {
   if (fx.squash > 0) fx.squash = Math.max(0, fx.squash - dt * 4)
   const blink = (t * 0.8) % 4 > 3.82
   const bob = Math.sin(t * 2.2) * 2.2
+  const stage = document.getElementById('stage')
   const preview = document.getElementById('preview-canvas')
   const result = document.getElementById('result-canvas')
   const title = document.getElementById('title-canvas')
-  if (preview) {
+  if (stage) {
+    training.frame(stage, now)
+  } else if (preview) {
     drawRobot(preview, state.build, { t, blink, bob, squash: fx.squash })
     drawParticles(preview.getContext('2d'))
   } else if (result) {
@@ -1040,6 +1096,8 @@ function statBar(v) {
 
 // --- Render -----------------------------------------------------------------
 function render() {
+  if (state.phase !== 'train') training.leave()
+  if (state.phase === 'train') return training.render()
   if (state.phase === 'title') return renderTitle()
   if (state.phase === 'build') return renderBuild()
   if (state.phase === 'result') return renderResult()
@@ -1057,9 +1115,15 @@ function renderTitle() {
         <input id="name-input" type="text" maxlength="12" placeholder="예: 리본" value="리본" />
       </div>
       <button class="primary-btn" id="start-btn">조립 시작</button>
+      ${hasSave() ? `<button class="nav-btn continue-btn" id="continue-btn">이어하기 · ${readSave()?.name || ''} (Day ${readSave()?.day || 1})</button>` : ''}
       <div class="hint">바디 → 헤드 → 암 → 하체 → 코어 → 도색 순서로 6단계를 거쳐 로봇을 완성합니다. 각 부품은 가사력/속도/내구성/정밀도/친화력 능력치에 영향을 줍니다.</div>
     </div>
   `
+  const cont = document.getElementById('continue-btn')
+  if (cont) cont.onclick = () => {
+    sfx.start()
+    beginTraining(readSave())
+  }
   document.getElementById('start-btn').onclick = () => {
     const nameInput = document.getElementById('name-input')
     state.name = nameInput.value.trim() || '리본'
@@ -1174,9 +1238,16 @@ function renderResult() {
       <div class="result-stats">
         ${STAT_KEYS.map((k) => `<div class="result-stat"><div class="label">${STAT_LABELS[k]}</div><div class="value">${stats[k]}</div>${statBar(stats[k])}</div>`).join('')}
       </div>
-      <button class="restart-btn" id="restart-btn">새 로봇 만들기</button>
+      <div class="result-actions">
+        <button class="primary-btn" id="train-btn">🎓 훈련 시작 — 움직임·말·가사를 가르쳐요</button>
+        <button class="restart-btn" id="restart-btn">새 로봇 만들기</button>
+      </div>
     </div>
   `
+  document.getElementById('train-btn').onclick = () => {
+    sfx.start()
+    beginTraining(null)
+  }
   document.getElementById('restart-btn').onclick = () => {
     sfx.click()
     state = freshState()
