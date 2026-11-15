@@ -4,6 +4,7 @@
 // cross-examine -> present evidence) is borrowed from the genre.
 
 import { drawCharacter, drawBust, CAST } from './characters.js'
+import { createTopview } from './topview.js'
 import {
   INTRO,
   CLUES,
@@ -140,6 +141,7 @@ const IDLE_LINE = '현장을 둘러보자. 수상한 곳이나 사람을 클릭�
 
 const state = {
   phase: 'title', // title | seq | investigate | exam | objection | gameover | ending
+  invMode: 'classic', // classic (click the scene) | top (walk around top-down)
   line: { who: 'seojin', mood: 'determined', text: IDLE_LINE, shown: 999 },
   hover: false,
   popup: null, // { id, until } - "evidence acquired" banner
@@ -193,6 +195,7 @@ function resetCase() {
     p.talked = false
     p.next = 0
   }
+  tv.reset()
 }
 
 function giveEvidence(id) {
@@ -331,7 +334,31 @@ function retryExam() {
 function startInvestigation() {
   state.phase = 'investigate'
   state.line = { who: 'seojin', mood: 'determined', text: IDLE_LINE, shown: 999 }
+  if (state.invMode === 'top') tv.reset()
 }
+
+// The top-down mode: the detective walks the scene himself.
+const tv = createTopview({
+  ctx,
+  W: CANVAS_W,
+  H: CANVAS_H,
+  state,
+  HOTSPOTS,
+  PEOPLE,
+  talkTo: (p) => talkTo(p),
+  examineHotspot: (h) => examineHotspot(h),
+  lineDone: () => lineDone(),
+  finishLine: () => finishLine(),
+  sounds: {
+    click: () => playClickSound(),
+    step: () => playTone({ freqFrom: 150, freqTo: 95, duration: 0.05, type: 'square', gain: 0.07 }),
+    thunder: () => {
+      playTone({ freqFrom: 90, freqTo: 35, duration: 1.1, type: 'sawtooth', gain: 0.22, delay: 0.25 })
+      playTone({ freqFrom: 60, freqTo: 30, duration: 1.3, type: 'sine', gain: 0.3, delay: 0.3 })
+    },
+  },
+})
+const TOP_IDLE_LINE = '비 오는 밤의 사건 현장이다. 직접 돌아다니며 단서를 찾아보자.'
 
 function talkTo(p) {
   const hanaDone = p.id === 'hana' && allHotspotsExamined()
@@ -339,7 +366,9 @@ function talkTo(p) {
   if (!hanaDone) p.next += 1
   const first = !p.talked
   p.talked = true
-  say(p.id, entry.text, entry.mood)
+  let text = entry.text
+  if (state.invMode === 'top') text = text.replace('하나씩 눌러서 조사해 봐요!', '가까이 가서 Space로 하나씩 조사해 봐요!').replace('수상한 곳은 노랗게 빛나고 있어요', '수상한 곳은 노랗게 반짝이고 있어요')
+  say(p.id, text, entry.mood)
   if (first && !p.isPlayer) playTalkSound()
   else playClickSound()
 }
@@ -436,8 +465,7 @@ canvas.addEventListener('mousemove', (e) => {
     hover = lay.cards.some((c) => inRect(mx, my, c)) || inRect(mx, my, lay.close) || (present && !!pickerSel() && inRect(mx, my, lay.submit))
   } else if (state.phase === 'investigate') {
     hover =
-      !!personAt(mx, my) ||
-      !!hotspotAt(mx, my) ||
+      (state.invMode === 'classic' && (!!personAt(mx, my) || !!hotspotAt(mx, my))) ||
       inRect(mx, my, fileButtonRect()) ||
       (allHotspotsExamined() && inRect(mx, my, proceedButtonRect()))
   } else if (state.phase === 'exam' && state.exam.mode === 'listen') {
@@ -475,6 +503,7 @@ canvas.addEventListener('click', (e) => {
 
   if (state.phase === 'title') {
     playClickSound()
+    state.invMode = inRect(mx, my, titleButtons().top) ? 'top' : 'classic'
     startSequence(INTRO, 'intro', startInvestigation)
     return
   }
@@ -484,6 +513,24 @@ canvas.addEventListener('click', (e) => {
   }
   if (state.phase === 'seq') {
     advanceSequence()
+    return
+  }
+  if (state.phase === 'investigate' && state.invMode === 'top') {
+    if (inRect(mx, my, fileButtonRect())) {
+      if (state.evidence.length) state.filePanel = { sel: state.evidence[0] }
+      playClickSound()
+      return
+    }
+    if (tv.talking) {
+      if (!lineDone()) finishLine()
+      else tv.closeTalk()
+      playClickSound()
+      return
+    }
+    if (allHotspotsExamined() && inRect(mx, my, proceedButtonRect())) {
+      playClickSound()
+      startSequence(BEFORE_KIM, 'courtKim', () => startExam('kim'))
+    }
     return
   }
   if (state.phase === 'investigate') {
@@ -1514,11 +1561,21 @@ function drawTitle(t) {
   ctx.fillStyle = '#9fb3d9'
   ctx.font = '15px sans-serif'
   ctx.fillText('현장을 조사하고, 증언 속 거짓을 찾아 범인을 밝혀내라', W / 2 - 40, 144)
+  const tb = titleButtons()
+  drawButton(tb.classic, '클래식 조사 · 클릭으로 단서 찾기', '#2f5fa0', { font: 'bold 14px sans-serif' })
+  drawButton(tb.top, '탑뷰 조사 · 직접 돌아다니며 찾기', '#2e6b4a', { font: 'bold 14px sans-serif' })
   ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
-  ctx.fillStyle = '#fff'
-  ctx.font = 'bold 16px sans-serif'
-  ctx.fillText('클릭하여 시작', W / 2 - 40, 560)
+  ctx.fillStyle = '#cfd8ff'
+  ctx.font = '13px sans-serif'
+  ctx.textAlign = 'center'
+  ctx.fillText('조사 방식을 골라 시작하세요 (화면의 다른 곳을 눌러도 클래식으로 시작)', W / 2, 584)
   ctx.globalAlpha = 1
+}
+function titleButtons() {
+  return {
+    classic: { x: 90, y: 508, w: 340, h: 48 },
+    top: { x: 470, y: 508, w: 340, h: 48 },
+  }
 }
 
 // ---------- Scenes ----------
@@ -1613,7 +1670,34 @@ function drawSeqScene(t) {
   ctx.fillText(`${s.index + 1} / ${s.lines.length}`, 36, 30)
 }
 
+let lastTvTime = performance.now()
+function drawTopInvestigate(t) {
+  const now = performance.now()
+  const dt = Math.min(0.05, (now - lastTvTime) / 1000)
+  lastTvTime = now
+  if (!pickerOpen()) tv.update(dt)
+  tv.draw(t)
+  const examinedCount = HOTSPOTS.filter((h) => h.examined).length
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#ffd36b'
+  ctx.font = 'bold 14px sans-serif'
+  ctx.fillText(`조사한 단서: ${examinedCount}/${HOTSPOTS.length}`, 20, 30)
+  ctx.fillStyle = '#9fe0c0'
+  ctx.fillText(`나눈 대화: ${talkedCount()}/${talkTargets()}`, 20, 52)
+  drawFileButton()
+  if (tv.talking) drawDialogueBox()
+  if (allHotspotsExamined() && !tv.talking) {
+    const btn = proceedButtonRect()
+    const pulse = 0.85 + Math.sin(t * 5) * 0.15
+    ctx.globalAlpha = pulse
+    drawButton({ x: CANVAS_W - 250, y: 196, w: 220, h: 42 }, '증인을 심문하러 가기', '#2e6b4a')
+    ctx.globalAlpha = 1
+    void btn
+  }
+}
+
 function drawInvestigateScene(t) {
+  if (state.invMode === 'top') return drawTopInvestigate(t)
   drawRoomBackdrop(t)
   drawHotspots(t)
   for (const p of PEOPLE) {
