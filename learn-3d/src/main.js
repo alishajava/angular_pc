@@ -21,6 +21,7 @@ camera.lookAt(0, 0, 0)
 
 // Renderer: Scene을 Camera 시점으로 "실제 화면에 그려주는" 엔진.
 const renderer = new THREE.WebGLRenderer({ antialias: true })
+renderer.shadowMap.enabled = true // 그림자를 쓰려면 렌더러에서도 켜 줘야 한다
 renderer.setSize(window.innerWidth, window.innerHeight)
 document.body.appendChild(renderer.domElement) // 여기서 <canvas>가 만들어져 붙는다
 
@@ -29,7 +30,19 @@ document.body.appendChild(renderer.domElement) // 여기서 <canvas>가 만들�
 // ----------------------------------------------------------------
 // 3D는 빛이 없으면 물체가 새까맣게 보인다(2D는 이런 개념 자체가 없었다).
 // 가장 간단하게: 사방에서 은은하게 비추는 빛 하나만 추가한다.
-scene.add(new THREE.AmbientLight(0xffffff, 1.2))
+scene.add(new THREE.AmbientLight(0xffffff, 0.7))
+// 방향성 조명(해): 한 방향에서 평행하게 비춰서, 물체의 밝은 면/어두운 면이 생긴다.
+// castShadow = true 로 하면 이 빛이 그림자도 만들어 준다.
+const sun = new THREE.DirectionalLight(0xfff2cf, 1.6)
+sun.position.set(6, 12, 5)
+sun.castShadow = true
+sun.shadow.camera.left = -12
+sun.shadow.camera.right = 12
+sun.shadow.camera.top = 12
+sun.shadow.camera.bottom = -12
+scene.add(sun)
+// 멀리 있는 것은 배경색으로 흐려지게 하는 안개. 한 줄이면 깊이감이 확 산다.
+scene.fog = new THREE.Fog(0x8fbc5a, 14, 34)
 
 // ----------------------------------------------------------------
 // 3. 맵(바닥)
@@ -41,6 +54,11 @@ const ground = new THREE.Mesh(
   new THREE.MeshStandardMaterial({ color: 0x79a84f }),
 )
 ground.rotation.x = -Math.PI / 2 // 기본은 수직으로 서 있어서, 90도 돌려 눕힌다
+ground.receiveShadow = true // 바닥은 그림자를 "받는" 쪽
+// 2D 때의 격자처럼, 바닥에 눈금을 깔아 움직임이 잘 보이게 한다.
+const grid = new THREE.GridHelper(groundSize, groundSize, 0x4f7a32, 0x6c9645)
+grid.position.y = 0.01
+scene.add(grid)
 scene.add(ground)
 
 // ----------------------------------------------------------------
@@ -53,6 +71,7 @@ const player = new THREE.Mesh(
   new THREE.MeshStandardMaterial({ color: 0x2b6cff }),
 )
 player.position.set(0, 0.5, 0) // y=0.5: 박스 높이의 절반만큼 띄워서 바닥 위에 올려놓는다
+player.castShadow = true // 캐릭터는 그림자를 "드리우는" 쪽
 scene.add(player)
 
 // 캐릭터의 "이동 속도"도 2D 버전과 똑같은 하나의 숫자다.
@@ -82,10 +101,26 @@ function update() {
   const dt = (now - lastTime) / 1000 // 밀리초 -> 초
   lastTime = now
 
-  if (keysDown.has('w') || keysDown.has('arrowup')) player.position.z -= speed * dt
-  if (keysDown.has('s') || keysDown.has('arrowdown')) player.position.z += speed * dt
-  if (keysDown.has('a') || keysDown.has('arrowleft')) player.position.x -= speed * dt
-  if (keysDown.has('d') || keysDown.has('arrowright')) player.position.x += speed * dt
+  let dx = 0
+  let dz = 0
+  if (keysDown.has('w') || keysDown.has('arrowup')) dz -= 1
+  if (keysDown.has('s') || keysDown.has('arrowdown')) dz += 1
+  if (keysDown.has('a') || keysDown.has('arrowleft')) dx -= 1
+  if (keysDown.has('d') || keysDown.has('arrowright')) dx += 1
+  player.position.x += dx * speed * dt
+  player.position.z += dz * speed * dt
+  // 움직이는 방향으로 박스를 부드럽게 돌려 주면 "걷는" 느낌이 난다.
+  if (dx !== 0 || dz !== 0) {
+    const target = Math.atan2(dx, dz)
+    let diff = target - player.rotation.y
+    while (diff > Math.PI) diff -= Math.PI * 2
+    while (diff < -Math.PI) diff += Math.PI * 2
+    player.rotation.y += diff * Math.min(1, dt * 12)
+    // 통통 튀는 걸음: 사인 함수로 높이를 살짝 흔든다.
+    player.position.y = 0.5 + Math.abs(Math.sin(now / 90)) * 0.18
+  } else {
+    player.position.y = 0.5
+  }
 
   // 2D의 Math.max/min clamp와 똑같은 방식으로, 맵 밖으로 못 나가게 가둔다.
   const half = groundSize / 2 - 0.5
@@ -108,6 +143,12 @@ function loop() {
   requestAnimationFrame(loop)
 }
 loop()
+
+// 화면 왼쪽 위에 조작 안내를 띄운다 (3D 화면 위에 평범한 HTML 글자를 겹쳐 놓았을 뿐이다).
+const hint = document.createElement('div')
+hint.textContent = 'WASD / 방향키로 움직이세요'
+hint.style.cssText = 'position:fixed;left:16px;top:14px;color:#fff;font:14px sans-serif;text-shadow:0 1px 3px #0008;pointer-events:none'
+document.body.appendChild(hint)
 
 // 창 크기가 바뀌면 카메라 비율과 렌더러 크기도 맞춰준다 (3D만의 번거로움).
 window.addEventListener('resize', () => {

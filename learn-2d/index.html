@@ -8,20 +8,30 @@
       body {
         margin: 0;
         min-height: 100vh;
-        background: #222;
+        background: radial-gradient(circle at 50% 0%, #34404a, #1a1f24 70%);
         display: flex;
+        flex-direction: column;
+        gap: 12px;
         align-items: center;
         justify-content: center;
+        font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+        color: #dfe6ea;
       }
       canvas {
         background: #8fbc5a; /* 맵(잔디) 배경색 */
-        border: 4px solid #444;
+        border: 4px solid #3a444c;
+        border-radius: 10px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        max-width: 100%;
       }
+      .hint { font-size: 14px; opacity: 0.8; }
+      .hint b { color: #ffd76a; }
     </style>
   </head>
   <body>
     <!-- 게임이 그려질 캔버스. 가로 640, 세로 480 크기의 "맵" -->
     <canvas id="game" width="640" height="480"></canvas>
+    <div class="hint"><b>WASD</b> 또는 <b>방향키</b>로 파란 캐릭터를 움직여 보세요 · 코드를 읽으며 숫자를 바꿔보면 더 재밌어요</div>
 
     <script>
       // ----------------------------------------------------------------
@@ -46,6 +56,7 @@
         size: 32,
         speed: 4,
         color: '#2b6cff',
+        facing: { x: 0, y: 1 }, // 마지막으로 바라본 방향 (눈 위치를 정할 때 쓴다)
       }
 
       // ----------------------------------------------------------------
@@ -69,10 +80,16 @@
       function update() {
         // 눌려있는 키에 따라 x, y를 더하거나 뺀다.
         // 캔버스 좌표는 "아래로 갈수록 y가 커진다"는 점에 주의.
-        if (keysDown.has('w') || keysDown.has('arrowup')) player.y -= player.speed
-        if (keysDown.has('s') || keysDown.has('arrowdown')) player.y += player.speed
-        if (keysDown.has('a') || keysDown.has('arrowleft')) player.x -= player.speed
-        if (keysDown.has('d') || keysDown.has('arrowright')) player.x += player.speed
+        let dx = 0
+        let dy = 0
+        if (keysDown.has('w') || keysDown.has('arrowup')) dy -= 1
+        if (keysDown.has('s') || keysDown.has('arrowdown')) dy += 1
+        if (keysDown.has('a') || keysDown.has('arrowleft')) dx -= 1
+        if (keysDown.has('d') || keysDown.has('arrowright')) dx += 1
+        player.x += dx * player.speed
+        player.y += dy * player.speed
+        // 움직였다면 그 방향을 기억해 둔다 (아래 draw()에서 눈을 그리는 데 쓴다)
+        if (dx !== 0 || dy !== 0) player.facing = { x: dx, y: dy }
 
         // 캐릭터가 맵(캔버스) 밖으로 나가지 않도록 위치를 제한한다.
         // Math.max/Math.min을 같이 쓰면 "최솟값~최댓값 사이로 가둔다"는 뜻이 된다.
@@ -104,9 +121,36 @@
           ctx.stroke()
         }
 
-        // 캐릭터를 사각형으로 그린다. (x,y가 "중심"이 되도록 절반만큼 왼쪽/위로 옮겨서 그림)
+        // 캐릭터 그림자: 납작한 타원을 발밑에 깔면 한결 입체감이 난다.
+        ctx.fillStyle = 'rgba(0,0,0,0.22)'
+        ctx.beginPath()
+        ctx.ellipse(player.x, player.y + player.size / 2, player.size * 0.5, player.size * 0.16, 0, 0, Math.PI * 2)
+        ctx.fill()
+
+        // 캐릭터를 둥근 사각형으로 그린다. (x,y가 "중심"이 되도록 절반만큼 왼쪽/위로 옮겨서 그림)
         ctx.fillStyle = player.color
-        ctx.fillRect(player.x - player.size / 2, player.y - player.size / 2, player.size, player.size)
+        ctx.beginPath()
+        ctx.roundRect(player.x - player.size / 2, player.y - player.size / 2, player.size, player.size, 8)
+        ctx.fill()
+        ctx.lineWidth = 2
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)'
+        ctx.stroke()
+
+        // 눈 두 개: 바라보는 방향(facing)으로 살짝 치우쳐서 그린다.
+        const len = Math.hypot(player.facing.x, player.facing.y)
+        const fx = (player.facing.x / len) * 5
+        const fy = (player.facing.y / len) * 4
+        ctx.fillStyle = '#fff'
+        for (const ex of [-6, 6]) {
+          ctx.beginPath()
+          ctx.arc(player.x + ex + fx * 0.6, player.y - 2 + fy * 0.6, 4.2, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.fillStyle = '#111'
+          ctx.beginPath()
+          ctx.arc(player.x + ex + fx, player.y - 2 + fy, 2, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.fillStyle = '#fff'
+        }
       }
 
       // ----------------------------------------------------------------
