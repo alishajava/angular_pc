@@ -231,6 +231,35 @@ function bodyHalfWidth(chassisKey, W, atBottom) {
 
 const BODY = { neck: 118, shoulder: 126, waist: 160 }
 
+// A small porcelain neck so the head is always joined to the body.
+function drawNeck(ctx, cx) {
+  ctx.beginPath()
+  ctx.roundRect(cx - 9, 104, 18, 30, 5)
+  paintShape(ctx, lgrad(ctx, cx - 9, 0, cx + 9, 0, '#ffffff', '#e6dde2'), 2)
+  ctx.fillStyle = 'rgba(0,0,0,0.1)'
+  ctx.fillRect(cx - 8, 114, 16, 4)
+}
+
+// Until a body is chosen, a faint dummy torso keeps the head from floating.
+function drawGhostBody(ctx, cx) {
+  ctx.save()
+  ctx.setLineDash([5, 5])
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+  ctx.fillStyle = 'rgba(255,255,255,0.06)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(cx - 34, 130)
+  ctx.quadraticCurveTo(cx - 34, 124, cx - 26, 124)
+  ctx.lineTo(cx + 26, 124)
+  ctx.quadraticCurveTo(cx + 34, 124, cx + 34, 130)
+  ctx.lineTo(cx + 30, 200)
+  ctx.lineTo(cx - 30, 200)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+  ctx.restore()
+}
+
 function drawCore(ctx, key, cx, cy, scale = 1) {
   const spec = CORE_OPTIONS.find((c) => c.key === key)
   ctx.save()
@@ -778,10 +807,10 @@ function drawRobot(canvas, build, fx = {}) {
   if (build.legKey) drawLegs(ctx, build.legKey, cx, hemW, paint, accent, t)
   else placeholderSlot(ctx, cx - 34, 214, 68, 40)
 
-  if (build.chassisKey) {
-    drawDressBody(ctx, build.chassisKey, cx, paint, accent)
-    drawCollarAndBow(ctx, cx, accent, topW)
-  } else placeholderSlot(ctx, cx - 36, 122, 72, 84)
+  if (build.chassisKey) drawDressBody(ctx, build.chassisKey, cx, paint, accent)
+  else drawGhostBody(ctx, cx)
+  drawNeck(ctx, cx)
+  if (build.chassisKey) drawCollarAndBow(ctx, cx, accent, topW)
 
   if (build.coreKey && build.chassisKey) drawCore(ctx, build.coreKey, cx, 143, build.poweredOn ? build.pulse ?? 1 : 1)
 
@@ -792,7 +821,7 @@ function drawRobot(canvas, build, fx = {}) {
     placeholderSlot(ctx, cx + topW / 2 + 6, 128, 18, 40)
   }
 
-  const headY = 76 + Math.sin(t * 2.2 + 1) * 1.2
+  const headY = 79
   if (build.headKey) drawHead(ctx, build.headKey, cx, headY, paint, accent)
   else placeholderSlot(ctx, cx - 40, 36, 80, 78)
   ctx.restore()
