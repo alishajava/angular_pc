@@ -151,6 +151,45 @@
         font-weight: bold; border: none; border-radius: 10px; font-size: 0.88rem; cursor: pointer;
       }
 
+      /* ---------- Career: salary, review, offers ---------- */
+      .topbar .salary { opacity: 0.95; }
+      .worker-company { font-size: 0.78rem; font-weight: bold; margin-top: 0.1rem; color: #2a4fa0; }
+      .worker-company small { margin-left: 0.35rem; font-weight: normal; opacity: 0.6; }
+      .pay-line { display: flex; gap: 0.8rem; align-items: center; margin-top: 0.4rem; font-size: 0.74rem; padding: 0.4rem 0.7rem; background: #f3f7ff; border: 1px dashed #b9c9e6; border-radius: 8px; }
+      .pay-line b { margin-left: auto; color: #2a7a4f; }
+      .review-card { background: #fff; border: 1px solid var(--soft); border-radius: 12px; padding: 0.8rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.4rem; }
+      .review-head { display: flex; align-items: center; gap: 0.9rem; }
+      .grade { width: 58px; height: 58px; border-radius: 14px; display: grid; place-items: center; font-size: 2rem; font-weight: 800; color: #fff; flex-shrink: 0; }
+      .grade-S { background: linear-gradient(135deg, #f5b942, #e0752a); }
+      .grade-A { background: linear-gradient(135deg, #5fbf88, #2f9a66); }
+      .grade-B { background: linear-gradient(135deg, #6a93e0, #3f6fd1); }
+      .grade-C { background: linear-gradient(135deg, #a9b0c2, #7e869c); }
+      .grade-D { background: linear-gradient(135deg, #e07a7a, #c04a4a); }
+      .review-title { font-weight: bold; font-size: 0.95rem; }
+      .review-sub { font-size: 0.7rem; opacity: 0.65; margin-top: 0.15rem; }
+      .review-row { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 0.35rem 0; border-top: 1px solid #eef2f8; }
+      .review-row em { font-style: normal; color: #2a7a4f; margin-left: 0.4rem; }
+      .promo { background: #fff6dc; border: 1px solid #f0d88a; color: #8a5a00; border-radius: 8px; padding: 0.5rem 0.7rem; font-weight: bold; font-size: 0.85rem; }
+      .review-note { font-size: 0.72rem; opacity: 0.65; }
+      .offer-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; }
+      .offer-card { background: #fff; border: 1px solid var(--soft); border-radius: 12px; padding: 0.6rem 0.8rem; display: flex; flex-direction: column; gap: 0.25rem; }
+      .offer-head { display: flex; align-items: center; gap: 0.4rem; font-size: 0.92rem; }
+      .tag { font-size: 0.66rem; padding: 0.1rem 0.5rem; border-radius: 999px; background: #e8eefb; color: #2a4fa0; }
+      .tag.up-tag { background: #fff0c8; color: #8a5a00; }
+      .offer-line { font-size: 0.82rem; }
+      .offer-line em { font-style: normal; font-size: 0.74rem; margin-left: 0.3rem; }
+      .offer-line .up { color: #2a7a4f; } .offer-line .down { color: #c04a4a; }
+      .offer-note { font-size: 0.7rem; opacity: 0.65; }
+      .offer-actions { display: flex; gap: 0.4rem; margin-top: 0.2rem; }
+      .mini-btn { font-family: inherit; font-size: 0.74rem; padding: 0.35rem 0.8rem; border-radius: 8px; border: 1px solid var(--soft); background: #f4f7fc; cursor: pointer; color: var(--ink); }
+      .mini-btn.go { background: var(--blue); color: #fff; border-color: var(--blue); font-weight: bold; }
+      .mini-btn:disabled { opacity: 0.45; cursor: default; }
+      .offer-tip { font-size: 0.7rem; opacity: 0.6; margin-top: 0.4rem; line-height: 1.5; }
+      .muted { opacity: 0.6; font-size: 0.8rem; }
+      .career { font-size: 0.74rem; max-width: 460px; text-align: left; margin-bottom: 1rem; }
+      .career summary { cursor: pointer; text-align: center; opacity: 0.75; }
+      .career ul { margin: 0.4rem 0 0; padding-left: 1.1rem; line-height: 1.6; }
+
       @media (max-width: 640px) {
         .body-row { flex-direction: column; }
         .portrait-col { flex-direction: row; flex: 0 0 auto; border-right: none; border-bottom: 1px solid var(--soft); gap: 0.8rem; }

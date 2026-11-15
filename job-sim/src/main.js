@@ -11,12 +11,15 @@ const HAIR_COLORS = [
   { key: 'gray', label: '반백', hex: '#8a8a8a' },
 ]
 
-function rankForTurn(turn) {
-  if (turn < 8) return { key: 'junior', label: '신입사원' }
-  if (turn < 16) return { key: 'staff', label: '대리' }
-  if (turn < 24) return { key: 'manager', label: '과장' }
-  return { key: 'director', label: '부장' }
-}
+// Ranks are earned through the yearly review (not handed out by the calendar).
+const RANKS = [
+  { key: 'junior', label: '신입사원', living: 600, minYears: 2 },
+  { key: 'staff', label: '대리', living: 720, minYears: 2 },
+  { key: 'manager', label: '과장', living: 860, minYears: 2 },
+  { key: 'director', label: '부장', living: 1000, minYears: 99 },
+]
+const fmt = (n) => `${Math.round(n).toLocaleString('ko-KR')}만`
+const round10 = (n) => Math.round(n / 10) * 10
 
 function moodForStress(stress) {
   if (stress >= 85) return { key: 'sick', label: '탈진 직전' }
@@ -41,7 +44,7 @@ const ACTIVITIES = [
     desc: '밤늦게까지 업무를 처리한다 · 업무력 + / 수당',
     run(s) {
       s.stats.work = clamp(s.stats.work + rand(12, 18))
-      s.money += rand(5, 10)
+      s.money += rand(30, 60)
       s.stress = clamp(s.stress + rand(10, 15))
       return `${s.name}은(는) 밤늦게까지 야근하며 업무를 처리했다.`
     },
@@ -80,12 +83,28 @@ const ACTIVITIES = [
   {
     key: 'sidejob',
     name: '부업·투잡',
-    desc: '퇴근 후 부업을 한다 · 돈 +',
+    desc: '퇴근 후 부업을 한다 · 돈 + (120~180만)',
     run(s) {
-      s.money += rand(25, 35)
+      s.money += rand(120, 180)
       s.stats.stamina = clamp(s.stats.stamina - rand(8, 12))
       s.stress = clamp(s.stress + rand(10, 15))
       return `${s.name}은(는) 퇴근 후 부업으로 짬짬이 돈을 벌었다.`
+    },
+  },
+  {
+    key: 'jobhunt',
+    name: '이직 준비',
+    desc: '이력서를 쓰고 면접을 본다 · 이직 제안 받기 · 전문성 + / 스트레스 +',
+    run(s) {
+      s.stats.expertise = clamp(s.stats.expertise + rand(2, 5))
+      s.stress = clamp(s.stress + rand(6, 10))
+      const p = 0.25 + (s.stats.expertise + s.stats.network) / 300
+      let n = 0
+      for (let i = 0; i < 3; i++) if (Math.random() < p) n++
+      s.offers = generateOffers(n)
+      return s.offers.length
+        ? `${s.name}은(는) 이력서를 돌리고 면접을 봤다. ${s.offers.length}곳에서 제안이 왔다!`
+        : `${s.name}은(는) 이력서를 돌리고 면접을 봤지만, 아직 마음에 드는 제안은 오지 않았다.`
     },
   },
   {
@@ -101,10 +120,10 @@ const ACTIVITIES = [
   {
     key: 'travel',
     name: '여행',
-    desc: '휴가를 내고 떠난다 · 비용 50 · 랜덤 대폭 성장',
-    cost: 50,
+    desc: '휴가를 내고 떠난다 · 비용 250만 · 랜덤 대폭 성장',
+    cost: 250,
     run(s) {
-      s.money -= 50
+      s.money -= 250
       const picks = []
       while (picks.length < 2) {
         const k = pick(STAT_KEYS)
@@ -121,31 +140,141 @@ const ACTIVITIES = [
 const EVENTS = [
   { text: '상사에게 업무 성과로 칭찬을 받았다.', run: (s) => { s.stats.trust = clamp(s.stats.trust + 5); s.stress = clamp(s.stress - 4) } },
   { text: '동료와 업무 방식으로 사소한 갈등이 있었다.', run: (s) => { s.stress = clamp(s.stress + 8); s.stats.network = clamp(s.stats.network - 2) } },
-  { text: '사내 이벤트 추첨에서 소소한 상금을 받았다.', run: (s) => { s.money += 15 } },
+  { text: '사내 이벤트 추첨에서 소소한 상금을 받았다.', run: (s) => { s.money += 60 } },
   {
     text: '지하철에서 지갑을 소매치기당했다.',
-    condition: (s) => s.money >= 10,
-    run: (s) => { s.money = Math.max(0, s.money - 12) },
+    condition: (s) => s.money >= 70,
+    run: (s) => { s.money = Math.max(0, s.money - 70) },
   },
   { text: '중요한 프로젝트에 발탁되었다.', run: (s) => { s.stats.work = clamp(s.stats.work + 6); s.stress = clamp(s.stress + 5) } },
   { text: '야근 중 실수를 저질러 질책을 받았다.', run: (s) => { s.stress = clamp(s.stress + 10); s.stats.trust = clamp(s.stats.trust - 3) } },
   { text: '자기계발 강의에서 큰 깨달음을 얻었다.', run: (s) => { s.stats.expertise = clamp(s.stats.expertise + 6) } },
   { text: '동료의 추천으로 사내 동아리에 가입했다.', run: (s) => { s.stats.network = clamp(s.stats.network + 4); s.stats.trust = clamp(s.stats.trust + 2) } },
   { text: '과로로 몸이 으슬으슬했다.', run: (s) => { s.stress = clamp(s.stress + 12) } },
-  { text: '소액으로 투자해 짭짤한 수익을 얻었다.', run: (s) => { s.money += 10 } },
+  { text: '소액으로 투자해 짭짤한 수익을 얻었다.', run: (s) => { s.money += 50 } },
   { text: '동기와 점심을 먹으며 수다로 힐링했다.', run: (s) => { s.stress = clamp(s.stress - 8); s.stats.network = clamp(s.stats.network + 2) } },
   { text: '건강검진에서 체력 관리에 주의하라는 소견을 들었다.', run: (s) => { s.stats.stamina = clamp(s.stats.stamina - 5); s.stress = clamp(s.stress + 5) } },
   { text: '사내 체육대회에서 활약했다.', run: (s) => { s.stats.stamina = clamp(s.stats.stamina + 5); s.stats.network = clamp(s.stats.network + 4) } },
-  { text: '야근 수당을 넉넉히 받았다.', run: (s) => { s.money += 12 } },
+  { text: '야근 수당을 넉넉히 받았다.', run: (s) => { s.money += 50 } },
   { text: '중요한 문서에 커피를 쏟아 당황했다.', run: (s) => { s.stress = clamp(s.stress + 10) } },
   { text: '멘토에게 값진 조언을 들었다.', run: (s) => { s.stats.expertise = clamp(s.stats.expertise + 4); s.stats.trust = clamp(s.stats.trust + 3) } },
   { text: '오랜만에 칼퇴근을 해서 기분이 좋았다.', run: (s) => { s.stress = clamp(s.stress - 10) } },
   {
     text: '회사 앞에서 사기성 설문조사에 돈을 뜯겼다.',
-    condition: (s) => s.money >= 10,
-    run: (s) => { s.money = Math.max(0, s.money - 10) },
+    condition: (s) => s.money >= 60,
+    run: (s) => { s.money = Math.max(0, s.money - 60) },
   },
 ]
+
+// --- Career: companies, yearly review, job market -------------------------
+// Each company type bends the game a little: pay, how much stress piles up,
+// how fast you grow, how quickly promotions come and what the review rewards.
+const ARCHETYPES = {
+  mid: { key: 'mid', label: '중견기업', names: ['한결상사', '성진산업', '다온정밀', '우리화학'], pay: 1.0, stress: 0.9, growth: 1.0, raise: 0, promo: 0, w: { work: 0.35, expertise: 0.25, trust: 0.25, network: 0.15 }, note: '무난하고 균형 잡힌 직장' },
+  big: { key: 'big', label: '대기업', names: ['한빛전자', '대한중공업', '미래모빌리티', '동양제과'], pay: 1.08, stress: 1.0, growth: 1.0, raise: 0, promo: 1, w: { work: 0.3, expertise: 0.2, trust: 0.25, network: 0.25 }, note: '연봉이 높지만 승진이 느려요 · 인맥을 중시' },
+  startup: { key: 'startup', label: '스타트업', names: ['노바랩스', '피카테크', '버블웍스', '모두의AI'], pay: 0.92, stress: 1.25, growth: 1.15, raise: 2, promo: -1, stock: true, w: { work: 0.45, expertise: 0.2, trust: 0.2, network: 0.15 }, note: '빠른 성장·빠른 승진·스톡옵션(2년 이상 근속) / 스트레스 ↑' },
+  foreign: { key: 'foreign', label: '외국계', names: ['Globex 코리아', 'Nordic Systems', 'Aurora Korea'], pay: 1.18, stress: 1.1, growth: 1.05, raise: 1, promo: 0, need: (s) => s.stats.expertise >= 45, w: { work: 0.25, expertise: 0.4, trust: 0.2, network: 0.15 }, note: '최고 수준의 연봉 · 전문성을 평가 · 전문성 45 이상 필요' },
+  public: { key: 'public', label: '공공기관', names: ['한국에너지공단', '국가정보진흥원', '지역개발공사'], pay: 0.92, stress: 0.7, growth: 0.95, raise: -1, promo: 1, need: (s) => s.stats.trust >= 45, w: { work: 0.2, expertise: 0.2, trust: 0.4, network: 0.2 }, note: '안정적이고 스트레스가 적어요 · 신뢰 45 이상 필요' },
+}
+const GRADE_RAISE = { S: 7, A: 4, B: 2, C: 1, D: 0 }
+const GRADE_BONUS = { S: 0.8, A: 0.5, B: 0.25, C: 0.1, D: 0 }
+const GRADE_TEXT = { S: '탁월', A: '우수', B: '보통', C: '미흡', D: '부진' }
+
+function makeCompany(arch, name) {
+  const a = ARCHETYPES[arch]
+  return { arch, name: name || pick(a.names) }
+}
+const archOf = (s) => ARCHETYPES[s.company.arch]
+
+function generateOffers(n) {
+  const s = state
+  const pool = Object.values(ARCHETYPES).filter((a) => !a.need || a.need(s))
+  const shuffled = [...pool].sort(() => Math.random() - 0.5)
+  const offers = []
+  for (const a of shuffled) {
+    if (offers.length >= n) break
+    let name = pick(a.names)
+    if (name === s.company.name) name = a.names.find((x) => x !== s.company.name) || name
+    const promoted = s.rankIdx < 3 && Math.random() < 0.2
+    const rankIdx = promoted ? s.rankIdx + 1 : s.rankIdx
+    const mult = Math.min(1.25, a.pay * (0.95 + (s.stats.expertise + s.stats.network) / 1500 + rand(0, 4) / 100) * (promoted ? 1.05 : 1))
+    offers.push({ arch: a.key, name, rankIdx, salary: round10(s.salary * mult), negotiated: false })
+  }
+  return offers
+}
+
+function computeReview() {
+  const s = state
+  const a = archOf(s)
+  const w = a.w
+  let score = s.stats.work * w.work + s.stats.expertise * w.expertise + s.stats.trust * w.trust + s.stats.network * w.network + rand(-6, 6)
+  if (s.stress >= 80) score -= 5
+  score = Math.round(score)
+  const grade = score >= 70 ? 'S' : score >= 56 ? 'A' : score >= 42 ? 'B' : score >= 30 ? 'C' : 'D'
+  const raisePct = Math.max(0, GRADE_RAISE[grade] + a.raise)
+  const before = s.salary
+  s.salary = round10(s.salary * (1 + raisePct / 100))
+  const quarterly = Math.round((s.salary * 0.88) / 4)
+  const bonus = Math.round(quarterly * GRADE_BONUS[grade])
+  s.money += bonus
+  const review = { year: yearAt(s.turn - 1), grade, score, raisePct, before, after: s.salary, bonus, promoted: null }
+  // promotion: enough time in the grade + a good review
+  const needQ = (RANKS[s.rankIdx].minYears + a.promo) * 4
+  if (s.rankIdx < 3 && s.qAtRank >= needQ && (grade === 'S' || grade === 'A' || (grade === 'B' && s.rankIdx === 0))) {
+    review.promoted = { from: RANKS[s.rankIdx].label, to: RANKS[s.rankIdx + 1].label }
+    s.rankIdx += 1
+    s.qAtRank = 0
+    s.salary = round10(s.salary * 1.08)
+    review.after = s.salary
+  }
+  s.history.push({ year: review.year, company: s.company.name, rank: RANKS[s.rankIdx].label, salary: s.salary, grade })
+  return review
+}
+
+function negotiate(i) {
+  const o = state.offers[i]
+  if (!o || o.negotiated) return
+  o.negotiated = true
+  const chance = clamp(0.35 + (state.stats.network + state.stats.expertise) / 400, 0.3, 0.85)
+  const roll = Math.random()
+  if (roll < chance) {
+    const up = round10(o.salary * 1.08)
+    state.negMsg = `협상 성공! ${o.name}이(가) 연봉을 ${fmt(o.salary)} → ${fmt(up)}으로 올려 주었다.`
+    o.salary = up
+    sfx.good()
+  } else if (roll > 0.88) {
+    state.negMsg = `협상이 틀어져 ${o.name}이(가) 제안을 철회했다...`
+    state.offers.splice(i, 1)
+    sfx.bad()
+  } else {
+    state.negMsg = `${o.name}은(는) 조건을 더 올려 줄 수 없다고 했다. 기존 조건은 유효하다.`
+    sfx.click()
+  }
+  render()
+}
+
+function acceptOffer(i) {
+  const o = state.offers[i]
+  if (!o) return
+  const a = ARCHETYPES[o.arch]
+  const prevCompany = state.company.name
+  const prevSalary = state.salary
+  state.company = makeCompany(o.arch, o.name)
+  if (o.rankIdx !== state.rankIdx) state.qAtRank = 0
+  state.rankIdx = o.rankIdx
+  state.salary = o.salary
+  state.tenureQ = 0
+  state.transfers += 1
+  // starting over in a new place: trust has to be earned again
+  state.stats.trust = Math.max(5, Math.round(state.stats.trust * 0.5))
+  state.stress = clamp(state.stress - 5)
+  state.history.push({ year: yearAt(Math.max(0, state.turn - 1)), company: o.name, rank: RANKS[state.rankIdx].label, salary: o.salary, moved: true })
+  state.offers = []
+  state.joinMsg = `${state.name}은(는) ${prevCompany}을(를) 떠나 ${a.label} ${o.name}에 ${RANKS[state.rankIdx].label}(으)로 입사했다.\n연봉 ${fmt(prevSalary)} → ${fmt(o.salary)} (${o.salary >= prevSalary ? '+' : ''}${Math.round(((o.salary - prevSalary) / prevSalary) * 100)}%)\n새 환경에서는 신뢰를 처음부터 다시 쌓아야 한다. (신뢰 -50%)`
+  state.phase = 'joined'
+  sfx.start()
+  render()
+}
 
 // --- Endings ------------------------------------------------------------
 const HIGH = 70
@@ -160,11 +289,38 @@ function computeEnding(s) {
     }
   }
   const { work, stamina, network, expertise, trust } = s.stats
+  // startup stock options pay off (or don't) at the end for those who stayed 2+ years
+  s.stockNote = ''
+  if (archOf(s).stock && s.tenureQ >= 8) {
+    if (Math.random() < 0.3) {
+      s.money += 6000
+      s.stockNote = '\n\n💎 근속한 스타트업이 상장에 성공해 스톡옵션으로 6,000만을 손에 쥐었다!'
+    } else s.stockNote = '\n\n스톡옵션은 끝내 휴지조각이 되었지만, 값진 경험이 남았다.'
+  }
+  const rankIdx = s.rankIdx
 
-  if (work >= HIGH && trust >= HIGH) {
+  if (s.salary >= 8000) {
+    return {
+      title: '연봉킹 엔딩',
+      text: `꾸준한 성과와 영리한 이직으로 연봉 ${fmt(s.salary)}까지 오른 ${s.name}은(는) 업계에서 손꼽히는 고연봉자가 되었다.${s.stockNote}`,
+    }
+  }
+  if (s.transfers >= 3 && s.salary >= 5800) {
+    return {
+      title: '프로 이직러 엔딩',
+      text: `${s.transfers}번의 이직으로 몸값을 차곡차곡 올린 ${s.name}은(는) 어디서든 러브콜을 받는 프로 이직러가 되었다.${s.stockNote}`,
+    }
+  }
+  if (s.transfers === 0 && rankIdx === 3 && trust >= 60) {
+    return {
+      title: '한 우물 엔딩',
+      text: `한 회사에서 묵묵히 일해 부장까지 오른 ${s.name}은(는) 동료와 후배 모두가 믿고 따르는 회사의 산증인이 되었다.${s.stockNote}`,
+    }
+  }
+  if (work >= HIGH && trust >= HIGH && rankIdx >= 2) {
     return {
       title: '임원 엔딩',
-      text: `뛰어난 업무 성과와 두터운 신뢰를 바탕으로, ${s.name}은(는) 마침내 임원으로 승진해 회사의 핵심 의사결정에 참여하게 되었다.`,
+      text: `뛰어난 업무 성과와 두터운 신뢰를 바탕으로, ${s.name}은(는) 마침내 임원으로 승진해 회사의 핵심 의사결정에 참여하게 되었다.${s.stockNote}`,
     }
   }
   if (trust >= HIGH && network >= HIGH) {
@@ -173,7 +329,7 @@ function computeEnding(s) {
       text: `깊은 신뢰와 넓은 인맥을 쌓은 ${s.name}은(는) 팀원들이 가장 따르고 싶어하는 리더로 자리매김했다.`,
     }
   }
-  if (s.money >= 300 && network >= HIGH) {
+  if (s.money >= 10000 && network >= HIGH) {
     return {
       title: '창업가 엔딩',
       text: `차곡차곡 모은 자금과 넓은 인맥을 발판으로, ${s.name}은(는) 회사를 나와 자신만의 사업을 시작했다.`,
@@ -582,7 +738,18 @@ function freshState() {
     hairKey: HAIR_COLORS[0].key,
     turn: 0,
     stats: { work: 20, stamina: 20, network: 20, expertise: 20, trust: 20 },
-    money: 50,
+    money: 300, // 만원
+    salary: 3200, // 연봉 (만원)
+    company: makeCompany('mid', '한결상사'),
+    rankIdx: 0,
+    qAtRank: 0, // 현재 직급에서 보낸 분기 수
+    tenureQ: 0, // 현재 회사 근속 분기 수
+    transfers: 0,
+    totalEarned: 0,
+    offers: [],
+    history: [{ year: 1, company: '한결상사', rank: '신입사원', salary: 3200 }],
+    lastPay: null,
+    review: null,
     stress: 20,
     burnoutTurns: 0, // 스트레스 85 이상으로 끝난 턴 수
     sick: false,
@@ -601,6 +768,7 @@ function quarterAt(turn) {
 
 function resolveTurn(activity) {
   const lines = []
+  const before = { stats: { ...state.stats }, stress: state.stress }
   if (state.sick) {
     state.stress = clamp(state.stress - rand(20, 28))
     lines.push(`${state.name}은(는) 번아웃 조짐으로 이번 분기는 병가를 내고 쉬었다.`)
@@ -614,11 +782,33 @@ function resolveTurn(activity) {
       lines.push(ev.text)
     }
   }
+  // the company's culture bends what you just gained (growth) and what it cost (stress)
+  const co = archOf(state)
+  for (const k of ['work', 'expertise']) {
+    const d = state.stats[k] - before.stats[k]
+    if (d > 0) state.stats[k] = clamp(before.stats[k] + Math.round(d * co.growth))
+  }
+  const sd = state.stress - before.stress
+  if (sd > 0) state.stress = clamp(before.stress + Math.round(sd * co.stress))
+  // headhunters call people with a good profile
+  if (!state.sick && !state.offers.length && Math.random() < (state.stats.expertise + state.stats.network) / 650) {
+    state.offers = generateOffers(1)
+    if (state.offers.length) lines.push(`헤드헌터에게서 이직 제안이 왔다! (${state.offers[0].name})`)
+  }
   if (!state.sick && state.stress >= 92 && Math.random() < 0.35) {
     state.sick = true
     lines.push(`${state.name}은(는) 무리를 한 탓인지 몸이 으슬으슬하다... (다음 분기는 병가를 낸다)`)
   }
   if (state.stress >= 85) state.burnoutTurns += 1
+  // payday: take-home pay minus the cost of living
+  const income = Math.round((state.salary * 0.88) / 4)
+  // lifestyle grows with income, so a bigger paycheck is not all pure savings
+  const living = Math.round(income * 0.55 + RANKS[state.rankIdx].living * 0.45)
+  state.money = Math.max(0, state.money + income - living)
+  state.totalEarned += income
+  state.lastPay = { income, living }
+  state.tenureQ += 1
+  state.qAtRank += 1
   state.lastResult = lines.join(' ')
   setTimeout(() => (state.sick ? sfx.bad() : sfx.pickup()), 90)
   state.turn += 1
@@ -626,10 +816,28 @@ function resolveTurn(activity) {
 }
 
 function continueFromResult() {
+  // the fourth quarter closes the year: performance review, raise, promotion
+  if (state.turn % 4 === 0 && state.turn > 0 && !state.sickBurnout) {
+    state.review = computeReview()
+    state.phase = 'review'
+    const g = state.review.grade
+    setTimeout(() => (state.review.promoted ? sfx.fanfare() : g === 'S' || g === 'A' ? sfx.good() : g === 'D' ? sfx.bad() : sfx.pickup()), 120)
+    render()
+    return
+  }
+  proceedAfterTurn()
+}
+
+function proceedAfterTurn() {
   if (state.turn >= TOTAL_TURNS) {
+    state.offers = []
     state.ending = computeEnding(state)
     state.phase = 'ending'
     setTimeout(() => (state.ending.title.includes('번아웃') ? sfx.lose() : sfx.fanfare()), 120)
+  } else if (state.offers.length) {
+    state.phase = 'offers'
+    state.negMsg = ''
+    sfx.alarm()
   } else {
     state.phase = 'choose'
   }
@@ -641,6 +849,9 @@ function render() {
   if (state.phase === 'title') return renderTitle()
   if (state.phase === 'choose') return renderChoose()
   if (state.phase === 'result') return renderResult()
+  if (state.phase === 'review') return renderReview()
+  if (state.phase === 'offers') return renderOffers()
+  if (state.phase === 'joined') return renderJoined()
   if (state.phase === 'ending') return renderEnding()
 }
 
@@ -662,7 +873,7 @@ function renderTitle() {
         </div>
       </div>
       <button class="primary-btn" id="start-btn">입사하기</button>
-      <div class="hint">매 분기마다 활동을 선택해 능력치를 키우세요. 무리하면 번아웃이 올 수 있어요. 8년이 지나면 그동안의 성장에 따라 엔딩이 결정됩니다.</div>
+      <div class="hint">매 분기마다 활동을 선택해 능력치를 키우세요. 4분기마다 인사평가로 연봉·승진이 정해지고, 이직 제안으로 회사를 옮길 수도 있어요. 무리하면 번아웃이 올 수 있어요. 8년이 지나면 그동안의 성장에 따라 엔딩이 결정됩니다.</div>
     </div>
   `
   const nameInput = document.getElementById('name-input')
@@ -692,19 +903,22 @@ function statBar(key, val) {
 }
 
 function renderTopAndPortrait(extraBodyHtml) {
-  const rank = rankForTurn(state.turn)
+  const rank = RANKS[state.rankIdx]
   const mood = moodForStress(state.stress)
+  const arch = archOf(state)
   app.innerHTML = `
     <div class="game-wrap">
       <div class="topbar">
-        <span>${yearAt(state.turn)}년차 · ${quarterAt(state.turn)}</span>
-        <span class="money">💰 ${state.money}</span>
+        <span>${Math.min(8, yearAt(state.turn))}년차 · ${quarterAt(state.turn)}</span>
+        <span class="salary">연봉 ${fmt(state.salary)}</span>
+        <span class="money">💰 ${fmt(state.money)}</span>
       </div>
       <div class="body-row">
         <div class="portrait-col">
           <canvas id="portrait-canvas" width="200" height="240"></canvas>
           <div class="worker-name">${state.name}</div>
           <div class="worker-rank">${rank.label}</div>
+          <div class="worker-company">${state.company.name}<small>${arch.label}</small></div>
           <div class="mood-tag">${mood.label}</div>
         </div>
         <div class="stats-col">
@@ -755,20 +969,94 @@ function renderChoose() {
 }
 
 function renderResult() {
+  const pay = state.lastPay
+  const payLine = pay
+    ? `<div class="pay-line"><span>급여(세후) +${fmt(pay.income)}</span><span>생활비 −${fmt(pay.living)}</span><b>${pay.income - pay.living >= 0 ? '+' : ''}${fmt(pay.income - pay.living)}</b></div>`
+    : ''
   const body = `<div class="log-box">${state.lastResult}</div>
+    ${payLine}
     <button class="continue-btn" id="continue-btn">계속</button>`
   renderTopAndPortrait(body)
   document.getElementById('continue-btn').onclick = continueFromResult
 }
 
+function renderReview() {
+  const r = state.review
+  const a = archOf(state)
+  const wtxt = `업무 ${Math.round(a.w.work * 100)}% · 전문성 ${Math.round(a.w.expertise * 100)}% · 신뢰 ${Math.round(a.w.trust * 100)}% · 인맥 ${Math.round(a.w.network * 100)}%`
+  const body = `
+    <div class="review-card">
+      <div class="review-head">
+        <div class="grade grade-${r.grade}">${r.grade}</div>
+        <div>
+          <div class="review-title">${r.year}년차 인사평가 · ${GRADE_TEXT[r.grade]}</div>
+          <div class="review-sub">평가 점수 ${r.score}점 · ${a.label} 기준 (${wtxt})</div>
+        </div>
+      </div>
+      <div class="review-row"><span>연봉</span><b>${fmt(r.before)} → ${fmt(r.after)} <em>${r.raisePct > 0 ? `+${r.raisePct}%` : '동결'}</em></b></div>
+      <div class="review-row"><span>성과급</span><b>${r.bonus > 0 ? `+${fmt(r.bonus)}` : '없음'}</b></div>
+      ${r.promoted ? `<div class="promo">🎉 승진! ${r.promoted.from} → ${r.promoted.to} (연봉 +8%)</div>` : ''}
+      ${!r.promoted && state.rankIdx < 3 ? `<div class="review-note">다음 승진까지: 현재 직급 ${Math.floor(state.qAtRank / 4)}년 근무 · 평가 A 이상 필요</div>` : ''}
+    </div>
+    <button class="continue-btn" id="review-ok">확인</button>`
+  renderTopAndPortrait(body)
+  document.getElementById('review-ok').onclick = proceedAfterTurn
+}
+
+function renderOffers() {
+  const cur = state.salary
+  const cards = state.offers
+    .map((o, i) => {
+      const a = ARCHETYPES[o.arch]
+      const diff = Math.round(((o.salary - cur) / cur) * 100)
+      return `<div class="offer-card">
+        <div class="offer-head"><b>${o.name}</b><span class="tag">${a.label}</span>${o.rankIdx > state.rankIdx ? '<span class="tag up-tag">직급 상승</span>' : ''}</div>
+        <div class="offer-line">${RANKS[o.rankIdx].label} · 연봉 <b>${fmt(o.salary)}</b> <em class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '+' : ''}${diff}%</em></div>
+        <div class="offer-note">${a.note}</div>
+        <div class="offer-actions">
+          <button class="mini-btn" data-neg="${i}" ${o.negotiated ? 'disabled' : ''}>${o.negotiated ? '협상 완료' : '연봉 협상'}</button>
+          <button class="mini-btn go" data-accept="${i}">이직하기</button>
+        </div>
+      </div>`
+    })
+    .join('')
+  const body = `
+    <div class="log-box">이직 제안이 도착했다. 지금 회사: <b>${state.company.name}</b> (${archOf(state).label}) · 연봉 ${fmt(cur)}${state.negMsg ? `\n${state.negMsg}` : ''}</div>
+    <div class="offer-list">${cards || '<div class="muted">제안이 모두 사라졌다.</div>'}</div>
+    <div class="offer-tip">이직하면 근속이 초기화되고 신뢰가 절반으로 줄어요. 회사 성격에 따라 스트레스·성장·승진 속도가 달라집니다.</div>
+    <button class="continue-btn" id="decline-btn">${state.offers.length ? '모두 거절하고 남는다' : '돌아가기'}</button>`
+  renderTopAndPortrait(body)
+  document.querySelectorAll('[data-neg]').forEach((b) => (b.onclick = () => negotiate(Number(b.dataset.neg))))
+  document.querySelectorAll('[data-accept]').forEach((b) => (b.onclick = () => acceptOffer(Number(b.dataset.accept))))
+  document.getElementById('decline-btn').onclick = () => {
+    state.offers = []
+    state.phase = 'choose'
+    render()
+  }
+}
+
+function renderJoined() {
+  const body = `<div class="log-box">${state.joinMsg}</div>
+    <button class="continue-btn" id="joined-ok">출근하기</button>`
+  renderTopAndPortrait(body)
+  document.getElementById('joined-ok').onclick = () => {
+    state.phase = state.turn >= TOTAL_TURNS ? 'choose' : 'choose'
+    render()
+  }
+}
+
 function renderEnding() {
-  const rank = rankForTurn(TOTAL_TURNS)
+  const rank = RANKS[state.rankIdx]
+  const career = state.history
+    .map((h) => `<li>${h.moved ? '↪ ' : ''}${h.year}년차 · ${h.company} · ${h.rank} · ${fmt(h.salary)}${h.grade ? ` (평가 ${h.grade})` : ''}</li>`)
+    .join('')
   app.innerHTML = `
     <div class="ending-wrap">
       <canvas id="ending-canvas" width="220" height="264"></canvas>
       <h2 class="ending-title">${state.ending.title}</h2>
       <div class="ending-text">${state.ending.text}</div>
-      <div class="ending-stats">업무력 ${state.stats.work} · 체력 ${state.stats.stamina} · 인맥 ${state.stats.network} · 전문성 ${state.stats.expertise} · 신뢰 ${state.stats.trust} · 자금 ${state.money}</div>
+      <div class="ending-stats">업무력 ${state.stats.work} · 체력 ${state.stats.stamina} · 인맥 ${state.stats.network} · 전문성 ${state.stats.expertise} · 신뢰 ${state.stats.trust}<br>최종 연봉 ${fmt(state.salary)} · 이직 ${state.transfers}회 · 누적 수입 ${fmt(state.totalEarned)} · 자산 ${fmt(state.money)}</div>
+      <details class="career"><summary>커리어 기록 보기</summary><ul>${career}</ul></details>
       <button class="restart-btn" id="restart-btn">다시 시작하기</button>
     </div>
   `
