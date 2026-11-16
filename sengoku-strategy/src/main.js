@@ -1721,30 +1721,124 @@ function drawTitle() {
   ctx.globalAlpha = 1
 }
 
-function drawIntro() {
+function introCard(x, y, w, h, title, color, lines) {
+  ctx.fillStyle = 'rgba(255,240,210,0.06)'
+  ctx.beginPath()
+  ctx.roundRect(x, y, w, h, 12)
+  ctx.fill()
+  ctx.strokeStyle = color
+  ctx.lineWidth = 2
+  ctx.stroke()
+  ctx.fillStyle = color
+  ctx.beginPath()
+  ctx.roundRect(x, y, w, 34, [12, 12, 0, 0])
+  ctx.fill()
   ctx.fillStyle = '#231b12'
-  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
+  ctx.textAlign = 'center'
+  ctx.font = 'bold 16px sans-serif'
+  ctx.fillText(title, x + w / 2, y + 23)
+  ctx.fillStyle = '#f2e8d4'
+  ctx.font = '13px sans-serif'
+  ctx.textAlign = 'left'
+  lines.forEach((l, i) => ctx.fillText(l, x + 16, y + 58 + i * 22))
+}
+
+function drawIntro() {
+  const W = CANVAS_W
+  const H = CANVAS_H
+  const t = performance.now() / 1000
+  const bg = ctx.createLinearGradient(0, 0, 0, H)
+  bg.addColorStop(0, '#2a1f14')
+  bg.addColorStop(1, '#1a130c')
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, W, H)
+  // faint banner stripes
+  ctx.fillStyle = 'rgba(255,224,140,0.035)'
+  for (let x = 0; x < W; x += 60) ctx.fillRect(x, 0, 24, H)
+
   ctx.textAlign = 'center'
   ctx.fillStyle = '#ffe066'
-  ctx.font = 'bold 22px sans-serif'
-  ctx.fillText('후한 말, 군웅할거의 시대', CANVAS_W / 2, 60)
-  ctx.font = '13px sans-serif'
-  ctx.fillStyle = '#fff'
-  const lines = [
-    '목표: 7개 영지를 모두 통일하거나, 40계절(10년) 뒤 가장 강한 세력이 되면 승리입니다.',
-    '매 계절(턴)마다 내정(농업/상업/축성), 외교(불가침/동맹/혼인동맹), 군사(모병/출진) 중 원하는 만큼 행동할 수 있습니다.',
-    '전투는 격자 위에서 병력을 이동시켜 벌입니다 - 창은 기병에, 기병은 궁병에, 궁병은 창병에 강합니다.',
-    '궁병은 사거리 2에서 반격 없이 공격할 수 있고, 장수의 통솔과 지형(산악은 수비에 유리)이 승패를 가릅니다.',
-    '치안이 낮은 영지는 반란으로 독립할 수 있으니 점령 직후엔 내정을 신경 쓰세요.',
-    '오른쪽 "천하 정세" 패널에서 항상 각 세력의 영지 수와 관계를 확인할 수 있습니다.',
-    '매 턴이 시작되면 부관이 먼저 다음 행동을 묻습니다.',
-    '',
-    '조작: 영지 클릭으로 선택·행동, 세력 이름 클릭으로 외교, 하단 버튼으로 턴 종료',
-  ]
-  lines.forEach((line, i) => ctx.fillText(line, CANVAS_W / 2, 100 + i * 26))
+  ctx.font = 'bold 28px sans-serif'
+  ctx.fillText('후한 말, 군웅할거의 시대', W / 2, 62)
+  ctx.fillStyle = 'rgba(255,224,140,0.5)'
+  ctx.fillRect(W / 2 - 150, 74, 300, 2)
+
+  // goal banner
+  ctx.fillStyle = 'rgba(200,60,50,0.18)'
+  ctx.beginPath()
+  ctx.roundRect(W / 2 - 330, 92, 660, 46, 10)
+  ctx.fill()
+  ctx.strokeStyle = '#d96a52'
+  ctx.lineWidth = 2
+  ctx.stroke()
+  ctx.fillStyle = '#ffd9cc'
+  ctx.font = 'bold 15px sans-serif'
+  ctx.fillText('목표: 7개 영지를 모두 통일하거나, 40계절(10년) 뒤 가장 강한 세력이 되면 승리!', W / 2, 121)
+
+  // three kinds of action
+  const cw = Math.min(290, (W - 80 - 40) / 3)
+  const gap = 20
+  const x0 = (W - (cw * 3 + gap * 2)) / 2
+  introCard(x0, 160, cw, 150, '내정', '#8fcf6a', ['농업 · 상업 · 축성으로 영지를 키워요.', '치안이 낮으면 반란이 일어나요.', '점령한 직후엔 내정을 챙기세요.'])
+  introCard(x0 + cw + gap, 160, cw, 150, '외교', '#6ab0e8', ['불가침 · 동맹 · 혼인동맹을 맺어요.', '오른쪽 "천하 정세" 패널에서', '각 세력의 영지 수와 관계를 확인!'])
+  introCard(x0 + (cw + gap) * 2, 160, cw, 150, '군사', '#e8a04a', ['모병하고 출진해 영지를 빼앗아요.', '전투는 격자 위에서 병력을 움직여요.', '장수의 통솔과 지형이 승패를 가릅니다.'])
+
+  // unit triangle
+  const ty = 345
+  ctx.fillStyle = 'rgba(255,240,210,0.06)'
+  ctx.beginPath()
+  ctx.roundRect(x0, ty, cw * 3 + gap * 2, 150, 12)
+  ctx.fill()
   ctx.fillStyle = '#ffe066'
-  ctx.font = 'bold 14px sans-serif'
-  ctx.fillText('클릭하여 시작', CANVAS_W / 2, CANVAS_H - 30)
+  ctx.font = 'bold 15px sans-serif'
+  ctx.textAlign = 'left'
+  ctx.fillText('병종 상성', x0 + 18, ty + 28)
+  const nodes = [
+    { x: W / 2 - 150, label: '창병', color: '#8fcf6a' },
+    { x: W / 2, label: '기병', color: '#e8a04a' },
+    { x: W / 2 + 150, label: '궁병', color: '#6ab0e8' },
+  ]
+  nodes.forEach((n, i) => {
+    ctx.fillStyle = n.color
+    ctx.beginPath()
+    ctx.arc(n.x, ty + 72, 28, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#231b12'
+    ctx.font = 'bold 16px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(n.label, n.x, ty + 78)
+    if (i < 2) {
+      // arrow: the left unit beats the right one
+      const ax = n.x + 34
+      const bx = nodes[i + 1].x - 40
+      ctx.strokeStyle = '#ffe9b0'
+      ctx.fillStyle = '#ffe9b0'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      ctx.moveTo(ax, ty + 72)
+      ctx.lineTo(bx, ty + 72)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(bx + 8, ty + 72)
+      ctx.lineTo(bx - 4, ty + 64)
+      ctx.lineTo(bx - 4, ty + 80)
+      ctx.closePath()
+      ctx.fill()
+    }
+  })
+  ctx.fillStyle = '#f2e8d4'
+  ctx.font = '13px sans-serif'
+  ctx.fillText('창병 > 기병 > 궁병 > 창병   ·   궁병은 사거리 2에서 반격 없이 공격   ·   산악 지형은 수비에 유리', W / 2, ty + 130)
+
+  ctx.fillStyle = '#c8b894'
+  ctx.font = '13px sans-serif'
+  ctx.fillText('조작: 영지 클릭으로 선택·행동 · 세력 이름 클릭으로 외교 · 하단 버튼으로 턴 종료 · 매 턴 시작에 부관이 다음 행동을 물어봅니다', W / 2, ty + 178)
+
+  ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
+  ctx.fillStyle = '#ffe066'
+  ctx.font = 'bold 17px sans-serif'
+  ctx.fillText('클릭하여 시작', W / 2, H - 40)
+  ctx.globalAlpha = 1
 }
 
 function drawEnding() {
