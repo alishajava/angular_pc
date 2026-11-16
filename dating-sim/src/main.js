@@ -255,7 +255,7 @@ function starsDecor(n, area) {
 
 const BACKGROUNDS = {
   title: {
-    gradient: 'linear-gradient(160deg, #3a2a5c 0%, #1f1733 70%)',
+    gradient: 'linear-gradient(160deg, #5a3a7c 0%, #3a2656 45%, #1f1733 85%)',
     decor: `<svg viewBox="0 0 300 180" preserveAspectRatio="none">${starsDecor(26, 160)}</svg>`,
   },
   clubroom: {
@@ -650,6 +650,10 @@ function render() {
   if (state.screen === 'title') {
     app.innerHTML = `
       <div class="vn-bg" id="bg"></div>
+      <div class="title-cast">
+        ${CHARACTERS.map((c, i) => `<img src="${PORTRAIT_IMAGES[c.id].soft}" alt="${c.name}" style="animation-delay:${i * -0.9}s" />`).join('')}
+      </div>
+      <div class="title-petals">${Array.from({ length: 14 }, (_, i) => `<span style="left:${(i * 73) % 100}%;animation-delay:${-i * 0.7}s;animation-duration:${7 + (i % 5)}s"></span>`).join('')}</div>
       <div class="vn-panel title-wrap">
         <h1>동아리 연애 시뮬레이션</h1>
         <div class="subtitle">6일간의 선택이 엔딩을 결정합니다</div>

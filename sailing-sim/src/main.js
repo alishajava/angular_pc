@@ -662,6 +662,11 @@ function drawWindCompass(info) {
 
 function drawHud() {
   const info = pointOfSailInfo()
+  // a soft panel behind the readout so it stays legible over ports and islands
+  ctx.fillStyle = 'rgba(6,16,32,0.62)'
+  ctx.beginPath()
+  ctx.roundRect(8, 8, 392, 150, 10)
+  ctx.fill()
   ctx.textAlign = 'left'
   ctx.textBaseline = 'top'
   ctx.font = 'bold 18px sans-serif'

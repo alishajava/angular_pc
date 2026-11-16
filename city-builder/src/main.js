@@ -370,6 +370,143 @@ canvas.addEventListener('mouseleave', () => {
 })
 
 // ---------- Draw ----------
+const tHash = (a, b, k = 0) => {
+  const v = Math.sin(a * 127.1 + b * 311.7 + k * 74.7) * 43758.5453
+  return v - Math.floor(v)
+}
+const GRASS_SHADES = ['#3f5c38', '#43623b', '#3b5834', '#476a3e']
+
+function drawGrassTile(x, y, r, c, plain = false) {
+  ctx.fillStyle = GRASS_SHADES[Math.floor(tHash(r, c) * 4)]
+  ctx.fillRect(x, y, TILE, TILE)
+  if (plain) return
+  const h = tHash(r, c, 3)
+  ctx.strokeStyle = 'rgba(160,215,120,0.35)'
+  ctx.lineWidth = 1
+  for (let i = 0; i < 3; i++) {
+    const gx = x + 3 + tHash(r, c, 10 + i) * (TILE - 6)
+    const gy = y + 6 + tHash(r, c, 20 + i) * (TILE - 8)
+    ctx.beginPath()
+    ctx.moveTo(gx, gy)
+    ctx.lineTo(gx - 1, gy - 3)
+    ctx.moveTo(gx + 1, gy)
+    ctx.lineTo(gx + 2, gy - 3)
+    ctx.stroke()
+  }
+  if (h > 0.9) {
+    // a small tree
+    ctx.fillStyle = 'rgba(0,0,0,0.2)'
+    ctx.beginPath()
+    ctx.ellipse(x + 13, y + 20, 7, 3, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#5a4026'
+    ctx.fillRect(x + 11, y + 12, 3, 8)
+    ctx.fillStyle = '#2f7a3d'
+    ctx.beginPath()
+    ctx.arc(x + 12.5, y + 10, 7, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#4aa050'
+    ctx.beginPath()
+    ctx.arc(x + 10.5, y + 8, 3.5, 0, Math.PI * 2)
+    ctx.fill()
+  } else if (h > 0.8) {
+    ctx.fillStyle = ['#ffd6e8', '#fff3a0', '#d8c8ff'][Math.floor(tHash(r, c, 5) * 3)]
+    ctx.beginPath()
+    ctx.arc(x + 8 + tHash(r, c, 6) * 8, y + 8 + tHash(r, c, 7) * 8, 1.8, 0, Math.PI * 2)
+    ctx.fill()
+  }
+}
+
+function roadAt(r, c) {
+  return inBounds(r, c) && (tiles[r][c].type === 'road' || tiles[r][c].type === 'cityhall')
+}
+
+function drawRoadTile(x, y, r, c) {
+  ctx.fillStyle = '#4a4a52'
+  ctx.fillRect(x, y, TILE, TILE)
+  const n = roadAt(r - 1, c)
+  const s2 = roadAt(r + 1, c)
+  const w = roadAt(r, c - 1)
+  const e = roadAt(r, c + 1)
+  ctx.strokeStyle = 'rgba(255,230,140,0.7)'
+  ctx.lineWidth = 1.6
+  ctx.setLineDash([4, 4])
+  ctx.beginPath()
+  if (w || e) {
+    ctx.moveTo(w ? x : x + TILE / 2, y + TILE / 2)
+    ctx.lineTo(e ? x + TILE : x + TILE / 2, y + TILE / 2)
+  }
+  if (n || s2) {
+    ctx.moveTo(x + TILE / 2, n ? y : y + TILE / 2)
+    ctx.lineTo(x + TILE / 2, s2 ? y + TILE : y + TILE / 2)
+  }
+  ctx.stroke()
+  ctx.setLineDash([])
+  // kerbs on the sides that are not road
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'
+  if (!n) ctx.fillRect(x, y, TILE, 2)
+  if (!s2) ctx.fillRect(x, y + TILE - 2, TILE, 2)
+  if (!w) ctx.fillRect(x, y, 2, TILE)
+  if (!e) ctx.fillRect(x + TILE - 2, y, 2, TILE)
+}
+
+function drawZoneTile(x, y, t) {
+  const col = ZONE_COLORS[t.type][t.level]
+  if (t.level === 0) {
+    // zoned but still empty: dashed outline over the grass
+    ctx.fillStyle = col
+    ctx.globalAlpha = 0.45
+    ctx.fillRect(x + 1, y + 1, TILE - 2, TILE - 2)
+    ctx.globalAlpha = 1
+    ctx.strokeStyle = col
+    ctx.setLineDash([3, 3])
+    ctx.lineWidth = 1.5
+    ctx.strokeRect(x + 2.5, y + 2.5, TILE - 5, TILE - 5)
+    ctx.setLineDash([])
+    return
+  }
+  const lv = t.level
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'
+  ctx.fillRect(x + 3, y + TILE - 4, TILE - 4, 3)
+  if (t.type === 'res') {
+    // little house(s) that grow with the level
+    const hh = 6 + lv * 3
+    ctx.fillStyle = '#e8dcc0'
+    ctx.fillRect(x + 4, y + TILE - 4 - hh, TILE - 8, hh)
+    ctx.fillStyle = col
+    ctx.beginPath()
+    ctx.moveTo(x + 2, y + TILE - 4 - hh)
+    ctx.lineTo(x + TILE / 2, y + TILE - 4 - hh - 7)
+    ctx.lineTo(x + TILE - 2, y + TILE - 4 - hh)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = '#ffd86a'
+    for (let i = 0; i < lv; i++) ctx.fillRect(x + 6 + i * 5, y + TILE - 4 - hh + 4, 3, 3)
+  } else if (t.type === 'com') {
+    const hh = 7 + lv * 3
+    ctx.fillStyle = col
+    ctx.fillRect(x + 3, y + TILE - 4 - hh, TILE - 6, hh)
+    ctx.fillStyle = 'rgba(255,255,255,0.8)'
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = i % 2 ? '#fff' : '#d83a3a'
+      ctx.fillRect(x + 3 + i * ((TILE - 6) / 4), y + TILE - 4 - hh + 3, (TILE - 6) / 4, 3)
+    }
+    ctx.fillStyle = 'rgba(200,230,255,0.85)'
+    for (let i = 0; i < lv + 1; i++) ctx.fillRect(x + 5 + i * 5, y + TILE - 12, 3, 5)
+  } else {
+    const hh = 6 + lv * 3
+    ctx.fillStyle = col
+    ctx.fillRect(x + 3, y + TILE - 4 - hh, TILE - 6, hh)
+    ctx.fillStyle = '#3a3a42'
+    ctx.fillRect(x + TILE - 9, y + TILE - 4 - hh - 6, 4, 8)
+    const ph = (performance.now() / 900 + x * 0.01) % 1
+    ctx.fillStyle = `rgba(210,210,220,${(1 - ph) * 0.5})`
+    ctx.beginPath()
+    ctx.arc(x + TILE - 7 + ph * 4, y + TILE - 4 - hh - 8 - ph * 8, 2 + ph * 3, 0, Math.PI * 2)
+    ctx.fill()
+  }
+}
+
 function drawMap() {
   const startCol = Math.max(0, Math.floor(state.camX / TILE))
   const endCol = Math.min(COLS, Math.ceil((state.camX + VIEW_W) / TILE))
@@ -384,17 +521,23 @@ function drawMap() {
       const t = tiles[r][c]
       const x = c * TILE - state.camX
       const y = r * TILE - state.camY
-      let color = '#3f5c38'
-      if (t.type === 'road') color = '#555555'
-      else if (t.type === 'cityhall') color = '#c9a86a'
-      else if (t.type === 'power') color = '#e0c040'
-      else if (t.type === 'water') color = '#4098d0'
-      else if (t.type === 'res') color = ZONE_COLORS.res[t.level]
-      else if (t.type === 'com') color = ZONE_COLORS.com[t.level]
-      else if (t.type === 'ind') color = ZONE_COLORS.ind[t.level]
-      ctx.fillStyle = color
-      ctx.fillRect(x, y, TILE, TILE)
-      ctx.strokeStyle = 'rgba(0,0,0,0.15)'
+      if (t.type === 'grass' || t.type === undefined || t.type === 'empty') drawGrassTile(x, y, r, c)
+      else if (t.type === 'road') drawRoadTile(x, y, r, c)
+      else {
+        // everything else stands on grass
+        drawGrassTile(x, y, r, c, true)
+        if (t.type === 'cityhall') {
+          ctx.fillStyle = '#c9a86a'
+          ctx.fillRect(x, y, TILE, TILE)
+        } else if (t.type === 'power') {
+          ctx.fillStyle = '#3a3a42'
+          ctx.fillRect(x + 1, y + 1, TILE - 2, TILE - 2)
+        } else if (t.type === 'water') {
+          ctx.fillStyle = '#4098d0'
+          ctx.fillRect(x + 1, y + 1, TILE - 2, TILE - 2)
+        } else if (t.type === 'res' || t.type === 'com' || t.type === 'ind') drawZoneTile(x, y, t)
+      }
+      ctx.strokeStyle = 'rgba(0,0,0,0.1)'
       ctx.strokeRect(x + 0.5, y + 0.5, TILE - 1, TILE - 1)
 
       if (t.type === 'cityhall') {
@@ -418,10 +561,6 @@ function drawMap() {
         ctx.beginPath()
         ctx.arc(x + TILE / 2, y + TILE / 2, TILE * 0.3, 0, Math.PI * 2)
         ctx.fill()
-      } else if ((t.type === 'res' || t.type === 'com' || t.type === 'ind') && t.level > 0) {
-        ctx.fillStyle = 'rgba(0,0,0,0.35)'
-        const h = 4 + t.level * 4
-        ctx.fillRect(x + 4, y + TILE - h - 2, TILE - 8, h)
       }
 
       if (t.type === 'res' || t.type === 'com' || t.type === 'ind') {

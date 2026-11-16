@@ -607,38 +607,156 @@ const buildingsMid = makeBuildings(34, WORLD_WIDTH * 1.2, [60, 140], [50, 110])
 
 function worldToScreenX(x) { return x - state.cameraX }
 
-function drawParallaxLayer(buildings, factor, color) {
+const bgHash = (a, k = 0) => {
+  const x = Math.sin(a * 127.1 + k * 311.7) * 43758.5453
+  return x - Math.floor(x)
+}
+
+function drawParallaxLayer(buildings, factor, color, windowColor) {
   ctx.fillStyle = color
   const offset = state.cameraX * factor
   for (const b of buildings) {
     const sx = b.x - offset
     if (sx < -b.w || sx > canvas.width + b.w) continue
+    ctx.fillStyle = color
     ctx.fillRect(sx, GROUND_TOP - b.h, b.w, b.h)
+    // lit windows, a few flickering neon dots on the taller ones
+    if (windowColor) {
+      for (let wy = GROUND_TOP - b.h + 10; wy < GROUND_TOP - 12; wy += 16) {
+        for (let wx = sx + 8; wx < sx + b.w - 10; wx += 14) {
+          if (bgHash(b.x + wx * 0.37, wy) > 0.62) {
+            ctx.fillStyle = bgHash(b.x, wy) > 0.8 ? 'rgba(130,200,255,0.55)' : windowColor
+            ctx.fillRect(wx, wy, 7, 8)
+          }
+        }
+      }
+    }
   }
+}
+
+const LAMP_SPACING = 620
+const PROP_SPOTS = Array.from({ length: 18 }, (_, i) => ({ x: 260 + i * 310 + bgHash(i, 5) * 120, kind: Math.floor(bgHash(i, 9) * 3) }))
+
+function drawStreetProp(x, kind) {
+  const sx = worldToScreenX(x)
+  if (sx < -60 || sx > canvas.width + 60) return
+  const y = GROUND_TOP + 30
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'
+  ctx.beginPath()
+  ctx.ellipse(sx, y + 2, 20, 5, 0, 0, Math.PI * 2)
+  ctx.fill()
+  if (kind === 0) {
+    // trash can
+    ctx.fillStyle = '#4a5260'
+    hRound(sx - 11, y - 30, 22, 30, 4); ctx.fill()
+    ctx.fillStyle = '#5c6676'
+    ctx.fillRect(sx - 13, y - 33, 26, 5)
+    ctx.fillStyle = 'rgba(255,255,255,0.12)'
+    ctx.fillRect(sx - 8, y - 26, 3, 22)
+  } else if (kind === 1) {
+    // stacked crates
+    ctx.fillStyle = '#7a5a36'
+    ctx.fillRect(sx - 18, y - 24, 36, 24)
+    ctx.strokeStyle = '#4a3420'
+    ctx.lineWidth = 2
+    ctx.strokeRect(sx - 18, y - 24, 36, 24)
+    ctx.beginPath()
+    ctx.moveTo(sx - 18, y - 24); ctx.lineTo(sx + 18, y)
+    ctx.moveTo(sx + 18, y - 24); ctx.lineTo(sx - 18, y)
+    ctx.stroke()
+  } else {
+    // hydrant
+    ctx.fillStyle = '#c0392b'
+    hRound(sx - 7, y - 24, 14, 24, 4); ctx.fill()
+    ctx.fillRect(sx - 11, y - 18, 22, 5)
+    ctx.fillStyle = '#e8c040'
+    ctx.fillRect(sx - 8, y - 28, 16, 5)
+  }
+}
+
+function drawStreetLamp(x) {
+  const sx = worldToScreenX(x)
+  if (sx < -120 || sx > canvas.width + 120) return
+  const top = GROUND_TOP - 120
+  // light pool on the pavement
+  const g = ctx.createRadialGradient(sx, GROUND_TOP + 30, 4, sx, GROUND_TOP + 30, 150)
+  g.addColorStop(0, 'rgba(255,226,150,0.28)')
+  g.addColorStop(1, 'rgba(255,226,150,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(sx - 150, GROUND_TOP - 40, 300, 220)
+  ctx.fillStyle = '#15121f'
+  ctx.fillRect(sx - 3, top, 6, 150)
+  ctx.fillRect(sx - 3, top, 30, 5)
+  ctx.fillStyle = 'rgba(255,236,170,0.95)'
+  ctx.beginPath()
+  ctx.ellipse(sx + 24, top + 8, 11, 5, 0, 0, Math.PI * 2)
+  ctx.fill()
 }
 
 function drawBackground() {
   const grad = ctx.createLinearGradient(0, 0, 0, GROUND_TOP)
-  grad.addColorStop(0, '#2b1f4a')
-  grad.addColorStop(1, '#5d4a8a')
+  grad.addColorStop(0, '#241a44')
+  grad.addColorStop(0.7, '#5d4a8a')
+  grad.addColorStop(1, '#8a6aa0')
   ctx.fillStyle = grad
   ctx.fillRect(0, 0, canvas.width, GROUND_TOP)
 
-  drawParallaxLayer(buildingsFar, 0.25, '#20163a')
-  drawParallaxLayer(buildingsMid, 0.5, '#2e2050')
+  // stars and a hazy moon far behind everything
+  const t = performance.now() / 1000
+  for (let i = 0; i < 50; i++) {
+    const sx = ((bgHash(i, 1) * canvas.width * 1.4 - state.cameraX * 0.03) % canvas.width + canvas.width) % canvas.width
+    const sy = bgHash(i, 2) * (GROUND_TOP * 0.55)
+    ctx.fillStyle = `rgba(255,255,255,${0.3 + 0.5 * Math.abs(Math.sin(t * 0.8 + i))})`
+    ctx.fillRect(sx, sy, 1.6, 1.6)
+  }
+  const mx = canvas.width - 150 - state.cameraX * 0.02
+  const mg = ctx.createRadialGradient(mx, 70, 6, mx, 70, 70)
+  mg.addColorStop(0, 'rgba(255,244,210,0.45)')
+  mg.addColorStop(1, 'rgba(255,244,210,0)')
+  ctx.fillStyle = mg
+  ctx.fillRect(mx - 70, 0, 140, 140)
+  ctx.fillStyle = '#fff3d0'
+  ctx.beginPath()
+  ctx.arc(mx, 70, 22, 0, Math.PI * 2)
+  ctx.fill()
 
-  ctx.fillStyle = '#3a3a42'
-  ctx.fillRect(0, GROUND_TOP, canvas.width, canvas.height - GROUND_TOP)
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)'
-  ctx.lineWidth = 2
-  for (let i = 0; i < 40; i++) {
-    const sx = i * 90 - state.cameraX
-    if (sx < -20 || sx > canvas.width + 20) continue
+  drawParallaxLayer(buildingsFar, 0.25, '#20163a', 'rgba(255,214,120,0.35)')
+  drawParallaxLayer(buildingsMid, 0.5, '#2e2050', 'rgba(255,214,120,0.6)')
+
+  // sidewalk strip, curb, then asphalt with lane dashes
+  const walk = 40
+  ctx.fillStyle = '#5a5a66'
+  ctx.fillRect(0, GROUND_TOP, canvas.width, walk)
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)'
+  ctx.lineWidth = 1.5
+  for (let i = 0; i < 60; i++) {
+    const sx = i * 70 - (state.cameraX % 70) - 70 + 70
     ctx.beginPath()
     ctx.moveTo(sx, GROUND_TOP)
-    ctx.lineTo(sx - 30, canvas.height)
+    ctx.lineTo(sx, GROUND_TOP + walk)
     ctx.stroke()
   }
+  ctx.fillStyle = '#7a7a88'
+  ctx.fillRect(0, GROUND_TOP + walk - 4, canvas.width, 4)
+  ctx.fillStyle = '#34343c'
+  ctx.fillRect(0, GROUND_TOP + walk, canvas.width, canvas.height - GROUND_TOP - walk)
+  const laneY = GROUND_TOP + walk + (canvas.height - GROUND_TOP - walk) * 0.5
+  ctx.fillStyle = 'rgba(255,224,120,0.5)'
+  for (let i = -1; i < 20; i++) {
+    const sx = i * 130 - (state.cameraX % 130)
+    ctx.fillRect(sx, laneY, 64, 5)
+  }
+  // oil stains and cracks for grit
+  ctx.fillStyle = 'rgba(0,0,0,0.14)'
+  for (let i = 0; i < 24; i++) {
+    const sx = i * 240 + bgHash(i, 3) * 120 - state.cameraX
+    if (sx < -80 || sx > canvas.width + 80) continue
+    ctx.beginPath()
+    ctx.ellipse(sx, GROUND_TOP + walk + 20 + bgHash(i, 4) * (canvas.height - GROUND_TOP - walk - 40), 34, 8, 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  for (const pr of PROP_SPOTS) drawStreetProp(pr.x, pr.kind)
+  for (let x = 120; x < WORLD_WIDTH + 400; x += LAMP_SPACING) drawStreetLamp(x)
 }
 
 function drawShadow(x, y, scale) {
