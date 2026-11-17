@@ -634,6 +634,25 @@ function recolorParts(model, names, hex) {
   }
 }
 
+// 원본 모델의 머리카락은 정수리(hair_cap)와 옆머리, 앞머리뿐이라 뒤통수가
+// 맨살로 비어 "머리 위에 빵을 얹은" 모양이었다. 뒤통수~목덜미를 덮는
+// 뒷머리를 추가해 정수리·옆머리와 이어 준다.
+// (모델 좌표: 머리 x ±0.39, y 1.93~2.79, z ±0.35)
+function addModelHairBack(model, hex) {
+  const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(hex), roughness: 0.8 })
+  const parts = [
+    // [w, h, d, x, y, z]
+    [0.86, 0.68, 0.14, 0, 2.31, -0.37], // 뒤통수 (정수리 아래 ~ 목 위)
+    [0.62, 0.14, 0.12, 0, 1.94, -0.35], // 목덜미 쪽으로 살짝 좁아지는 끝단
+  ]
+  for (const [w, h, d, x, y, z] of parts) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat)
+    m.position.set(x, y, z)
+    m.name = 'hair_back'
+    model.add(m)
+  }
+}
+
 // Clones the loaded character model (so each NPC gets its own independent
 // mesh/material instances to rig and recolor) and optionally overrides any
 // of its palette groups, producing a palette-swapped variant from the same
@@ -646,6 +665,7 @@ function instantiateCharacterModel(sourceScene, variant = {}) {
   if (variant.shorts) recolorParts(model, SHORTS_PARTS, variant.shorts)
   if (variant.shoes) recolorParts(model, SHOE_PARTS, variant.shoes)
   if (variant.skin) recolorParts(model, SKIN_PARTS, variant.skin)
+  addModelHairBack(model, variant.hair || '#2b2320')
   addModelFace(model, variant, variant.look)
   const box = new THREE.Box3().setFromObject(model)
   const height = box.max.y - box.min.y || 1
