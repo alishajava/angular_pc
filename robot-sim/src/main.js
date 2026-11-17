@@ -228,12 +228,15 @@ const FACADES = [
 const ROOF_MAT = new THREE.MeshStandardMaterial({ color: 0x141a26, roughness: 0.9, envMapIntensity: 0.2 })
 const beacons = [] // 옥상 경고등
 
-function makeBuilding(x, z, w, d, h, rotY = 0) {
+function pickFacade() {
+  return FACADES[Math.floor(Math.random() * FACADES.length)]
+}
+// 창 간격이 건물 크기와 상관없이 일정하도록 UV를 월드 크기에 맞춰 늘린다
+function blockMesh(w, h, d, side, slantTop = 0) {
   const geo = new THREE.BoxGeometry(w, h, d)
   const uv = geo.attributes.uv
   const ox = Math.random()
   const oy = Math.random()
-  // 면(4정점씩): +x, -x, +y, -y, +z, -z. 옆면은 건물 크기에 맞춰 창 간격을 일정하게 반복
   for (let f = 0; f < 6; f++) {
     if (f === 2 || f === 3) continue
     const fw = f < 2 ? d : w
@@ -241,26 +244,87 @@ function makeBuilding(x, z, w, d, h, rotY = 0) {
       uv.setXY(i, uv.getX(i) * (fw / WIN_TEX_SPAN) + ox, uv.getY(i) * (h / WIN_TEX_SPAN) + oy)
     }
   }
-  const side = FACADES[Math.floor(Math.random() * FACADES.length)]
-  const mesh = new THREE.Mesh(geo, [side, side, ROOF_MAT, ROOF_MAT, side, side])
-  mesh.position.set(x, h / 2, z)
-  mesh.rotation.y = rotY
-  scene.add(mesh)
+  if (slantTop) {
+    // 지붕 한쪽을 비스듬히 깎는다
+    const pos = geo.attributes.position
+    for (let i = 0; i < pos.count; i++) if (pos.getY(i) > 0 && pos.getX(i) > 0) pos.setY(i, pos.getY(i) - slantTop)
+    geo.computeVertexNormals()
+  }
+  return new THREE.Mesh(geo, [side, side, ROOF_MAT, ROOF_MAT, side, side])
+}
+function cylinderMesh(r, h, side) {
+  const geo = new THREE.CylinderGeometry(r, r, h, 20)
+  const uv = geo.attributes.uv
+  const ox = Math.random()
+  const oy = Math.random()
+  const circ = Math.PI * 2 * r
+  const nSide = (20 + 1) * 2 // 옆면 정점 수 (그룹 0)
+  for (let i = 0; i < nSide; i++) uv.setXY(i, uv.getX(i) * (circ / WIN_TEX_SPAN) + ox, uv.getY(i) * (h / WIN_TEX_SPAN) + oy)
+  return new THREE.Mesh(geo, [side, ROOF_MAT, ROOF_MAT])
+}
 
-  // 옥상: 기계실 + 안테나 + (높은 건물은) 깜빡이는 경고등
-  const roofBox = new THREE.Mesh(new THREE.BoxGeometry(w * 0.45, 1.2, d * 0.45), ROOF_MAT)
-  roofBox.position.set(0, h / 2 + 0.6, 0)
-  mesh.add(roofBox)
-  if (h > 16) {
-    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 5, 5), ROOF_MAT)
-    ant.position.set(w * 0.15, h / 2 + 3.5, d * 0.1)
-    mesh.add(ant)
-    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3030 }))
-    bulb.position.set(w * 0.15, h / 2 + 6.2, d * 0.1)
-    mesh.add(bulb)
+// 여러 모양의 건물: 단순 상자 / 계단식 / 원통 / 쌍둥이 / ㄱ자 / 기울어진 지붕 / 저층부+타워
+// 반환값의 top은 가장 높은 지점 (옥상 장식 위치)
+function makeBuilding(x, z, w, d, h, rotY = 0, kind = null) {
+  const group = new THREE.Group()
+  group.position.set(x, 0, z)
+  group.rotation.y = rotY
+  const side = pickFacade()
+  const add = (mesh, px, py, pz) => { mesh.position.set(px, py, pz); group.add(mesh); return mesh }
+  const kinds = ['box', 'stepped', 'cylinder', 'twin', 'lshape', 'slant', 'podium']
+  kind = kind || kinds[Math.floor(Math.random() * kinds.length)]
+  let top = { x: 0, y: h, z: 0 }
+
+  if (kind === 'stepped') {
+    const tiers = [[1, 1, 0.55], [0.72, 0.72, 0.8], [0.45, 0.45, 1]]
+    let y = 0
+    for (const [fw, fd, fh] of tiers) {
+      const th = h * fh - y
+      add(blockMesh(w * fw, th, d * fd, side), 0, y + th / 2, 0)
+      y += th
+    }
+  } else if (kind === 'cylinder') {
+    const r = Math.min(w, d) * 0.55
+    add(cylinderMesh(r, h, side), 0, h / 2, 0)
+    add(cylinderMesh(r * 0.55, h * 0.18, side), 0, h + h * 0.09, 0)
+    top = { x: 0, y: h * 1.18, z: 0 }
+  } else if (kind === 'twin') {
+    const hw = w * 0.38
+    add(blockMesh(hw, h, d * 0.8, side), -w * 0.28, h / 2, 0)
+    add(blockMesh(hw, h * 0.78, d * 0.8, side), w * 0.28, h * 0.39, 0)
+    add(blockMesh(w, h * 0.22, d * 0.9, side), 0, h * 0.11, 0)
+    top = { x: -w * 0.28, y: h, z: 0 }
+  } else if (kind === 'lshape') {
+    add(blockMesh(w, h, d * 0.45, side), 0, h / 2, -d * 0.27)
+    add(blockMesh(w * 0.42, h * 0.72, d, side), -w * 0.29, h * 0.36, 0)
+    top = { x: 0, y: h, z: -d * 0.27 }
+  } else if (kind === 'slant') {
+    const slope = h * 0.22
+    add(blockMesh(w, h, d, side, slope), 0, h / 2, 0)
+    top = { x: -w * 0.25, y: h, z: 0 }
+  } else if (kind === 'podium') {
+    add(blockMesh(w * 1.25, h * 0.28, d * 1.25, side), 0, h * 0.14, 0)
+    add(blockMesh(w * 0.55, h * 0.72, d * 0.55, side), 0, h * 0.28 + h * 0.36, 0)
+    top = { x: 0, y: h, z: 0 }
+  } else {
+    add(blockMesh(w, h, d, side), 0, h / 2, 0)
+  }
+  scene.add(group)
+
+  // 옥상: 기계실·물탱크 + (높은 건물은) 안테나와 깜빡이는 경고등
+  const roofBox = new THREE.Mesh(new THREE.BoxGeometry(w * 0.3, 1.1, d * 0.3), ROOF_MAT)
+  roofBox.position.set(top.x, top.y + 0.55, top.z)
+  group.add(roofBox)
+  if (h > 14) {
+    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 4, 5), ROOF_MAT)
+    ant.position.set(top.x, top.y + 3, top.z)
+    group.add(ant)
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3030 }))
+    bulb.position.set(top.x, top.y + 5.2, top.z)
+    group.add(bulb)
     beacons.push({ mat: bulb.material, phase: Math.random() * 6 })
   }
-  return mesh
+  return group
 }
 
 // 아레나 안 장애물: 중층 빌딩 (충돌 반경은 기존과 같음)
@@ -270,17 +334,17 @@ for (let i = 0; i < 10; i++) {
   const r = 16 + Math.random() * 30
   const x = Math.sin(angle) * r
   const z = Math.cos(angle) * r
-  const h = 5 + Math.random() * 6
-  const w = 2.4 + Math.random() * 1.4
-  makeBuilding(x, z, w, w, h)
+  const h = 4 + Math.random() * 4
+  const w = 2.6 + Math.random() * 1.6
+  makeBuilding(x, z, w, w, h, rand(0, Math.PI))
   obstacles.push({ x, z, radius: w * 0.75 })
 }
 
 // 아레나 바깥: 도시 스카이라인 (방사형 도로 8개를 비워 두고 3겹으로 배치)
 for (const [r0, r1, hMin, hMax, count] of [
-  [64, 78, 12, 34, 52],
-  [88, 118, 26, 70, 56],
-  [128, 190, 40, 110, 60],
+  [64, 78, 7, 20, 52],
+  [88, 118, 14, 36, 56],
+  [128, 190, 22, 56, 60],
 ]) {
   for (let i = 0; i < count; i++) {
     const a = (i / count) * Math.PI * 2 + rand(-0.04, 0.04)
