@@ -365,7 +365,7 @@ function drawHotspotHighlights() {
   const t = T()
   for (const h of scene.hotspots) {
     if (state.hoveredHotspot !== h.id) continue
-    const pulse = 0.55 + Math.sin(t * 5) * 0.2
+    const pulse = 0.65 + Math.sin(t * 1.8) * 0.1
     ctx.save()
     ctx.shadowColor = 'rgba(95,200,230,0.9)'
     ctx.shadowBlur = 18
@@ -580,8 +580,8 @@ function drawEntranceBg() {
     ctx.closePath()
     ctx.fill()
   }
-  // flickering floodlight above the door
-  const flick = Math.sin(t * 13) > 0.92 ? 0.35 : 0.9
+  // floodlight above the door (steady)
+  const flick = 0.9
   ctx.fillStyle = '#2a2f34'
   rr(675, 96, 44, 14, 4, '#2a2f34')
   const cone = ctx.createLinearGradient(0, 110, 0, 330)
@@ -629,8 +629,8 @@ function drawEntranceBg() {
   ctx.quadraticCurveTo(212, 412, 220, 398)
   ctx.stroke()
   if (!state.flags.keyTaken) {
-    const k = (Math.sin(t * 4) + 1) / 2
-    ctx.fillStyle = `rgba(255,236,150,${0.3 + k * 0.7})`
+    const k = (Math.sin(t * 1.2) + 1) / 2
+    ctx.fillStyle = `rgba(255,236,150,${0.65 + k * 0.3})`
     ctx.fillRect(205, 430, 3, 3)
     ctx.fillRect(203, 432, 7, 1)
     ctx.fillRect(206, 428, 1, 7)
@@ -731,8 +731,8 @@ function drawLobbyBg() {
   }
   ctx.fill()
 
-  // hanging lamp, flickering
-  const fl = Math.sin(t * 17) > 0.95 || Math.sin(t * 7.3) > 0.985 ? 0.3 : 1
+  // hanging lamp (steady)
+  const fl = 1
   ctx.strokeStyle = '#1a1a16'
   ctx.lineWidth = 2
   ctx.beginPath()
@@ -896,7 +896,7 @@ function drawLobbyBg() {
   ctx.stroke()
   // call panel + card reader + floor lights
   rr(932, 280, 20, 60, 3, '#2a3036', '#111')
-  const blink = powered ? '#4dff88' : Math.sin(t * 4) > 0 ? '#ff4d4d' : '#6a2020'
+  const blink = powered ? '#4dff88' : '#e04545'
   ctx.fillStyle = blink
   ctx.beginPath()
   ctx.arc(942, 296, 4.5, 0, Math.PI * 2)
@@ -988,7 +988,7 @@ function drawLabBg() {
   ctx.stroke()
 
   // central device
-  const pulse = 0.75 + Math.sin(t * 2.4) * 0.25
+  const pulse = 0.85 + Math.sin(t * 0.9) * 0.08
   const glow = ctx.createRadialGradient(480, 300, 10, 480, 300, 220)
   glow.addColorStop(0, `rgba(120,255,220,${0.6 * pulse})`)
   glow.addColorStop(1, 'rgba(120,255,220,0)')
@@ -1021,7 +1021,7 @@ function drawLabBg() {
   og.addColorStop(1, 'rgba(60,200,170,0)')
   ctx.fillStyle = og
   ctx.beginPath()
-  ctx.arc(0, 0, 30 + Math.sin(t * 3) * 3, 0, Math.PI * 2)
+  ctx.arc(0, 0, 30 + Math.sin(t * 1.2) * 1.5, 0, Math.PI * 2)
   ctx.fill()
   ctx.restore()
   // sparks
@@ -1082,7 +1082,7 @@ function drawTitleCard() {
   ctx.fillStyle = '#b8d8e4'
   ctx.fillText('1908년 시베리아, 하늘에서 떨어진 "그것"의 기록.', W / 2, 278)
   ctx.fillText('눈보라 속 버려진 소련 연구 기지에 들어가 진실을 찾아라.', W / 2, 304)
-  ctx.globalAlpha = 0.5 + Math.sin(t * 3) * 0.5
+  ctx.globalAlpha = 0.75 + Math.sin(t * 1.5) * 0.25
   ctx.font = 'bold 19px sans-serif'
   ctx.fillStyle = '#ffd86a'
   ctx.fillText('화면을 클릭해 시작', W / 2, 376)
