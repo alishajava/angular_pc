@@ -64,12 +64,9 @@
 
 
       .title-cast { position: absolute; left: 0; right: 0; top: 6%; height: 62%; display: flex; justify-content: center; align-items: flex-end; pointer-events: none; }
-      .title-cast img { height: 100%; width: auto; margin: 0 -3.5%; filter: drop-shadow(0 10px 18px rgba(0,0,0,0.4)); animation: castFloat 4.2s ease-in-out infinite; }
+      .title-cast img { height: 100%; width: auto; margin: 0 -3.5%; filter: drop-shadow(0 10px 18px rgba(0,0,0,0.4)); }
       .title-cast img:nth-child(odd) { height: 94%; }
-      @keyframes castFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
-      .title-petals span { position: absolute; top: -20px; width: 9px; height: 12px; border-radius: 80% 0 80% 0; background: rgba(255, 190, 215, 0.75); animation: petalFall linear infinite; pointer-events: none; }
-      @keyframes petalFall { 0% { transform: translate(0, 0) rotate(0deg); opacity: 0; } 10% { opacity: 1; } 100% { transform: translate(60px, 620px) rotate(360deg); opacity: 0.2; } }
-      .title-wrap { background: linear-gradient(180deg, rgba(20,12,34,0) 0%, rgba(20,12,34,0) 58%, rgba(20,12,34,0.88) 78%); }
+      .vn-panel.title-wrap { background: linear-gradient(180deg, rgba(20,12,34,0) 0%, rgba(20,12,34,0) 58%, rgba(20,12,34,0.88) 78%); }
       .vn-panel {
         position: absolute;
         left: 0;
@@ -173,42 +170,15 @@
         margin-top: 0.6rem;
       }
 
-      /* --- portrait 연출: 등장, 숨쉬기, 선택 반응 --- */
-      .vn-portrait img {
-        transform-origin: 50% 100%;
-        animation: vn-breathe 3.6s ease-in-out infinite;
-      }
-      .vn-portrait.enter img {
-        animation: vn-enter 0.45s ease-out both, vn-breathe 3.6s ease-in-out 0.45s infinite;
-      }
+      /* --- portrait 연출: 흔들림 없이 부드러운 등장 + 선택 반응(색감만) --- */
+      .vn-portrait.enter img { animation: vn-enter 0.35s ease-out both; }
       .vn-portrait.happy {
         filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.35)) drop-shadow(0 0 18px rgba(255, 143, 171, 0.55));
       }
-      .vn-portrait.happy img {
-        animation: vn-hop 0.55s ease-out both, vn-breathe 3.6s ease-in-out 0.55s infinite;
-      }
-      .vn-portrait.meh img {
-        animation: vn-droop 0.6s ease-out both;
-        filter: saturate(0.82) brightness(0.94);
-      }
-      @keyframes vn-breathe {
-        0%, 100% { transform: scale(1, 1); }
-        50% { transform: scale(1.004, 1.012); }
-      }
+      .vn-portrait.meh img { filter: saturate(0.82) brightness(0.94); }
       @keyframes vn-enter {
-        from { transform: translateY(5%); opacity: 0; }
-        to { transform: translateY(0); opacity: 1; }
-      }
-      @keyframes vn-hop {
-        0% { transform: translateY(0) scale(1, 1); }
-        30% { transform: translateY(-3.2%) scale(0.99, 1.02); }
-        55% { transform: translateY(0) scale(1.012, 0.985); }
-        75% { transform: translateY(-1.2%) scale(1, 1.006); }
-        100% { transform: translateY(0) scale(1, 1); }
-      }
-      @keyframes vn-droop {
-        0% { transform: rotate(0) translateY(0); }
-        100% { transform: rotate(-1.4deg) translateY(0.8%); }
+        from { opacity: 0; }
+        to { opacity: 1; }
       }
       .vn-fx {
         position: absolute;
@@ -256,7 +226,7 @@
         cursor: pointer;
       }
       @media (prefers-reduced-motion: reduce) {
-        .vn-portrait img, .vn-fx span, .title-cast img, .title-petals span { animation: none !important; }
+        .vn-fx span { animation: none !important; }
       }
     </style>
   </head>
