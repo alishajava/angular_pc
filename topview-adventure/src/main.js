@@ -29,7 +29,7 @@ const ROOM_A = [
   WALL,
   floorRow({ 2: 'H', 3: 'H', 4: 'H', 5: 'H', 6: 'H', 17: 'H', 18: 'H', 19: 'H', 20: 'H', 21: 'H' }),
   floorRow({ 2: 'H', 3: 'H', 4: 'H', 5: 'H', 6: 'H', 17: 'H', 18: 'H', 19: 'H', 20: 'H', 21: 'H' }),
-  floorRow({ 2: 'H', 3: 'H', 4: 'H', 5: 'H', 6: 'H', 17: 'H', 18: 'H', 19: 'H', 20: 'H', 21: 'H', 12: 'F' }),
+  floorRow({ 2: 'H', 3: 'H', 4: 'D', 5: 'H', 6: 'H', 17: 'H', 18: 'H', 19: 'D', 20: 'H', 21: 'H', 12: 'F' }),
   floorRow(),
   floorRow(),
   floorRow({ 10: 'V' }),
@@ -88,11 +88,57 @@ const ROOM_C = [
   WALL,
 ]
 
-for (const m of [ROOM_A, ROOM_B, ROOM_C]) {
+// 집 안: '#'는 벽, B 침대 S 책장 U 식탁 O 난로 P 화분 Q 작업대(모두 가구라 막혀 있고 E로 살펴볼 수 있음),
+// M/N 집 주인, X 문 앞 매트(밟으면 밖으로 나감)
+const HOME_A = [
+  WALL,
+  WALL,
+  WALL,
+  floorRow({ 3: 'S', 4: 'S', 10: 'O', 14: 'P', 19: 'B', 20: 'B' }),
+  floorRow(),
+  floorRow({ 9: 'M' }),
+  floorRow(),
+  floorRow(),
+  floorRow({ 11: 'U', 12: 'U', 13: 'U' }),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  floorRow({ 3: 'P', 21: 'P' }),
+  floorRow(),
+  floorRow(),
+  floorRow({ 12: 'X' }),
+  WALL,
+]
+const HOME_B = [
+  WALL,
+  WALL,
+  WALL,
+  floorRow({ 4: 'Q', 5: 'Q', 6: 'Q', 10: 'S', 11: 'S', 19: 'B', 20: 'B' }),
+  floorRow(),
+  floorRow({ 9: 'N' }),
+  floorRow(),
+  floorRow(),
+  floorRow(),
+  floorRow({ 14: 'U', 15: 'U', 16: 'U' }),
+  floorRow(),
+  floorRow(),
+  floorRow({ 3: 'S', 4: 'S' }),
+  floorRow({ 21: 'P' }),
+  floorRow(),
+  floorRow(),
+  floorRow({ 12: 'X' }),
+  WALL,
+]
+
+for (const m of [ROOM_A, ROOM_B, ROOM_C, HOME_A, HOME_B]) {
   if (m.length !== ROWS) throw new Error('room row count mismatch')
 }
 
-const SOLID = new Set(['#', 'b', 'H', 'F'])
+const SOLID = new Set(['#', 'b', 'H', 'F', 'B', 'S', 'U', 'O', 'P', 'Q'])
+const FURNITURE = 'BSUOPQ'
+const NPC_TYPES = 'VWMN'
+const isNpc = (it) => NPC_TYPES.includes(it.type)
 
 const DIALOGUE = {
   V: {
@@ -108,6 +154,36 @@ const DIALOGUE = {
     text: '누가 세웠는지도 모르는 팻말. "열쇠 없이는 절대 못 지나감... 진짜임... 농담 아님."',
   },
 }
+const DIALOGUE_ALT = {
+  M: '오, 열쇠 찾았네! 그거면 숲지기네 문이 열릴 거야. 그 안에 뭐가 있는지는 나도 몰라. 가서 알려 줘, 응?',
+  N: '오, 열쇠 찾으셨네요! 제 기계보다 훨씬 빠르시다... 그 기계는 고철로 팔아야겠다.',
+}
+Object.assign(DIALOGUE, {
+  M: {
+    speaker: '인심 좋은 할머니',
+    text: '어머, 손님이네! 빵 좀 먹을래? ...아, 못 주겠다. 아까 다 먹었네. 그나저나 열쇠 찾는다고? 마당 오른쪽 아래 풀밭에서 반짝이는 걸 봤어. 요즘 눈이 침침해서 확실하진 않지만.',
+  },
+  N: {
+    speaker: '졸린 발명가',
+    text: '으아, 깜짝이야! 노크하셨어요? 못 들었네요. 지금 열쇠를 자동으로 찾아 주는 기계를 만드는 중인데, 그 기계가 어디 갔는지를 찾는 중이라... 제 열쇠는 어디 갔지?',
+  },
+})
+const INTERIOR_TEXT = {
+  homeA: {
+    B: { speaker: '침대', text: '포근한 이불이 깔린 침대. 낮잠 자고 싶지만 모험 중이라 참는다.' },
+    O: { speaker: '난로', text: '타닥타닥 불이 타는 난로. 위에 올려 둔 주전자가 보글보글 끓고 있다.' },
+    U: { speaker: '식탁', text: '식탁 위에 식은 빵 한 덩이. 옆에 메모: "먹지 마시오. 내가 아껴둔 거임. —할머니"' },
+    S: { speaker: '책장', text: '뜨개질 책, 요리책, 그리고 "손주 자랑하는 법"이라는 두꺼운 책이 꽂혀 있다.' },
+    P: { speaker: '화분', text: '잘 자란 화분. 이름표에 "철수"라고 적혀 있다.' },
+  },
+  homeB: {
+    Q: { speaker: '작업대', text: '나사, 톱니바퀴, 반쯤 완성된 로봇 팔. 버튼을 누르자 "삐-" 하고 엄청 큰 소리가 났다. 얼른 껐다.' },
+    S: { speaker: '선반', text: '"실패한 발명품"이라고 적힌 선반. 라벨 붙은 상자가 너무 많다.' },
+    B: { speaker: '침대', text: '침대 위에 설계도가 널려 있다. 이불에는 잔 흔적이 없다. 밤샌 모양이다.' },
+    U: { speaker: '탁자', text: '식은 커피잔이 열두 개. 전부 같은 컵인데 하나같이 반쯤 남아 있다.' },
+    P: { speaker: '화분', text: '시들시들한 화분. 물 주는 로봇을 만들다가 화분이 먼저 시들었다고 한다.' },
+  },
+}
 const FLAVOR = {
   village: { speaker: '우물', text: '들여다보니 메아리가 돌아온다. "...열쇠는 오른쪽 아래..." 누군가 장난치고 있다.' },
   forest: { speaker: '버섯', text: '수상하게 빛나는 버섯. 먹으면 안 될 것 같다. 아니, 절대 먹으면 안 된다.' },
@@ -116,6 +192,8 @@ const FLAVOR = {
 // People: where they idle and how they look.
 const LOOK_PLAYER = { skin: '#f4cba2', hair: '#5a3820', hairStyle: 'messy', shirt: '#3f9fd1', pants: '#3a4a6a', shoes: '#2b2440', eye: '#2f5fa0', outfit: 'tee' }
 const LOOK_V = { skin: '#f6d2b0', hair: '#8a8f9a', hairStyle: 'bun', shirt: '#8c9bab', pants: '#6a5a4a', shoes: '#3a2a1a', eye: '#4a6a8a', outfit: 'apron' }
+const LOOK_M = { skin: '#f2cfb0', hair: '#e6e2dc', hairStyle: 'bun', shirt: '#b57a9a', pants: '#6a4a5a', shoes: '#4a3a3a', eye: '#4a5a6a', outfit: 'apron' }
+const LOOK_N = { skin: '#f0c9a4', hair: '#3a3a5a', hairStyle: 'messy', shirt: '#e8e8ee', pants: '#4a4a5a', shoes: '#2a2a38', eye: '#3a5a8a', outfit: 'tee', glasses: true }
 const LOOK_W = { skin: '#e8b48f', hair: '#6b3a1c', hairStyle: 'short', shirt: '#5a8f5a', pants: '#4a5a3a', shoes: '#4a3a24', eye: '#3f8f5a', outfit: 'tee', hat: 'cap' }
 
 function buildInteractables(mapRows, roomName) {
@@ -123,7 +201,7 @@ function buildInteractables(mapRows, roomName) {
   for (let row = 0; row < mapRows.length; row++) {
     for (let col = 0; col < mapRows[row].length; col++) {
       const ch = mapRows[row][col]
-      if (!'VWCKTLRF'.includes(ch)) continue
+      if (!'VWCKTLRFDXMNBSUOPQ'.includes(ch)) continue
       const x = col * TILE + TILE / 2
       const y = row * TILE + TILE / 2
       list.push({
@@ -158,11 +236,23 @@ function makeRoom(mapRows, name) {
 }
 
 const ROOMS = {
+  homeA: makeRoom(HOME_A, 'homeA'),
+  homeB: makeRoom(HOME_B, 'homeB'),
   village: makeRoom(ROOM_A, 'village'),
   forest: makeRoom(ROOM_B, 'forest'),
   grove: makeRoom(ROOM_C, 'grove'),
 }
-const ROOM_TITLE = { village: '조용한 마을', forest: '수상한 숲', grove: '고요한 숲속 빈터' }
+const ROOM_TITLE = { village: '조용한 마을', forest: '수상한 숲', grove: '고요한 숲속 빈터', homeA: '할머니의 집', homeB: '발명가의 작업실' }
+// 집 문 → 집 안 (마을의 D 타일 위치 "행,열"), 그리고 집 안 → 마을 문 앞
+const DOOR_TARGET = {
+  '3,4': { room: 'homeA', pos: { x: 12 * TILE + TILE / 2, y: 14 * TILE + TILE / 2, facing: 'up' } },
+  '3,19': { room: 'homeB', pos: { x: 12 * TILE + TILE / 2, y: 14 * TILE + TILE / 2, facing: 'up' } },
+}
+const HOME_EXIT = {
+  homeA: { room: 'village', pos: { x: 4 * TILE + TILE / 2, y: 4 * TILE + TILE / 2 + 6, facing: 'down' } },
+  homeB: { room: 'village', pos: { x: 19 * TILE + TILE / 2, y: 4 * TILE + TILE / 2 + 6, facing: 'down' } },
+}
+const isHome = (key) => key === 'homeA' || key === 'homeB'
 const EXITS = {
   village: { R: { room: 'forest', side: 'L' } },
   forest: { L: { room: 'village', side: 'R' }, R: { room: 'grove', side: 'L' } },
@@ -190,7 +280,7 @@ function canMoveTo(x, y, half) {
   }
   // people are solid too
   for (const it of room().interactables) {
-    if (it.type !== 'V' && it.type !== 'W') continue
+    if (!isNpc(it)) continue
     if (Math.hypot(x - it.x, y - it.y) < 17) return false
   }
   return true
@@ -266,11 +356,17 @@ function updateFade(dt) {
   }
 }
 
-function enterRoom(key, side) {
+function enterRoom(key, side, pos = null) {
   currentRoomKey = key
-  player.x = ENTRY_COL[side] * TILE + TILE / 2
-  player.y = DOOR_ROW * TILE + TILE / 2
-  player.facing = side === 'L' ? 'right' : 'left'
+  if (pos) {
+    player.x = pos.x
+    player.y = pos.y
+    player.facing = pos.facing
+  } else {
+    player.x = ENTRY_COL[side] * TILE + TILE / 2
+    player.y = DOOR_ROW * TILE + TILE / 2
+    player.facing = side === 'L' ? 'right' : 'left'
+  }
   for (const it of room().interactables) it.touching = true
   particles.length = 0
 }
@@ -293,7 +389,23 @@ function faceToward(it) {
 }
 
 function triggerInteraction(item) {
-  if (item.type === 'V' || item.type === 'W' || item.type === 'C') {
+  if (item.type === 'D') {
+    const target = DOOR_TARGET[`${item.row},${item.col}`]
+    if (target) go(target)
+    return
+  }
+  if (item.type === 'X') {
+    go(HOME_EXIT[currentRoomKey])
+    return
+  }
+  if (FURNITURE.includes(item.type)) {
+    const f = INTERIOR_TEXT[currentRoomKey] && INTERIOR_TEXT[currentRoomKey][item.type]
+    if (!f) return
+    sfx.click()
+    say(f.speaker, f.text)
+    return
+  }
+  if (isNpc(item) || item.type === 'C') {
     const line = DIALOGUE[item.type]
     if (item.type !== 'C') {
       faceToward(item)
@@ -301,7 +413,8 @@ function triggerInteraction(item) {
       item.emoteT = 1.2
     }
     sfx.click()
-    say(line.speaker, line.text)
+    const alt = DIALOGUE_ALT[item.type]
+    say(line.speaker, alt && inventory.includes('key') ? alt : line.text)
     return
   }
   if (item.type === 'F') {
@@ -351,7 +464,7 @@ function triggerInteraction(item) {
 }
 function go(exit) {
   sfx.door()
-  transition(() => enterRoom(exit.room, exit.side))
+  transition(() => enterRoom(exit.room, exit.side, exit.pos))
 }
 
 // ---------------------------------------------------------------- input ----
@@ -393,7 +506,7 @@ window.addEventListener('keydown', (e) => {
     // talk again to whoever is close
     let best = null
     for (const it of room().interactables) {
-      if (!'VWCF'.includes(it.type)) continue
+      if (!('VWMNCF' + FURNITURE).includes(it.type)) continue
       const d = Math.hypot(player.x - it.x, player.y - it.y)
       if (d < 46 && (!best || d < best.d)) best = { it, d }
     }
@@ -439,13 +552,13 @@ function updatePlayer(dt) {
   if (locked) return
   for (const item of room().interactables) {
     if (item.type === 'K' && item.collected) continue
-    if (item.type === 'F') continue
+    if (item.type === 'F' || FURNITURE.includes(item.type)) continue
     const near = Math.abs(player.x - item.x) < PLAYER_HALF + 14 && Math.abs(player.y - item.y) < PLAYER_HALF + 14
-    const reach = item.type === 'V' || item.type === 'W' ? Math.hypot(player.x - item.x, player.y - item.y) < 30 : near
+    const reach = isNpc(item) ? Math.hypot(player.x - item.x, player.y - item.y) < 30 : near
     if (reach && !item.touching) {
       item.touching = true
       triggerInteraction(item)
-    } else if (!reach && !(item.type === 'V' || item.type === 'W') ? true : !reach && Math.hypot(player.x - item.x, player.y - item.y) > 52) {
+    } else if (!reach && !isNpc(item) ? true : !reach && Math.hypot(player.x - item.x, player.y - item.y) > 52) {
       item.touching = false
     }
   }
@@ -473,10 +586,10 @@ function updatePeople(dt) {
       }
     }
     if (it.type === 'R' && it.open > 0 && it.open < 1) it.open = Math.min(1, it.open + dt * 2)
-    if (it.type !== 'V' && it.type !== 'W') continue
+    if (!isNpc(it)) continue
     const near = Math.hypot(player.x - it.x, player.y - it.y)
     // villagers shuffle around their spot; the ranger mostly just sits
-    if (it.type === 'V') {
+    if (it.type !== 'W') {
       const dx = it.tx - it.x
       const dy = it.ty - it.y
       const d = Math.hypot(dx, dy)
@@ -538,6 +651,8 @@ function ell(x, y, rx, ry, color) {
 const THEME = {
   village: { grass: ['#78b865', '#7dbd69', '#72b05f', '#80c06c'], path: '#d8bd86', pathEdge: '#b49458', sky: '255,240,200' },
   forest: { grass: ['#4f8f4a', '#549650', '#4a8745', '#589a52'], path: '#b8996a', pathEdge: '#8e7248', sky: '210,255,200' },
+  homeA: { grass: ['#b88a5a'], path: '#c9a070', pathEdge: '#8a6238', sky: '255,220,160' },
+  homeB: { grass: ['#9a7a5a'], path: '#b8946a', pathEdge: '#6a4a2a', sky: '255,230,190' },
   grove: { grass: ['#5b8a6a', '#609070', '#56826a', '#659476'], path: '#9aa0a6', pathEdge: '#6e747a', sky: '170,230,255' },
 }
 
@@ -755,6 +870,11 @@ function getGround(key) {
   c.width = W
   c.height = H
   const g = c.getContext('2d')
+  if (isHome(key)) {
+    drawHomeGround(g, key)
+    groundCache[key] = c
+    return c
+  }
   for (let r = 0; r < ROWS; r++) {
     for (let col = 0; col < COLS; col++) {
       g.fillStyle = th.grass[Math.floor(hash(col, r) * th.grass.length)]
@@ -795,6 +915,24 @@ function getGround(key) {
     g.fill()
   }
   if (key === 'village') {
+    // 집 앞 길 + 현관 매트
+    for (const dc of [4, 19]) {
+      g.fillStyle = th.pathEdge
+      g.beginPath()
+      g.roundRect(dc * TILE - 3, 4 * TILE - 2, TILE + 6, 5 * TILE, 8)
+      g.fill()
+      g.fillStyle = th.path
+      g.beginPath()
+      g.roundRect(dc * TILE, 4 * TILE - 2, TILE, 5 * TILE, 8)
+      g.fill()
+      g.fillStyle = '#b8503a'
+      g.beginPath()
+      g.roundRect(dc * TILE - 2, 4 * TILE + 2, TILE + 4, 14, 3)
+      g.fill()
+      g.strokeStyle = 'rgba(255,230,180,0.8)'
+      g.lineWidth = 1.5
+      g.strokeRect(dc * TILE + 1, 4 * TILE + 5, TILE - 2, 8)
+    }
     // a path from the road up to the plaza + flowers
     g.fillStyle = th.pathEdge
     g.beginPath()
@@ -860,7 +998,18 @@ function sceneObjects() {
   const r = room()
   const objs = []
   const isExit = (c, rw) => r.mapRows[rw][c] === 'L' || r.mapRows[rw][c] === 'R'
-  for (let rw = 0; rw < ROWS; rw++) {
+  if (isHome(key)) {
+    for (let rw = 0; rw < ROWS; rw++) {
+      for (let c = 0; c < COLS; c++) {
+        const ch = r.mapRows[rw][c]
+        if (!FURNITURE.includes(ch) || r.mapRows[rw][c - 1] === ch) continue
+        let n = 1
+        while (r.mapRows[rw][c + n] === ch) n++
+        objs.push({ y: (rw + 1) * TILE - 4, f: () => drawFurniture(ch, c * TILE, rw * TILE, n) })
+      }
+    }
+  }
+  for (let rw = 0; rw < ROWS && !isHome(key); rw++) {
     for (let c = 0; c < COLS; c++) {
       const ch = r.mapRows[rw][c]
       const x = c * TILE + TILE / 2
@@ -889,6 +1038,8 @@ function sceneObjects() {
   }
   for (const it of r.interactables) {
     if (it.type === 'V') objs.push({ y: it.y + 6, f: () => drawNpc(it, LOOK_V) })
+    else if (it.type === 'M') objs.push({ y: it.y + 6, f: () => drawNpc(it, LOOK_M) })
+    else if (it.type === 'N') objs.push({ y: it.y + 6, f: () => drawNpc(it, LOOK_N) })
     else if (it.type === 'W') objs.push({ y: it.y + 6, f: () => drawNpc(it, LOOK_W, true) })
     else if (it.type === 'C') objs.push({ y: it.y + 12, f: () => drawSign(it.x, it.y) })
     else if (it.type === 'K' && !it.collected) objs.push({ y: it.y, f: () => drawKey(it.x, it.y) })
@@ -898,6 +1049,276 @@ function sceneObjects() {
   objs.push({ y: player.y + 10, f: drawPlayer })
   objs.sort((a, b) => a.y - b.y)
   return objs
+}
+
+// ---- 집 안 ----
+function drawHomeGround(g, key) {
+  const A = key === 'homeA'
+  // 바닥: 나무 널
+  for (let r = 0; r < ROWS; r++) {
+    for (let col = 0; col < COLS; col++) {
+      const sh = hash(col, r, 3)
+      g.fillStyle = A ? ['#c79a62', '#c29458', '#cca06a'][Math.floor(sh * 3)] : ['#a88660', '#a3815a', '#ae8c66'][Math.floor(sh * 3)]
+      g.fillRect(col * TILE, r * TILE, TILE, TILE)
+      g.strokeStyle = 'rgba(70,40,15,0.28)'
+      g.lineWidth = 1
+      g.strokeRect(col * TILE + 0.5, r * TILE + 0.5, TILE - 1, TILE - 1)
+      if (sh > 0.55) {
+        g.fillStyle = 'rgba(70,40,15,0.18)'
+        g.fillRect(col * TILE + 5 + sh * 8, r * TILE + 9 + sh * 10, 9, 1.5)
+      }
+    }
+  }
+  // 러그
+  g.fillStyle = A ? '#a0485a' : '#3f6a8a'
+  g.beginPath()
+  g.roundRect(7 * TILE, 5.5 * TILE, 11 * TILE, 7 * TILE, 14)
+  g.fill()
+  g.strokeStyle = A ? '#f0d9a8' : '#d9c58a'
+  g.lineWidth = 3
+  g.strokeRect(7 * TILE + 10, 5.5 * TILE + 10, 11 * TILE - 20, 7 * TILE - 20)
+  g.strokeStyle = 'rgba(255,255,255,0.25)'
+  g.lineWidth = 1.5
+  g.strokeRect(7 * TILE + 18, 5.5 * TILE + 18, 11 * TILE - 36, 7 * TILE - 36)
+  // 뒷벽 (0~2행): 벽지 + 징두리 판벽
+  const wall = A ? '#e8d4a8' : '#cfd6dc'
+  g.fillStyle = wall
+  g.fillRect(0, 0, W, 3 * TILE)
+  g.strokeStyle = A ? 'rgba(160,110,70,0.22)' : 'rgba(90,110,130,0.25)'
+  g.lineWidth = 2
+  for (let x = 12; x < W; x += 32) {
+    g.beginPath()
+    g.moveTo(x, 6)
+    g.lineTo(x, 2 * TILE - 2)
+    g.stroke()
+  }
+  g.fillStyle = A ? '#8a5a30' : '#5a6672'
+  g.fillRect(0, 2 * TILE - 2, W, 3 * TILE - (2 * TILE - 2))
+  g.fillStyle = A ? '#a8743e' : '#76828e'
+  g.fillRect(0, 2 * TILE + 6, W, 3 * TILE - (2 * TILE + 6))
+  g.fillStyle = 'rgba(0,0,0,0.25)'
+  g.fillRect(0, 3 * TILE, W, 7)
+  // 창문 두 개
+  for (const wx of [6.5 * TILE, 16.5 * TILE]) {
+    g.fillStyle = '#5a3a1e'
+    g.fillRect(wx - 30, 14, 60, 54)
+    g.fillStyle = '#bfe6ff'
+    g.fillRect(wx - 26, 18, 52, 46)
+    g.fillStyle = 'rgba(255,255,255,0.5)'
+    g.fillRect(wx - 26, 18, 52, 10)
+    g.fillStyle = '#5a3a1e'
+    g.fillRect(wx - 1.5, 18, 3, 46)
+    g.fillRect(wx - 26, 39, 52, 3)
+    g.fillStyle = A ? '#d8707e' : '#6a8fb8'
+    g.fillRect(wx - 34, 12, 12, 56)
+    g.fillRect(wx + 22, 12, 12, 56)
+  }
+  // 벽 장식: 액자
+  g.fillStyle = '#6a4424'
+  g.fillRect(A ? 12 * TILE : 12.3 * TILE, 22, 42, 32)
+  g.fillStyle = A ? '#9ac47a' : '#e8c26a'
+  g.fillRect((A ? 12 * TILE : 12.3 * TILE) + 4, 26, 34, 24)
+  if (A) {
+    g.fillStyle = '#e8f0d0'
+    g.beginPath()
+    g.arc(12 * TILE + 28, 36, 6, 0, Math.PI * 2)
+    g.fill()
+  } else {
+    g.strokeStyle = '#5a4a20'
+    g.lineWidth = 2
+    g.beginPath()
+    g.arc(12.3 * TILE + 21, 38, 8, 0, Math.PI * 2)
+    g.moveTo(12.3 * TILE + 21, 26)
+    g.lineTo(12.3 * TILE + 21, 50)
+    g.stroke()
+  }
+  // 옆벽·아랫벽 (두꺼운 목재 벽)
+  g.fillStyle = A ? '#7a4e28' : '#4e5a66'
+  g.fillRect(0, 3 * TILE, TILE, H - 3 * TILE)
+  g.fillRect(W - TILE, 3 * TILE, TILE, H - 3 * TILE)
+  g.fillRect(0, H - TILE, W, TILE)
+  g.fillStyle = 'rgba(0,0,0,0.22)'
+  g.fillRect(TILE - 4, 3 * TILE, 4, H - 3 * TILE - TILE)
+  g.fillRect(W - TILE, 3 * TILE, 4, H - 3 * TILE - TILE)
+  g.fillStyle = A ? '#946034' : '#5e6c7a'
+  g.fillRect(0, H - TILE, W, 6)
+  // 현관문 (아랫벽 가운데) + 매트
+  const dx = 12 * TILE
+  g.fillStyle = '#4a2c14'
+  g.fillRect(dx - 6, H - TILE - 6, TILE + 12, TILE + 6)
+  g.fillStyle = '#8a5a30'
+  g.beginPath()
+  g.roundRect(dx - 1, H - TILE - 2, TILE + 2, TILE + 2, [14, 14, 0, 0])
+  g.fill()
+  g.fillStyle = '#ffd24a'
+  g.fillRect(dx + TILE - 8, H - 14, 3, 3)
+  g.fillStyle = A ? '#b8503a' : '#3a7a5a'
+  g.beginPath()
+  g.roundRect(dx - 3, 16 * TILE + 4, TILE + 6, 20, 4)
+  g.fill()
+  g.strokeStyle = 'rgba(255,240,200,0.8)'
+  g.lineWidth = 1.5
+  g.strokeRect(dx + 1, 16 * TILE + 8, TILE - 2, 12)
+}
+
+function drawFurniture(ch, x, y, n) {
+  const w = n * TILE
+  const bottom = y + TILE - 2
+  ell(x + w / 2 + 3, bottom, w * 0.5, 6, 'rgba(0,0,0,0.25)')
+  if (ch === 'B') {
+    // 침대 (가로로 누운 모양, 머리맡은 왼쪽)
+    ctx.fillStyle = '#6a4424'
+    ctx.beginPath()
+    ctx.roundRect(x + 2, bottom - 36, w - 4, 38, 5)
+    ctx.fill()
+    ctx.fillStyle = '#f4ead4'
+    ctx.beginPath()
+    ctx.roundRect(x + 6, bottom - 32, w - 12, 28, 4)
+    ctx.fill()
+    ctx.fillStyle = '#fffaf0'
+    ctx.beginPath()
+    ctx.roundRect(x + 9, bottom - 28, 18, 20, 5)
+    ctx.fill()
+    ctx.fillStyle = currentRoomKey === 'homeA' ? '#c9606e' : '#5f86b8'
+    ctx.beginPath()
+    ctx.roundRect(x + 30, bottom - 32, w - 36, 28, [0, 4, 4, 0])
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.moveTo(x + 38, bottom - 30)
+    ctx.lineTo(x + 38, bottom - 6)
+    ctx.stroke()
+  } else if (ch === 'S') {
+    // 책장
+    ctx.fillStyle = '#6a4424'
+    ctx.fillRect(x + 1, bottom - 62, w - 2, 64)
+    ctx.fillStyle = '#3a2410'
+    ctx.fillRect(x + 4, bottom - 58, w - 8, 56)
+    const cols = ['#c9606e', '#5f86b8', '#e0b84a', '#6aa86a', '#9a6ab8', '#d98a4a']
+    for (let sh = 0; sh < 3; sh++) {
+      const sy = bottom - 58 + sh * 19
+      ctx.fillStyle = '#7a5230'
+      ctx.fillRect(x + 4, sy + 17, w - 8, 3)
+      let bx = x + 7
+      let k = sh * 2
+      while (bx < x + w - 10) {
+        const bw = 5 + ((k * 7) % 4)
+        ctx.fillStyle = cols[k % cols.length]
+        ctx.fillRect(bx, sy + 3 + (k % 3), bw, 14 - (k % 3))
+        bx += bw + 1
+        k++
+      }
+    }
+  } else if (ch === 'U') {
+    // 식탁 + 의자
+    for (const cx of [x + 6, x + w - 6]) {
+      ctx.fillStyle = '#7a4e28'
+      ctx.beginPath()
+      ctx.roundRect(cx - 9, bottom - 18, 18, 18, 3)
+      ctx.fill()
+    }
+    ctx.fillStyle = '#8a5a30'
+    ctx.beginPath()
+    ctx.roundRect(x + 8, bottom - 30, w - 16, 28, 6)
+    ctx.fill()
+    ctx.fillStyle = currentRoomKey === 'homeA' ? '#f4e6c8' : '#cfd9e4'
+    ctx.beginPath()
+    ctx.roundRect(x + 12, bottom - 27, w - 24, 20, 4)
+    ctx.fill()
+    ctx.fillStyle = '#fff'
+    for (const px of [x + w * 0.3, x + w * 0.7]) {
+      ctx.beginPath()
+      ctx.arc(px, bottom - 17, 5, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    if (currentRoomKey === 'homeA') {
+      ctx.fillStyle = '#d9a860'
+      ctx.beginPath()
+      ctx.ellipse(x + w / 2, bottom - 19, 9, 5, 0, 0, Math.PI * 2)
+      ctx.fill()
+    } else {
+      ctx.fillStyle = '#5a3a24'
+      for (let i = 0; i < 4; i++) ctx.fillRect(x + 16 + i * 14, bottom - 24 + (i % 2) * 6, 7, 6)
+    }
+  } else if (ch === 'O') {
+    // 난로 + 굴뚝 연통
+    ctx.fillStyle = '#4a4a52'
+    ctx.fillRect(x + 11, bottom - 74, 10, 40)
+    ctx.fillStyle = '#7a4a3a'
+    ctx.fillRect(x + 2, bottom - 36, w - 4, 38)
+    ctx.fillStyle = '#9a6050'
+    for (let i = 0; i < 3; i++) ctx.fillRect(x + 2, bottom - 34 + i * 12, w - 4, 1.5)
+    ctx.fillStyle = '#2a1a14'
+    ctx.beginPath()
+    ctx.roundRect(x + 7, bottom - 22, w - 14, 18, [8, 8, 0, 0])
+    ctx.fill()
+    const fl = 0.75 + Math.sin(elapsed * 5) * 0.12
+    ctx.fillStyle = `rgba(255,150,40,${fl})`
+    ctx.beginPath()
+    ctx.moveTo(x + 10, bottom - 5)
+    ctx.quadraticCurveTo(x + 12, bottom - 18, x + 16, bottom - 14)
+    ctx.quadraticCurveTo(x + 20, bottom - 20, x + 22, bottom - 5)
+    ctx.fill()
+    ctx.fillStyle = '#c9a840'
+    ctx.beginPath()
+    ctx.roundRect(x + 6, bottom - 44, 20, 10, 3)
+    ctx.fill()
+  } else if (ch === 'P') {
+    ctx.fillStyle = '#b8603a'
+    ctx.beginPath()
+    ctx.moveTo(x + 8, bottom - 14)
+    ctx.lineTo(x + w - 8, bottom - 14)
+    ctx.lineTo(x + w - 11, bottom)
+    ctx.lineTo(x + 11, bottom)
+    ctx.closePath()
+    ctx.fill()
+    for (const [dx, dy, r, c] of [[-8, -26, 9, '#3f8a45'], [8, -28, 9, '#4a9a50'], [0, -36, 11, '#56a85a'], [-3, -22, 7, '#2f7a3d']]) {
+      ell(x + w / 2 + dx, bottom + dy, r, r * 0.85, c)
+    }
+  } else if (ch === 'Q') {
+    // 작업대: 공구 + 기어 + 불빛 깜빡임 없는 장치
+    ctx.fillStyle = '#6a4a2a'
+    ctx.beginPath()
+    ctx.roundRect(x + 1, bottom - 32, w - 2, 34, 4)
+    ctx.fill()
+    ctx.fillStyle = '#8a8f98'
+    ctx.beginPath()
+    ctx.roundRect(x + 3, bottom - 34, w - 6, 12, 3)
+    ctx.fill()
+    ctx.fillStyle = '#b8bec8'
+    ctx.fillRect(x + 6, bottom - 34, w - 12, 3)
+    // 로봇 팔
+    ctx.strokeStyle = '#c9ccd4'
+    ctx.lineWidth = 4
+    ctx.beginPath()
+    ctx.moveTo(x + 22, bottom - 30)
+    ctx.lineTo(x + 34, bottom - 52)
+    ctx.lineTo(x + 52, bottom - 44)
+    ctx.stroke()
+    ctx.fillStyle = '#e04a3a'
+    ctx.beginPath()
+    ctx.arc(x + 52, bottom - 44, 5, 0, Math.PI * 2)
+    ctx.fill()
+    // 톱니바퀴
+    ctx.save()
+    ctx.translate(x + w - 22, bottom - 22)
+    ctx.fillStyle = '#d9b040'
+    for (let i = 0; i < 8; i++) {
+      ctx.rotate(Math.PI / 4)
+      ctx.fillRect(-2, -12, 4, 5)
+    }
+    ctx.beginPath()
+    ctx.arc(0, 0, 8, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#6a4a2a'
+    ctx.beginPath()
+    ctx.arc(0, 0, 3, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+    ctx.fillStyle = '#4af0c8'
+    ctx.fillRect(x + 62, bottom - 12, 8, 5)
+  }
 }
 
 function fence(c, rw) {
@@ -1254,6 +1675,25 @@ function drawAtmosphere() {
     g.addColorStop(1, 'rgba(150,230,255,0)')
     ctx.fillStyle = g
     ctx.fillRect(0, 0, W, H)
+  }
+  if (isHome(key)) {
+    ctx.fillStyle = 'rgba(255,190,110,0.10)'
+    ctx.fillRect(0, 0, W, H)
+    for (const wx of [6.5 * TILE, 16.5 * TILE]) {
+      ctx.save()
+      ctx.globalCompositeOperation = 'lighter'
+      const g = ctx.createLinearGradient(wx, 70, wx + 50, 330)
+      g.addColorStop(0, 'rgba(255,240,190,0.16)')
+      g.addColorStop(1, 'rgba(255,240,190,0)')
+      ctx.fillStyle = g
+      ctx.beginPath()
+      ctx.moveTo(wx - 26, 66)
+      ctx.lineTo(wx + 26, 66)
+      ctx.lineTo(wx + 110, 330)
+      ctx.lineTo(wx + 30, 330)
+      ctx.fill()
+      ctx.restore()
+    }
   }
   // soft vignette for everyone
   const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, H * 0.95)
