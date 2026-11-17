@@ -90,10 +90,10 @@ waveTotalEl.textContent = String(WAVE_TOTAL)
 
 // --- Scene setup ----------------------------------------------------------------
 const scene = new THREE.Scene()
-scene.background = new THREE.Color(0x05070c)
-scene.fog = new THREE.Fog(0x0a1220, 55, 160)
+scene.background = new THREE.Color(0x1b1a36)
+scene.fog = new THREE.Fog(0x1b1a36, 70, 250)
 
-const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 400)
+const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 500)
 
 const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -121,12 +121,46 @@ const fill = new THREE.DirectionalLight(0x4d8bff, 0.5)
 fill.position.set(-25, 20, -30)
 scene.add(fill)
 
-const groundMat = new THREE.MeshStandardMaterial({ color: 0x162236, metalness: 0.1, roughness: 0.95, envMapIntensity: 0.25 })
-const ground = new THREE.Mesh(new THREE.CircleGeometry(ARENA_RADIUS * 1.4, 48), groundMat)
+// --- 도시 배경 ----------------------------------------------------------------
+// 하늘: 황혼 그라데이션 돔 + 별 + 달
+{
+  const geo = new THREE.SphereGeometry(400, 32, 20)
+  const pos = geo.attributes.position
+  const cols = []
+  const top = new THREE.Color(0x070b20)
+  const mid = new THREE.Color(0x2a2150)
+  const low = new THREE.Color(0xc2607a)
+  const c = new THREE.Color()
+  for (let i = 0; i < pos.count; i++) {
+    const t = clamp(pos.getY(i) / 400, -0.1, 1)
+    if (t < 0.18) c.copy(low).lerp(mid, clamp(t / 0.18, 0, 1))
+    else c.copy(mid).lerp(top, clamp((t - 0.18) / 0.6, 0, 1))
+    cols.push(c.r, c.g, c.b)
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
+  scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false })))
+  const starPos = []
+  for (let i = 0; i < 260; i++) {
+    const a = Math.random() * Math.PI * 2
+    const e = 0.25 + Math.random() * 1.1
+    starPos.push(Math.cos(a) * Math.cos(e) * 380, Math.sin(e) * 380, Math.sin(a) * Math.cos(e) * 380)
+  }
+  const starGeo = new THREE.BufferGeometry()
+  starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3))
+  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8 })))
+  const moon = new THREE.Mesh(new THREE.CircleGeometry(16, 32), new THREE.MeshBasicMaterial({ color: 0xfff1c8, fog: false }))
+  moon.position.set(-170, 150, -300)
+  moon.lookAt(0, 0, 0)
+  scene.add(moon)
+}
+
+// 바닥: 아스팔트 + 차선 + 가로등
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x1a2233, metalness: 0.1, roughness: 0.95, envMapIntensity: 0.25 })
+const ground = new THREE.Mesh(new THREE.CircleGeometry(260, 64), groundMat)
 ground.rotation.x = -Math.PI / 2
 scene.add(ground)
 
-const grid = new THREE.GridHelper(ARENA_RADIUS * 2, 44, 0x2a5a8a, 0x152536)
+const grid = new THREE.GridHelper(ARENA_RADIUS * 2, 44, 0x2a5a8a, 0x1b2a40)
 grid.position.y = 0.02
 scene.add(grid)
 
@@ -138,21 +172,172 @@ boundaryRing.rotation.x = -Math.PI / 2
 boundaryRing.position.y = 0.03
 scene.add(boundaryRing)
 
+// 창문 텍스처: 어두운 외벽 + 불 켜진 창 (emissive 맵을 따로 만들어 밤에 빛나게)
+const WIN_TEX_SPAN = 17.6 // 텍스처 한 장이 덮는 월드 길이 (창 8칸)
+function makeFacadeTextures(seed, tint) {
+  const N = 8
+  const S = 256
+  const cell = S / N
+  const base = document.createElement('canvas')
+  const glow = document.createElement('canvas')
+  base.width = base.height = glow.width = glow.height = S
+  const b = base.getContext('2d')
+  const g = glow.getContext('2d')
+  b.fillStyle = tint
+  b.fillRect(0, 0, S, S)
+  g.fillStyle = '#000'
+  g.fillRect(0, 0, S, S)
+  let sd = seed
+  const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647)
+  const lit = ['#ffd98a', '#ffe9b8', '#9fe0ff', '#ffc27a']
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const px = x * cell + cell * 0.2
+      const py = y * cell + cell * 0.18
+      const w = cell * 0.6
+      const h = cell * 0.62
+      b.fillStyle = 'rgba(8,12,22,0.9)'
+      b.fillRect(px, py, w, h)
+      if (rnd() < 0.42) {
+        const col = lit[Math.floor(rnd() * lit.length)]
+        b.fillStyle = col
+        b.fillRect(px, py, w, h)
+        g.fillStyle = col
+        g.fillRect(px, py, w, h)
+      }
+    }
+  }
+  const mk = (cv) => {
+    const t = new THREE.CanvasTexture(cv)
+    t.wrapS = t.wrapT = THREE.RepeatWrapping
+    t.colorSpace = THREE.SRGBColorSpace
+    t.anisotropy = 4
+    return t
+  }
+  return { map: mk(base), emissiveMap: mk(glow) }
+}
+const FACADES = [
+  ['#1d2740', 11], ['#2a2236', 23], ['#1a2b33', 37], ['#2b2a2f', 51],
+].map(([tint, seed]) => {
+  const t = makeFacadeTextures(seed, tint)
+  return new THREE.MeshStandardMaterial({
+    map: t.map, emissive: 0xffffff, emissiveMap: t.emissiveMap, emissiveIntensity: 0.9,
+    metalness: 0.15, roughness: 0.85, envMapIntensity: 0.3,
+  })
+})
+const ROOF_MAT = new THREE.MeshStandardMaterial({ color: 0x141a26, roughness: 0.9, envMapIntensity: 0.2 })
+const beacons = [] // 옥상 경고등
+
+function makeBuilding(x, z, w, d, h, rotY = 0) {
+  const geo = new THREE.BoxGeometry(w, h, d)
+  const uv = geo.attributes.uv
+  const ox = Math.random()
+  const oy = Math.random()
+  // 면(4정점씩): +x, -x, +y, -y, +z, -z. 옆면은 건물 크기에 맞춰 창 간격을 일정하게 반복
+  for (let f = 0; f < 6; f++) {
+    if (f === 2 || f === 3) continue
+    const fw = f < 2 ? d : w
+    for (let i = f * 4; i < f * 4 + 4; i++) {
+      uv.setXY(i, uv.getX(i) * (fw / WIN_TEX_SPAN) + ox, uv.getY(i) * (h / WIN_TEX_SPAN) + oy)
+    }
+  }
+  const side = FACADES[Math.floor(Math.random() * FACADES.length)]
+  const mesh = new THREE.Mesh(geo, [side, side, ROOF_MAT, ROOF_MAT, side, side])
+  mesh.position.set(x, h / 2, z)
+  mesh.rotation.y = rotY
+  scene.add(mesh)
+
+  // 옥상: 기계실 + 안테나 + (높은 건물은) 깜빡이는 경고등
+  const roofBox = new THREE.Mesh(new THREE.BoxGeometry(w * 0.45, 1.2, d * 0.45), ROOF_MAT)
+  roofBox.position.set(0, h / 2 + 0.6, 0)
+  mesh.add(roofBox)
+  if (h > 16) {
+    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 5, 5), ROOF_MAT)
+    ant.position.set(w * 0.15, h / 2 + 3.5, d * 0.1)
+    mesh.add(ant)
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3030 }))
+    bulb.position.set(w * 0.15, h / 2 + 6.2, d * 0.1)
+    mesh.add(bulb)
+    beacons.push({ mat: bulb.material, phase: Math.random() * 6 })
+  }
+  return mesh
+}
+
+// 아레나 안 장애물: 중층 빌딩 (충돌 반경은 기존과 같음)
 const obstacles = []
 for (let i = 0; i < 10; i++) {
   const angle = (i / 10) * Math.PI * 2 + rand(-0.2, 0.2)
   const r = 16 + Math.random() * 30
   const x = Math.sin(angle) * r
   const z = Math.cos(angle) * r
-  const h = 3 + Math.random() * 4
-  const w = 2 + Math.random() * 1.4
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(w, h, w),
-    new THREE.MeshStandardMaterial({ color: 0x1b2430, metalness: 0.25, roughness: 0.8, envMapIntensity: 0.35 }),
-  )
-  mesh.position.set(x, h / 2, z)
-  scene.add(mesh)
+  const h = 5 + Math.random() * 6
+  const w = 2.4 + Math.random() * 1.4
+  makeBuilding(x, z, w, w, h)
   obstacles.push({ x, z, radius: w * 0.75 })
+}
+
+// 아레나 바깥: 도시 스카이라인 (방사형 도로 8개를 비워 두고 3겹으로 배치)
+for (const [r0, r1, hMin, hMax, count] of [
+  [64, 78, 12, 34, 52],
+  [88, 118, 26, 70, 56],
+  [128, 190, 40, 110, 60],
+]) {
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2 + rand(-0.04, 0.04)
+    const m = ((a / (Math.PI / 4)) % 1 + 1) % 1
+    if (m < 0.07 || m > 0.93) continue // 도로가 지나는 자리
+    const r = rand(r0, r1)
+    const w = rand(7, 15)
+    const d = rand(7, 15)
+    makeBuilding(Math.sin(a) * r, Math.cos(a) * r, w, d, rand(hMin, hMax), -a)
+  }
+}
+
+// 도로: 아레나를 감싸는 원형 도로 + 바깥으로 뻗는 8개 방사 도로 (점선 차선)
+{
+  const lineMat = new THREE.MeshBasicMaterial({ color: 0xe8d890, transparent: true, opacity: 0.55 })
+  const roadMat = new THREE.MeshStandardMaterial({ color: 0x232c3d, roughness: 0.95, envMapIntensity: 0.15 })
+  const ring = new THREE.Mesh(new THREE.RingGeometry(ARENA_RADIUS + 2, ARENA_RADIUS + 11, 96), roadMat)
+  ring.rotation.x = -Math.PI / 2
+  ring.position.y = 0.015
+  scene.add(ring)
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2
+    const road = new THREE.Mesh(new THREE.PlaneGeometry(10, 200), roadMat)
+    road.rotation.x = -Math.PI / 2
+    road.rotation.z = -a
+    road.position.set(Math.sin(a) * 160, 0.016, Math.cos(a) * 160)
+    scene.add(road)
+    for (let d = ARENA_RADIUS + 14; d < 250; d += 9) {
+      const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 4), lineMat)
+      dash.rotation.x = -Math.PI / 2
+      dash.rotation.z = -a
+      dash.position.set(Math.sin(a) * d, 0.03, Math.cos(a) * d)
+      scene.add(dash)
+    }
+  }
+  for (let i = 0; i < 120; i++) {
+    const a = (i / 120) * Math.PI * 2
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 2.4), lineMat)
+    dash.rotation.x = -Math.PI / 2
+    dash.rotation.z = -a - Math.PI / 2
+    dash.position.set(Math.sin(a) * (ARENA_RADIUS + 6.5), 0.03, Math.cos(a) * (ARENA_RADIUS + 6.5))
+    scene.add(dash)
+  }
+  // 가로등
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x20283a, roughness: 0.7 })
+  const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffe2a0 })
+  for (let i = 0; i < 36; i++) {
+    const a = (i / 36) * Math.PI * 2 + 0.05
+    const px = Math.sin(a) * (ARENA_RADIUS + 12.5)
+    const pz = Math.cos(a) * (ARENA_RADIUS + 12.5)
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 7, 6), poleMat)
+    pole.position.set(px, 3.5, pz)
+    scene.add(pole)
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 8, 6), bulbMat)
+    bulb.position.set(px, 7.2, pz)
+    scene.add(bulb)
+  }
 }
 
 // --- Mech model builder -----------------------------------------------------
@@ -1158,6 +1343,10 @@ function animate() {
   requestAnimationFrame(animate)
   const dt = Math.min(clock.getDelta(), 0.05)
   if (state.phase === 'playing' && !pausedForPointer) updateGame(dt)
+  for (const b of beacons) {
+    const k = 0.25 + 0.75 * (Math.sin(performance.now() / 420 + b.phase) > 0.2 ? 1 : 0)
+    b.mat.color.setRGB(k, k * 0.12, k * 0.12)
+  }
   renderer.render(scene, camera)
 }
 animate()
