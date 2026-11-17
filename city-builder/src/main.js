@@ -22,15 +22,11 @@ const POP_BY_LEVEL = [0, 12, 28, 50]
 const JOBS_BY_LEVEL = [0, 10, 22, 40]
 const MAX_LEVEL = POP_BY_LEVEL.length - 1
 
-const ROAD_COST = 10
-const ZONE_COST = 20
-const POWER_COST = 600
-const WATER_COST = 350
-const BULLDOZE_COST = 5
-const POWER_RADIUS = 9
-const WATER_RADIUS = 7
-const TICK_SECONDS = 3
-const DEFICIT_FREEZE = -500
+// 간단 버전: 전기·수도·세금·적자 없음. 도로 옆에 구역을 지정하면 알아서 커진다.
+const ROAD_COST = 5
+const ZONE_COST = 10
+const BULLDOZE_COST = 0
+const TICK_SECONDS = 2
 
 const ZONE_COLORS = {
   res: ['#2f4a2b', '#3f7a3d', '#4f9a4a', '#5fc258'],
@@ -40,12 +36,10 @@ const ZONE_COLORS = {
 
 const TOOLS = [
   { id: 'road', label: '도로', cost: ROAD_COST, key: '1', color: '#555' },
-  { id: 'res', label: '주거구역', cost: ZONE_COST, key: '2', color: ZONE_COLORS.res[1] },
-  { id: 'com', label: '상업구역', cost: ZONE_COST, key: '3', color: ZONE_COLORS.com[1] },
-  { id: 'ind', label: '공업구역', cost: ZONE_COST, key: '4', color: ZONE_COLORS.ind[1] },
-  { id: 'power', label: '발전소', cost: POWER_COST, key: '5', color: '#e0c040' },
-  { id: 'water', label: '급수탑', cost: WATER_COST, key: '6', color: '#4098d0' },
-  { id: 'bulldoze', label: '철거', cost: BULLDOZE_COST, key: '7', color: '#b04040' },
+  { id: 'res', label: '집', cost: ZONE_COST, key: '2', color: ZONE_COLORS.res[1] },
+  { id: 'com', label: '가게', cost: ZONE_COST, key: '3', color: ZONE_COLORS.com[1] },
+  { id: 'ind', label: '공장', cost: ZONE_COST, key: '4', color: ZONE_COLORS.ind[1] },
+  { id: 'bulldoze', label: '철거', cost: BULLDOZE_COST, key: '5', color: '#b04040' },
 ]
 
 function makeTile() {
@@ -64,13 +58,11 @@ const state = {
   camX: Math.max(0, CENTER_COL * TILE - VIEW_W / 2),
   camY: Math.max(0, CENTER_ROW * TILE - VIEW_H / 2),
   tool: 'road',
-  treasury: 5000,
-  taxRate: 9,
+  treasury: 1000,
   month: 0,
   population: 0,
-  demand: { res: 20, com: 10, ind: 10 },
   lastIncome: 0,
-  lastExpense: 0,
+  tip: '',
   paused: false,
   milestonesHit: new Set(),
   hover: null, // { row, col } in map viewport, or null
@@ -125,74 +117,55 @@ function hasRoadAdjacent(row, col) {
   return false
 }
 
-function collectBuildings(type) {
-  const list = []
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      if (tiles[r][c].type === type) list.push({ row: r, col: c })
-    }
-  }
-  return list
-}
-
-function isCovered(row, col, buildings, radius) {
-  for (const b of buildings) {
-    const d = Math.hypot(b.row - row, b.col - col)
-    if (d <= radius) return true
-  }
-  return false
-}
-
 function tick() {
   state.month += 1
   let resCap = 0
   let comCap = 0
   let indCap = 0
-  let roadCount = 0
-  const powerPlants = collectBuildings('power')
-  const waterTowers = collectBuildings('water')
-
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const t = tiles[r][c]
-      if (t.type === 'road') roadCount++
-      else if (t.type === 'res') resCap += POP_BY_LEVEL[t.level]
+      if (t.type === 'res') resCap += POP_BY_LEVEL[t.level]
       else if (t.type === 'com') comCap += JOBS_BY_LEVEL[t.level]
       else if (t.type === 'ind') indCap += JOBS_BY_LEVEL[t.level]
     }
   }
-
   state.population = resCap
-  const jobs = comCap + indCap
-  state.demand = {
-    res: clamp(jobs - resCap + 20 - state.taxRate * 1.5, -100, 100),
-    com: clamp(resCap * 0.6 - comCap + 10 - state.taxRate, -100, 100),
-    ind: clamp(resCap * 0.6 - indCap + 10 - state.taxRate, -100, 100),
+
+  // 수입: 사람이 많고 가게·공장이 있을수록 늘어난다 (지출은 없음)
+  const income = Math.round(resCap * 0.5 + (comCap + indCap) * 0.4)
+  state.treasury += income
+  state.lastIncome = income
+
+  // 도로에 붙은 구역은 매달 높은 확률로 한 단계씩 자란다
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const t = tiles[r][c]
+      if (t.type !== 'res' && t.type !== 'com' && t.type !== 'ind') continue
+      if (t.level >= MAX_LEVEL) continue
+      if (!hasRoadAdjacent(r, c)) continue
+      if (Math.random() < 0.45) t.level += 1
+    }
   }
 
-  const income = Math.round((resCap * 1.2 + comCap + indCap) * (state.taxRate / 100))
-  const expense = Math.round(roadCount * 0.2 + powerPlants.length * 20 + waterTowers.length * 12)
-  state.treasury += income - expense
-  state.lastIncome = income
-  state.lastExpense = expense
-
-  const frozen = state.treasury < DEFICIT_FREEZE
-  if (!frozen) {
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        const t = tiles[r][c]
-        if (t.type !== 'res' && t.type !== 'com' && t.type !== 'ind') continue
-        if (t.level >= MAX_LEVEL) continue
-        const demand = state.demand[t.type]
-        if (demand <= 0) continue
-        if (!hasRoadAdjacent(r, c)) continue
-        if (!isCovered(r, c, powerPlants, POWER_RADIUS)) continue
-        if (!isCovered(r, c, waterTowers, WATER_RADIUS)) continue
-        const chance = clamp(demand / 100, 0, 1) * 0.35
-        if (Math.random() < chance) t.level += 1
+  // 다음에 뭘 하면 좋을지 알려주는 한 줄 도우미
+  let counts = { res: 0, com: 0, ind: 0 }
+  let unroaded = 0
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const t = tiles[r][c]
+      if (counts[t.type] !== undefined) {
+        counts[t.type]++
+        if (!hasRoadAdjacent(r, c)) unroaded++
       }
     }
   }
+  if (counts.res + counts.com + counts.ind === 0) state.tip = '도로 옆에 집을 지어 보세요!'
+  else if (unroaded > 0) state.tip = '빨간 점은 도로가 안 닿았다는 뜻이에요. 옆에 도로를 이어 주세요.'
+  else if (counts.com === 0) state.tip = '가게를 지으면 돈이 더 벌려요.'
+  else if (counts.ind === 0) state.tip = '공장도 하나 지어 볼까요?'
+  else if (state.treasury < 100) state.tip = '돈이 부족하면 잠깐 기다려요. 달마다 수입이 들어와요.'
+  else state.tip = '마음껏 도시를 키워 보세요!'
 
   for (const m of [50, 100, 250, 500, 1000]) {
     if (state.population >= m && !state.milestonesHit.has(m)) {
@@ -238,8 +211,6 @@ function place(row, col, toolId) {
   else if (toolId === 'res') tiles[row][col] = { type: 'res', level: 0 }
   else if (toolId === 'com') tiles[row][col] = { type: 'com', level: 0 }
   else if (toolId === 'ind') tiles[row][col] = { type: 'ind', level: 0 }
-  else if (toolId === 'power') tiles[row][col] = { type: 'power', level: 0 }
-  else if (toolId === 'water') tiles[row][col] = { type: 'water', level: 0 }
 }
 
 // ---------- Input ----------
@@ -281,12 +252,6 @@ window.addEventListener('keydown', (e) => {
   } else if (key === ' ') {
     state.paused = !state.paused
     say(state.paused ? '일시정지' : '재개')
-    sfx.click()
-  } else if (key === '-' || key === '_') {
-    state.taxRate = clamp(state.taxRate - 1, 0, 20)
-    sfx.click()
-  } else if (key === '=' || key === '+') {
-    state.taxRate = clamp(state.taxRate + 1, 0, 20)
     sfx.click()
   } else if (key === 'm') {
     say(toggleMute() ? '소리 끔 (M으로 다시 켜기)' : '소리 켬')
@@ -454,11 +419,11 @@ function drawZoneTile(x, y, t) {
   const col = ZONE_COLORS[t.type][t.level]
   if (t.level === 0) {
     // zoned but still empty: dashed outline over the grass
-    ctx.fillStyle = col
-    ctx.globalAlpha = 0.45
+    ctx.fillStyle = ZONE_COLORS[t.type][3]
+    ctx.globalAlpha = 0.5
     ctx.fillRect(x + 1, y + 1, TILE - 2, TILE - 2)
     ctx.globalAlpha = 1
-    ctx.strokeStyle = col
+    ctx.strokeStyle = ZONE_COLORS[t.type][3]
     ctx.setLineDash([3, 3])
     ctx.lineWidth = 1.5
     ctx.strokeRect(x + 2.5, y + 2.5, TILE - 5, TILE - 5)
@@ -513,9 +478,6 @@ function drawMap() {
   const startRow = Math.max(0, Math.floor(state.camY / TILE))
   const endRow = Math.min(ROWS, Math.ceil((state.camY + VIEW_H) / TILE))
 
-  const powerPlants = collectBuildings('power')
-  const waterTowers = collectBuildings('water')
-
   for (let r = startRow; r < endRow; r++) {
     for (let c = startCol; c < endCol; c++) {
       const t = tiles[r][c]
@@ -529,12 +491,6 @@ function drawMap() {
         if (t.type === 'cityhall') {
           ctx.fillStyle = '#c9a86a'
           ctx.fillRect(x, y, TILE, TILE)
-        } else if (t.type === 'power') {
-          ctx.fillStyle = '#3a3a42'
-          ctx.fillRect(x + 1, y + 1, TILE - 2, TILE - 2)
-        } else if (t.type === 'water') {
-          ctx.fillStyle = '#4098d0'
-          ctx.fillRect(x + 1, y + 1, TILE - 2, TILE - 2)
         } else if (t.type === 'res' || t.type === 'com' || t.type === 'ind') drawZoneTile(x, y, t)
       }
       ctx.strokeStyle = 'rgba(0,0,0,0.1)'
@@ -545,29 +501,10 @@ function drawMap() {
         ctx.font = 'bold 9px sans-serif'
         ctx.textAlign = 'center'
         ctx.fillText('시청', x + TILE / 2, y + TILE / 2 + 3)
-      } else if (t.type === 'power') {
-        ctx.fillStyle = '#5c431c'
-        ctx.beginPath()
-        ctx.moveTo(x + TILE / 2, y + 2)
-        ctx.lineTo(x + TILE - 4, y + TILE / 2)
-        ctx.lineTo(x + TILE / 2 + 2, y + TILE / 2)
-        ctx.lineTo(x + TILE / 2, y + TILE - 2)
-        ctx.lineTo(x + 4, y + TILE / 2)
-        ctx.lineTo(x + TILE / 2 - 2, y + TILE / 2)
-        ctx.closePath()
-        ctx.fill()
-      } else if (t.type === 'water') {
-        ctx.fillStyle = '#1c5a85'
-        ctx.beginPath()
-        ctx.arc(x + TILE / 2, y + TILE / 2, TILE * 0.3, 0, Math.PI * 2)
-        ctx.fill()
       }
 
       if (t.type === 'res' || t.type === 'com' || t.type === 'ind') {
-        const powered = isCovered(r, c, powerPlants, POWER_RADIUS)
-        const watered = isCovered(r, c, waterTowers, WATER_RADIUS)
-        const roaded = hasRoadAdjacent(r, c)
-        if (!powered || !watered || !roaded) {
+        if (!hasRoadAdjacent(r, c)) {
           ctx.fillStyle = '#ff5050'
           ctx.beginPath()
           ctx.arc(x + TILE - 5, y + 5, 3, 0, Math.PI * 2)
@@ -586,60 +523,27 @@ function drawHoverPreview() {
   ctx.strokeStyle = '#ffe066'
   ctx.lineWidth = 2
   ctx.strokeRect(x + 1, y + 1, TILE - 2, TILE - 2)
-
-  if (state.tool === 'power' || state.tool === 'water') {
-    const radius = state.tool === 'power' ? POWER_RADIUS : WATER_RADIUS
-    ctx.strokeStyle = state.tool === 'power' ? 'rgba(224,192,64,0.6)' : 'rgba(64,152,208,0.6)'
-    ctx.lineWidth = 1.5
-    ctx.beginPath()
-    ctx.arc(x + TILE / 2, y + TILE / 2, radius * TILE, 0, Math.PI * 2)
-    ctx.stroke()
-  }
-}
-
-function drawDemandBar(label, value, x, y, w, color) {
-  ctx.fillStyle = 'rgba(255,255,255,0.15)'
-  ctx.fillRect(x, y, w, 8)
-  const mid = x + w / 2
-  const half = (w / 2) * clamp(value / 100, -1, 1)
-  ctx.fillStyle = color
-  if (half >= 0) ctx.fillRect(mid, y, half, 8)
-  else ctx.fillRect(mid + half, y, -half, 8)
-  ctx.fillStyle = '#fff'
-  ctx.font = '10px sans-serif'
-  ctx.textAlign = 'left'
-  ctx.fillText(label, x, y - 2)
 }
 
 function drawHud() {
   ctx.fillStyle = 'rgba(0,0,0,0.55)'
   ctx.fillRect(0, 0, VIEW_W, HUD_H)
-
   ctx.textAlign = 'left'
   ctx.fillStyle = '#fff'
-  ctx.font = 'bold 13px sans-serif'
-  ctx.fillText(`${state.month}개월차`, 10, 18)
-  ctx.fillText(`자금 ${state.treasury}`, 90, 18)
-  ctx.fillText(`인구 ${state.population}`, 190, 18)
+  ctx.font = 'bold 14px sans-serif'
+  ctx.fillText(`🪙 ${state.treasury}`, 12, 20)
+  ctx.fillText(`👥 인구 ${state.population}`, 120, 20)
+  ctx.fillText(`📅 ${state.month}개월`, 250, 20)
   ctx.font = '12px sans-serif'
-  ctx.fillText(`세율 ${state.taxRate}% ( -/= 로 조절 )`, 270, 18)
+  ctx.fillStyle = '#9fe8a0'
+  ctx.fillText(`달마다 +${state.lastIncome}`, 350, 20)
   if (state.paused) {
     ctx.fillStyle = '#ffe066'
-    ctx.fillText('일시정지중 (스페이스)', 430, 18)
+    ctx.fillText('일시정지 (스페이스)', 470, 20)
   }
-  if (state.treasury < DEFICIT_FREEZE) {
-    ctx.fillStyle = '#ff6060'
-    ctx.font = 'bold 11px sans-serif'
-    ctx.fillText('재정 적자! 개발이 멈췄습니다. 세율을 올리거나 지출을 줄이세요.', 10, 34)
-  } else {
-    ctx.fillStyle = '#ccc'
-    ctx.font = '11px sans-serif'
-    ctx.fillText(`이번 달 수입 +${state.lastIncome} · 지출 -${state.lastExpense}`, 10, 34)
-  }
-
-  drawDemandBar('R', state.demand.res, 480, 10, 70, '#5fc258')
-  drawDemandBar('C', state.demand.com, 560, 10, 70, '#4f9ce8')
-  drawDemandBar('I', state.demand.ind, 640, 10, 70, '#c9a03a')
+  ctx.fillStyle = '#ffe066'
+  ctx.font = 'bold 12px sans-serif'
+  ctx.fillText(`💡 ${state.tip || '도로 옆에 집을 지어 보세요!'}`, 12, 38)
 }
 
 function drawToast() {
@@ -767,7 +671,7 @@ function drawTitle() {
   ctx.fillText('미니시티 빌더', W / 2, 150)
   ctx.font = '15px sans-serif'
   ctx.fillStyle = '#cfd8ff'
-  ctx.fillText('도로를 깔고 구역을 지정해 나만의 도시를 키워보세요', W / 2, 182)
+  ctx.fillText('도로를 깔고 집을 지으면 도시가 저절로 자라요', W / 2, 182)
   ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
   ctx.font = 'bold 16px sans-serif'
   ctx.fillStyle = '#fff'
@@ -781,20 +685,22 @@ function drawIntro() {
   ctx.textAlign = 'center'
   ctx.fillStyle = '#ffe066'
   ctx.font = 'bold 20px sans-serif'
-  ctx.fillText('도시를 운영해보세요', canvas.width / 2, 60)
+  ctx.fillText('도시를 키워 보세요', canvas.width / 2, 60)
   ctx.font = '13px sans-serif'
   ctx.fillStyle = '#fff'
   const lines = [
-    '승리 조건은 없어요. 세율과 지출의 균형을 잡으며 도시를 키워가는 게임이에요.',
-    '하단 도구에서 도로/주거/상업/공업 구역, 발전소, 급수탑, 철거를 골라 지도를 클릭(드래그 가능)해 배치하세요.',
-    '구역은 도로에 붙어 있고, 발전소/급수탑 범위 안에 있어야 수요에 따라 저절로 건물이 들어서고 커집니다.',
-    '구역에 빨간 점이 떠 있으면 도로·전기·수도 중 하나가 빠졌다는 뜻이에요.',
-    '세율을 올리면 수입은 늘지만 수요(R/C/I 막대)가 줄어요. 지출(발전소·급수탑·도로 유지비)이 수입보다 크면 적자가 쌓여요.',
-    '적자가 너무 커지면 개발이 멈춰요. 세율을 조정하거나 지출을 줄여 회복하세요.',
+    '어려운 규칙은 없어요. 도로를 깔고, 도로 옆에 집·가게·공장을 지으면',
+    '저절로 건물이 커지고 인구가 늘어요. 돈은 달마다 자동으로 들어와요.',
     '',
-    '조작: 방향키/WASD 카메라 이동 · 숫자 1-7 또는 하단 버튼으로 도구 선택 · [-]/[=] 세율 · 스페이스 일시정지',
+    '1. 도로를 깔아요   2. 도로 옆에 집을 지어요',
+    '3. 가게와 공장도 지어 보세요   4. 잘못 지었으면 철거!',
+    '',
+    '구역에 빨간 점이 뜨면 도로가 안 닿았다는 뜻이에요.',
+    '화면 위쪽 💡 도우미가 다음에 할 일을 알려 줘요.',
+    '',
+    '조작: 클릭/드래그로 짓기 · 숫자 1-5 또는 하단 버튼으로 도구 선택 · 방향키/WASD 이동 · 스페이스 일시정지',
   ]
-  lines.forEach((line, i) => ctx.fillText(line, canvas.width / 2, 100 + i * 26))
+  lines.forEach((line, i) => ctx.fillText(line, canvas.width / 2, 108 + i * 28))
   ctx.fillStyle = '#ffe066'
   ctx.font = 'bold 14px sans-serif'
   ctx.fillText('클릭 또는 스페이스로 시작', canvas.width / 2, canvas.height - 30)
