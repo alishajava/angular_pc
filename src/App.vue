@@ -1,12 +1,17 @@
 <script setup>
-import { ref } from 'vue'
+import TownScene from './components/TownScene.vue'
+import TavernScene from './components/TavernScene.vue'
+import RpgGame from './components/RpgGame.vue'
+import { useFlowStore } from './stores/flow'
 
-const count = ref(0)
+const flow = useFlowStore()
 </script>
 
 <template>
   <main>
-    <h1>Hello World</h1>
-    <button type="button" @click="count++">count is {{ count }}</button>
+    <h1>던전 RPG</h1>
+    <TownScene v-if="flow.stage === 'town'" />
+    <TavernScene v-else-if="flow.stage === 'tavern'" />
+    <RpgGame v-else />
   </main>
 </template>
