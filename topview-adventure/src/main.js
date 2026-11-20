@@ -294,8 +294,15 @@ const ctx = canvas.getContext('2d')
 const DIR_VEC = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }
 const PLAYER_SPEED = 120
 const PLAYER_HALF = 9
+// 방향키(또는 WASD)를 빠르게 두 번 누르면 짧게 대시
+const DASH_SPEED = 380
+const DASH_TIME = 0.2
+const DASH_COOLDOWN = 0.45
+const DOUBLE_TAP_MS = 260
+const DIR_KEYS = { arrowup: 'up', w: 'up', arrowdown: 'down', s: 'down', arrowleft: 'left', a: 'left', arrowright: 'right', d: 'right' }
+const lastTap = {}
 
-const player = { x: TILE * 2, y: DOOR_ROW * TILE + TILE / 2, facing: 'right', moving: false, walk: 0 }
+const player = { x: TILE * 2, y: DOOR_ROW * TILE + TILE / 2, facing: 'right', moving: false, walk: 0, dash: 0, dashCd: 0, dashVec: [0, 0] }
 const inventory = []
 const state = { phase: 'title', ending: false, endT: 0, steps: 0 }
 let elapsed = 0
@@ -500,6 +507,18 @@ window.addEventListener('keydown', (e) => {
     }
     return
   }
+  const dashDir = DIR_KEYS[key]
+  if (dashDir && !dlg.active && !state.ending && fade.dir === 0) {
+    const now = performance.now()
+    if (lastTap[key] && now - lastTap[key] < DOUBLE_TAP_MS && player.dashCd <= 0) {
+      player.dash = DASH_TIME
+      player.dashCd = DASH_COOLDOWN
+      player.dashVec = DIR_VEC[dashDir]
+      player.facing = dashDir
+      sfx.whoosh && sfx.whoosh()
+      lastTap[key] = 0
+    } else lastTap[key] = now
+  }
   if (key === ' ' || key === 'enter' || key === 'e') {
     if (dlg.active) return advanceDialogue()
     if (state.ending) return
@@ -535,8 +554,27 @@ function updatePlayer(dt) {
     if (held(MOVE_KEYS.up)) dy -= 1
     if (held(MOVE_KEYS.down)) dy += 1
   }
-  player.moving = dx !== 0 || dy !== 0
-  if (player.moving) {
+  player.dashCd = Math.max(0, player.dashCd - dt)
+  if (locked) player.dash = 0
+  const dashing = player.dash > 0
+  if (dashing) {
+    // 대시: 짧은 시간 동안 한 방향으로 빠르게 미끄러진다 (벽·가구에는 그대로 막힘)
+    player.dash -= dt
+    const [vx, vy] = player.dashVec
+    player.moving = true
+    player.walk += dt * 20
+    const tx = player.x + vx * DASH_SPEED * dt
+    if (canMoveTo(tx, player.y, PLAYER_HALF)) player.x = tx
+    const ty = player.y + vy * DASH_SPEED * dt
+    if (canMoveTo(player.x, ty, PLAYER_HALF)) player.y = ty
+    if (Math.random() < 0.9) {
+      particles.push({ x: player.x - vx * 6 + (Math.random() - 0.5) * 8, y: player.y + 8, vx: -vx * 24 + (Math.random() - 0.5) * 20, vy: -vy * 24 - 8 - Math.random() * 12, grav: 0, life: 0.35, max: 0.35, color: '#f1e8d2', size: 3 + Math.random() * 3 })
+    }
+  } else if (dx !== 0 || dy !== 0) player.moving = true
+  else player.moving = false
+  if (dashing) {
+    // dash handled above
+  } else if (player.moving) {
     if (dx !== 0 && dy !== 0) {
       dx *= Math.SQRT1_2
       dy *= Math.SQRT1_2
@@ -1747,7 +1785,7 @@ function drawTitle() {
   ctx.globalAlpha = 1
   ctx.font = '13px sans-serif'
   ctx.fillStyle = '#c8b898'
-  ctx.fillText('WASD/방향키 이동 · 사람에게 다가가면 대화 · Space로 넘기기 · M 소리', W / 2, 366)
+  ctx.fillText('WASD/방향키 이동 · 두 번 누르면 대시 · 사람에게 다가가면 대화 · Space · M 소리', W / 2, 366)
 }
 
 function drawScene() {
