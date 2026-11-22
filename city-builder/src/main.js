@@ -10,10 +10,10 @@ const TILE = 24
 const COLS = 50
 const ROWS = 34
 
-const VIEW_W = 720
-const VIEW_H = 480
-const TOOLBAR_H = 80
-const HUD_H = 46
+const VIEW_W = 900
+const VIEW_H = 520
+const TOOLBAR_H = 88
+const HUD_H = 54
 
 const WORLD_W = COLS * TILE
 const WORLD_H = ROWS * TILE
@@ -27,6 +27,7 @@ const ROAD_COST = 5
 const ZONE_COST = 10
 const BULLDOZE_COST = 0
 const TICK_SECONDS = 2
+const MM = 3 // 미니맵 한 칸 크기(px)
 
 const ZONE_COLORS = {
   res: ['#2f4a2b', '#3f7a3d', '#4f9a4a', '#5fc258'],
@@ -35,11 +36,11 @@ const ZONE_COLORS = {
 }
 
 const TOOLS = [
-  { id: 'road', label: '도로', cost: ROAD_COST, key: '1', color: '#555' },
-  { id: 'res', label: '집', cost: ZONE_COST, key: '2', color: ZONE_COLORS.res[1] },
-  { id: 'com', label: '가게', cost: ZONE_COST, key: '3', color: ZONE_COLORS.com[1] },
-  { id: 'ind', label: '공장', cost: ZONE_COST, key: '4', color: ZONE_COLORS.ind[1] },
-  { id: 'bulldoze', label: '철거', cost: BULLDOZE_COST, key: '5', color: '#b04040' },
+  { id: 'road', label: '도로', cost: ROAD_COST, key: '1', color: '#555', desc: '길을 깔아요. 집·가게·공장은 도로 옆에 있어야 자라요. (드래그로 쭉 깔기)' },
+  { id: 'res', label: '집', cost: ZONE_COST, key: '2', color: ZONE_COLORS.res[1], desc: '주민이 살 집이에요. 인구가 늘수록 돈을 많이 벌어요.' },
+  { id: 'com', label: '가게', cost: ZONE_COST, key: '3', color: ZONE_COLORS.com[1], desc: '가게가 있으면 달마다 들어오는 돈이 늘어요.' },
+  { id: 'ind', label: '공장', cost: ZONE_COST, key: '4', color: ZONE_COLORS.ind[1], desc: '공장도 수입을 올려 줘요. 연기가 폴폴 나요.' },
+  { id: 'bulldoze', label: '철거', cost: BULLDOZE_COST, key: '5', color: '#b04040', desc: '잘못 지은 걸 치워요. 공짜예요! (시청은 철거 불가)' },
 ]
 
 function makeTile() {
@@ -63,6 +64,7 @@ const state = {
   population: 0,
   lastIncome: 0,
   tip: '',
+  speed: 1,
   paused: false,
   milestonesHit: new Set(),
   hover: null, // { row, col } in map viewport, or null
@@ -117,6 +119,24 @@ function hasRoadAdjacent(row, col) {
   return false
 }
 
+// ---------- UI 상태 / 이펙트 ----------
+const nowS = () => performance.now() / 1000
+const ui = {
+  hits: [], // 이번 프레임의 클릭 영역 { x, y, w, h, fn }
+  mouse: { x: -1, y: -1 },
+  floaters: [], // 떠오르는 숫자 (화면 좌표 x,y 또는 월드 좌표 wx,wy)
+  parts: [], // 월드 좌표 먼지/반짝이
+  pan: null,
+  mmDrag: false,
+}
+function burst(wx, wy, color, n) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2
+    const v = 20 + Math.random() * 50
+    ui.parts.push({ x: wx, y: wy, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 25, life: 0.6, max: 0.6, color, size: 2 + Math.random() * 2.5 })
+  }
+}
+
 function tick() {
   state.month += 1
   let resCap = 0
@@ -136,6 +156,7 @@ function tick() {
   const income = Math.round(resCap * 0.5 + (comCap + indCap) * 0.4)
   state.treasury += income
   state.lastIncome = income
+  if (income > 0) ui.floaters.push({ x: 118, y: 50, text: `+${income}`, color: '#9fe8a0', t: 0 })
 
   // 도로에 붙은 구역은 매달 높은 확률로 한 단계씩 자란다
   for (let r = 0; r < ROWS; r++) {
@@ -144,7 +165,11 @@ function tick() {
       if (t.type !== 'res' && t.type !== 'com' && t.type !== 'ind') continue
       if (t.level >= MAX_LEVEL) continue
       if (!hasRoadAdjacent(r, c)) continue
-      if (Math.random() < 0.45) t.level += 1
+      if (Math.random() < 0.45) {
+        t.level += 1
+        t.born = nowS()
+        burst(c * TILE + TILE / 2, r * TILE + TILE / 2, '#ffe066', 8)
+      }
     }
   }
 
@@ -194,6 +219,7 @@ function place(row, col, toolId) {
     }
     state.treasury -= BULLDOZE_COST
     tiles[row][col] = makeTile()
+    burst(col * TILE + TILE / 2, row * TILE + TILE / 2, '#b8b0a0', 8)
     sfx.whoosh()
     return
   }
@@ -207,10 +233,13 @@ function place(row, col, toolId) {
   }
   state.treasury -= tool.cost
   sfx.build()
+  ui.floaters.push({ wx: col * TILE + TILE / 2, wy: row * TILE, text: `-${tool.cost}`, color: '#ffb0a0', t: 0 })
+  burst(col * TILE + TILE / 2, row * TILE + TILE - 4, '#e8dcc0', 5)
   if (toolId === 'road') tiles[row][col] = { type: 'road', level: 0 }
   else if (toolId === 'res') tiles[row][col] = { type: 'res', level: 0 }
   else if (toolId === 'com') tiles[row][col] = { type: 'com', level: 0 }
   else if (toolId === 'ind') tiles[row][col] = { type: 'ind', level: 0 }
+  tiles[row][col].born = nowS()
 }
 
 // ---------- Input ----------
@@ -279,9 +308,19 @@ function eventPos(e) {
   return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY }
 }
 
-function toolbarIndexAt(x) {
-  const idx = Math.floor(x / (VIEW_W / TOOLS.length))
-  return idx >= 0 && idx < TOOLS.length ? idx : -1
+function inRect(x, y, h) {
+  return x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h
+}
+const MM_X = () => VIEW_W - COLS * MM - 14
+const MM_Y = () => VIEW_H - ROWS * MM - 14
+function minimapJump(x, y) {
+  const col = (x - MM_X()) / MM
+  const row = (y - MM_Y()) / MM
+  state.camX = clamp(col * TILE - VIEW_W / 2, 0, Math.max(0, WORLD_W - VIEW_W))
+  state.camY = clamp(row * TILE - VIEW_H / 2, 0, Math.max(0, WORLD_H - VIEW_H))
+}
+function overMinimap(x, y) {
+  return x >= MM_X() && x <= MM_X() + COLS * MM && y >= MM_Y() && y <= MM_Y() + ROWS * MM
 }
 
 function handlePointerDown(e) {
@@ -297,12 +336,22 @@ function handlePointerDown(e) {
     sfx.start()
     return
   }
-  if (y >= VIEW_H) {
-    const idx = toolbarIndexAt(x)
-    if (idx >= 0) {
-      state.tool = TOOLS[idx].id
-      sfx.click()
+  // 우클릭/휠클릭 드래그로 화면 이동
+  if (e.button === 1 || e.button === 2) {
+    ui.pan = { x, y, camX: state.camX, camY: state.camY }
+    return
+  }
+  // 버튼류(속도, 도구 막대)
+  for (let i = ui.hits.length - 1; i >= 0; i--) {
+    if (inRect(x, y, ui.hits[i])) {
+      ui.hits[i].fn()
+      return
     }
+  }
+  if (y >= VIEW_H) return
+  if (overMinimap(x, y)) {
+    ui.mmDrag = true
+    minimapJump(x, y)
     return
   }
   state.painting = true
@@ -313,7 +362,18 @@ function handlePointerDown(e) {
 
 function handlePointerMove(e) {
   const { x, y } = eventPos(e)
-  if (y >= VIEW_H || state.phase !== 'play') {
+  ui.mouse.x = x
+  ui.mouse.y = y
+  if (ui.pan) {
+    state.camX = clamp(ui.pan.camX - (x - ui.pan.x), 0, Math.max(0, WORLD_W - VIEW_W))
+    state.camY = clamp(ui.pan.camY - (y - ui.pan.y), 0, Math.max(0, WORLD_H - VIEW_H))
+    return
+  }
+  if (ui.mmDrag) {
+    minimapJump(x, y)
+    return
+  }
+  if (y >= VIEW_H || state.phase !== 'play' || overMinimap(x, y)) {
     state.hover = null
   } else {
     const col = Math.floor((x + state.camX) / TILE)
@@ -325,13 +385,17 @@ function handlePointerMove(e) {
 
 function handlePointerUp() {
   state.painting = false
+  ui.pan = null
+  ui.mmDrag = false
 }
 
 canvas.addEventListener('mousedown', handlePointerDown)
 canvas.addEventListener('mousemove', handlePointerMove)
+canvas.addEventListener('contextmenu', (e) => e.preventDefault())
 window.addEventListener('mouseup', handlePointerUp)
 canvas.addEventListener('mouseleave', () => {
   state.hover = null
+  ui.mouse.x = ui.mouse.y = -1
 })
 
 // ---------- Draw ----------
@@ -477,12 +541,23 @@ function drawMap() {
   const endCol = Math.min(COLS, Math.ceil((state.camX + VIEW_W) / TILE))
   const startRow = Math.max(0, Math.floor(state.camY / TILE))
   const endRow = Math.min(ROWS, Math.ceil((state.camY + VIEW_H) / TILE))
+  const now = nowS()
 
   for (let r = startRow; r < endRow; r++) {
     for (let c = startCol; c < endCol; c++) {
       const t = tiles[r][c]
       const x = c * TILE - state.camX
       const y = r * TILE - state.camY
+      // 새로 지으면/자라면 통통 튀어 오른다
+      const age = t.born ? now - t.born : 9
+      const pop = age < 0.4
+      if (pop) {
+        const k = 1 + 0.25 * Math.sin((Math.PI * age) / 0.4)
+        ctx.save()
+        ctx.translate(x + TILE / 2, y + TILE)
+        ctx.scale(k, k)
+        ctx.translate(-(x + TILE / 2), -(y + TILE))
+      }
       if (t.type === 'grass' || t.type === undefined || t.type === 'empty') drawGrassTile(x, y, r, c)
       else if (t.type === 'road') drawRoadTile(x, y, r, c)
       else {
@@ -505,86 +580,410 @@ function drawMap() {
 
       if (t.type === 'res' || t.type === 'com' || t.type === 'ind') {
         if (!hasRoadAdjacent(r, c)) {
+          // 도로가 안 닿은 구역: 깜빡이는 대신 또렷한 말풍선 표시
           ctx.fillStyle = '#ff5050'
           ctx.beginPath()
-          ctx.arc(x + TILE - 5, y + 5, 3, 0, Math.PI * 2)
+          ctx.arc(x + TILE - 6, y + 6, 6, 0, Math.PI * 2)
           ctx.fill()
+          ctx.fillStyle = '#fff'
+          ctx.font = 'bold 10px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.fillText('!', x + TILE - 6, y + 10)
         }
       }
+      if (pop) ctx.restore()
     }
   }
 }
 
+// ---- 도구 아이콘 (도구 막대와 커서 미리보기에 같이 쓴다) ----
+function drawToolIcon(id, cx, cy, s = 1) {
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.scale(s, s)
+  if (id === 'road') {
+    ctx.fillStyle = '#5a5a64'
+    ctx.beginPath()
+    ctx.roundRect(-15, -15, 30, 30, 5)
+    ctx.fill()
+    ctx.fillStyle = '#ffe28a'
+    for (const y of [-11, -2, 7]) ctx.fillRect(-1.5, y, 3, 5)
+  } else if (id === 'res') {
+    ctx.fillStyle = 'rgba(0,0,0,0.2)'
+    ctx.fillRect(-13, 12, 26, 3)
+    ctx.fillStyle = '#f3e6c8'
+    ctx.fillRect(-11, -3, 22, 16)
+    ctx.fillStyle = '#d9604a'
+    ctx.beginPath()
+    ctx.moveTo(-15, -2)
+    ctx.lineTo(0, -15)
+    ctx.lineTo(15, -2)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = '#8a5a30'
+    ctx.fillRect(-3, 4, 7, 9)
+    ctx.fillStyle = '#a8dcff'
+    ctx.fillRect(-9, 1, 5, 5)
+    ctx.fillRect(5, 1, 5, 5)
+  } else if (id === 'com') {
+    ctx.fillStyle = 'rgba(0,0,0,0.2)'
+    ctx.fillRect(-13, 12, 26, 3)
+    ctx.fillStyle = '#4f86c8'
+    ctx.fillRect(-12, -6, 24, 19)
+    for (let i = 0; i < 6; i++) {
+      ctx.fillStyle = i % 2 ? '#fff' : '#e04a4a'
+      ctx.fillRect(-13 + i * 4.4, -11, 4.4, 7)
+    }
+    ctx.fillStyle = '#d6efff'
+    ctx.fillRect(-9, 0, 9, 8)
+    ctx.fillStyle = '#7a4a26'
+    ctx.fillRect(3, 2, 6, 11)
+  } else if (id === 'ind') {
+    ctx.fillStyle = 'rgba(0,0,0,0.2)'
+    ctx.fillRect(-13, 12, 26, 3)
+    ctx.fillStyle = '#b8903a'
+    ctx.fillRect(-13, -3, 26, 16)
+    ctx.fillStyle = '#8a6a22'
+    ctx.beginPath()
+    ctx.moveTo(-13, -3)
+    ctx.lineTo(-13, -10)
+    ctx.lineTo(-4, -3)
+    ctx.lineTo(-4, -10)
+    ctx.lineTo(5, -3)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = '#4a4a54'
+    ctx.fillRect(7, -15, 6, 13)
+    ctx.fillStyle = 'rgba(220,220,230,0.7)'
+    ctx.beginPath()
+    ctx.arc(11, -17, 3.5, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#ffe28a'
+    ctx.fillRect(-9, 3, 5, 4)
+    ctx.fillRect(-1, 3, 5, 4)
+  } else {
+    ctx.fillStyle = '#c24a4a'
+    ctx.beginPath()
+    ctx.roundRect(-14, -14, 28, 28, 6)
+    ctx.fill()
+    ctx.strokeStyle = '#fff'
+    ctx.lineWidth = 4
+    ctx.lineCap = 'round'
+    ctx.beginPath()
+    ctx.moveTo(-7, -7)
+    ctx.lineTo(7, 7)
+    ctx.moveTo(7, -7)
+    ctx.lineTo(-7, 7)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
 function drawHoverPreview() {
-  if (!state.hover) return
+  if (!state.hover || state.phase !== 'play') return
   const { row, col } = state.hover
   const x = col * TILE - state.camX
   const y = row * TILE - state.camY
-  ctx.strokeStyle = '#ffe066'
+  const tile = tiles[row][col]
+  const tool = TOOLS.find((t) => t.id === state.tool)
+  const bulldoze = state.tool === 'bulldoze'
+  const blocked = bulldoze ? tile.type === 'empty' || tile.type === 'cityhall' : tile.type !== 'empty'
+  const broke = state.treasury < tool.cost
+  const bad = blocked || broke
+  ctx.save()
+  ctx.globalAlpha = 0.55
+  ctx.fillStyle = bad ? '#ff5050' : bulldoze ? '#ffb0a0' : '#fff6c0'
+  ctx.fillRect(x, y, TILE, TILE)
+  ctx.globalAlpha = bad ? 0.5 : 0.9
+  if (!blocked || bulldoze) drawToolIcon(state.tool, x + TILE / 2, y + TILE / 2 + 1, 0.7)
+  ctx.restore()
+  ctx.strokeStyle = bad ? '#ff6060' : '#ffe066'
   ctx.lineWidth = 2
   ctx.strokeRect(x + 1, y + 1, TILE - 2, TILE - 2)
+  // 커서 옆 비용 표시
+  const label = blocked ? (bulldoze ? '치울 게 없어요' : '이미 뭔가 있어요') : broke ? '돈이 부족해요' : tool.cost === 0 ? '무료' : `🪙 -${tool.cost}`
+  ctx.font = 'bold 11px sans-serif'
+  const w = ctx.measureText(label).width + 14
+  const lx = clamp(x + TILE + 4, 4, VIEW_W - w - 4)
+  const ly = clamp(y - 2, HUD_H + 4, VIEW_H - 28)
+  ctx.fillStyle = 'rgba(10,14,10,0.82)'
+  ctx.beginPath()
+  ctx.roundRect(lx, ly, w, 20, 10)
+  ctx.fill()
+  ctx.fillStyle = bad ? '#ff9a8a' : '#ffe9a8'
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(label, lx + 7, ly + 10.5)
+  ctx.textBaseline = 'alphabetic'
 }
 
+function uiButton(x, y, w, h, fn, active = false) {
+  const hover = ui.mouse.x >= x && ui.mouse.x <= x + w && ui.mouse.y >= y && ui.mouse.y <= y + h
+  ctx.fillStyle = active ? 'rgba(255,224,102,0.9)' : hover ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.14)'
+  ctx.beginPath()
+  ctx.roundRect(x, y, w, h, 9)
+  ctx.fill()
+  ui.hits.push({ x, y, w, h, fn })
+  return hover
+}
+
+const GOALS = [50, 100, 250, 500, 1000]
 function drawHud() {
-  ctx.fillStyle = 'rgba(0,0,0,0.55)'
+  // 상단 바
+  const g = ctx.createLinearGradient(0, 0, 0, HUD_H)
+  g.addColorStop(0, 'rgba(14,20,14,0.88)')
+  g.addColorStop(1, 'rgba(14,20,14,0.6)')
+  ctx.fillStyle = g
   ctx.fillRect(0, 0, VIEW_W, HUD_H)
+  ctx.fillStyle = 'rgba(255,224,150,0.25)'
+  ctx.fillRect(0, HUD_H - 1, VIEW_W, 1)
+
+  const pill = (x, label, value, color) => {
+    ctx.fillStyle = 'rgba(255,255,255,0.1)'
+    ctx.beginPath()
+    ctx.roundRect(x, 10, 136, 34, 17)
+    ctx.fill()
+    ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+    ctx.font = '18px sans-serif'
+    ctx.fillStyle = '#fff'
+    ctx.fillText(label, x + 12, 28)
+    ctx.font = 'bold 16px sans-serif'
+    ctx.fillStyle = color
+    ctx.fillText(value, x + 40, 28.5)
+  }
+  pill(12, '🪙', state.treasury.toLocaleString(), '#ffe066')
+  pill(156, '👥', `${state.population.toLocaleString()}명`, '#a8e8a8')
+  pill(300, '📅', `${state.month}개월`, '#bcd8ff')
+  ctx.textBaseline = 'alphabetic'
+
+  // 수입 표시 + 다음 목표 진행바
   ctx.textAlign = 'left'
-  ctx.fillStyle = '#fff'
-  ctx.font = 'bold 14px sans-serif'
-  ctx.fillText(`🪙 ${state.treasury}`, 12, 20)
-  ctx.fillText(`👥 인구 ${state.population}`, 120, 20)
-  ctx.fillText(`📅 ${state.month}개월`, 250, 20)
   ctx.font = '12px sans-serif'
   ctx.fillStyle = '#9fe8a0'
-  ctx.fillText(`달마다 +${state.lastIncome}`, 350, 20)
-  if (state.paused) {
-    ctx.fillStyle = '#ffe066'
-    ctx.fillText('일시정지 (스페이스)', 470, 20)
+  ctx.fillText(`달마다 +${state.lastIncome}`, 448, 22)
+  const next = GOALS.find((m) => state.population < m)
+  ctx.fillStyle = '#d8e0c8'
+  ctx.fillText(next ? `🎯 목표: 인구 ${next}명` : '🏆 모든 목표 달성!', 448, 38)
+  if (next) {
+    const prev = GOALS[GOALS.indexOf(next) - 1] || 0
+    const f = clamp((state.population - prev) / (next - prev), 0, 1)
+    ctx.fillStyle = 'rgba(255,255,255,0.15)'
+    ctx.beginPath()
+    ctx.roundRect(560, 31, 110, 9, 5)
+    ctx.fill()
+    ctx.fillStyle = '#ffd24a'
+    ctx.beginPath()
+    ctx.roundRect(560, 31, Math.max(9, 110 * f), 9, 5)
+    ctx.fill()
   }
-  ctx.fillStyle = '#ffe066'
-  ctx.font = 'bold 12px sans-serif'
-  ctx.fillText(`💡 ${state.tip || '도로 옆에 집을 지어 보세요!'}`, 12, 38)
+
+  // 속도 버튼
+  const btn = (x, label, speed, kind) => {
+    const active = kind === 'pause' ? state.paused : !state.paused && state.speed === speed
+    uiButton(x, 11, 40, 32, () => {
+      if (kind === 'pause') state.paused = !state.paused
+      else {
+        state.paused = false
+        state.speed = speed
+      }
+      sfx.click()
+    }, active)
+    ctx.fillStyle = active ? '#3a2a08' : '#fff'
+    ctx.font = 'bold 14px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(label, x + 20, 28)
+    ctx.textBaseline = 'alphabetic'
+  }
+  btn(VIEW_W - 138, '⏸', 0, 'pause')
+  btn(VIEW_W - 94, '▶', 1, 'speed')
+  btn(VIEW_W - 50, '⏩', 3, 'speed')
+
+  // 💡 도우미 말풍선
+  const tip = `💡 ${state.tip || '도로 옆에 집을 지어 보세요!'}`
+  ctx.font = 'bold 13px sans-serif'
+  const w = ctx.measureText(tip).width + 28
+  ctx.fillStyle = 'rgba(255,248,214,0.92)'
+  ctx.beginPath()
+  ctx.roundRect(12, HUD_H + 10, w, 28, 14)
+  ctx.fill()
+  ctx.fillStyle = '#4a3410'
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(tip, 26, HUD_H + 25)
+  ctx.textBaseline = 'alphabetic'
+  if (state.paused) {
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'
+    ctx.beginPath()
+    ctx.roundRect(VIEW_W / 2 - 70, HUD_H + 10, 140, 28, 14)
+    ctx.fill()
+    ctx.fillStyle = '#ffe066'
+    ctx.font = 'bold 13px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('⏸ 일시정지 중', VIEW_W / 2, HUD_H + 29)
+  }
+}
+
+function drawMinimap() {
+  const x0 = MM_X()
+  const y0 = MM_Y()
+  const w = COLS * MM
+  const h = ROWS * MM
+  ctx.fillStyle = 'rgba(10,16,10,0.75)'
+  ctx.beginPath()
+  ctx.roundRect(x0 - 5, y0 - 5, w + 10, h + 10, 8)
+  ctx.fill()
+  ctx.fillStyle = '#3f5c38'
+  ctx.fillRect(x0, y0, w, h)
+  const colors = { road: '#9a9aa6', cityhall: '#e8c878', res: '#5fc258', com: '#4f9ce8', ind: '#d9b03a' }
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const t = tiles[r][c]
+      const col = colors[t.type]
+      if (!col) continue
+      ctx.fillStyle = col
+      ctx.globalAlpha = t.level === 0 && (t.type === 'res' || t.type === 'com' || t.type === 'ind') ? 0.55 : 1
+      ctx.fillRect(x0 + c * MM, y0 + r * MM, MM, MM)
+    }
+  }
+  ctx.globalAlpha = 1
+  ctx.strokeStyle = '#ffe066'
+  ctx.lineWidth = 1.5
+  ctx.strokeRect(x0 + (state.camX / TILE) * MM, y0 + (state.camY / TILE) * MM, (VIEW_W / TILE) * MM, (VIEW_H / TILE) * MM)
+}
+
+function drawFloaters(dt) {
+  for (const f of ui.floaters) f.t += dt
+  ui.floaters = ui.floaters.filter((f) => f.t < 1.1)
+  ctx.font = 'bold 13px sans-serif'
+  ctx.textAlign = 'center'
+  for (const f of ui.floaters) {
+    const a = 1 - f.t / 1.1
+    const x = f.wx !== undefined ? f.wx - state.camX : f.x
+    const y = (f.wy !== undefined ? f.wy - state.camY : f.y) - f.t * 30
+    ctx.globalAlpha = Math.max(0, a)
+    ctx.lineWidth = 3
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)'
+    ctx.strokeText(f.text, x, y)
+    ctx.fillStyle = f.color
+    ctx.fillText(f.text, x, y)
+  }
+  ctx.globalAlpha = 1
+}
+
+function drawParts(dt) {
+  for (const p of ui.parts) {
+    p.x += p.vx * dt
+    p.y += p.vy * dt
+    p.vy += 120 * dt
+    p.life -= dt
+  }
+  ui.parts = ui.parts.filter((p) => p.life > 0)
+  for (const p of ui.parts) {
+    ctx.globalAlpha = Math.max(0, p.life / p.max)
+    ctx.fillStyle = p.color
+    ctx.fillRect(p.x - state.camX - p.size / 2, p.y - state.camY - p.size / 2, p.size, p.size)
+  }
+  ctx.globalAlpha = 1
 }
 
 function drawToast() {
   if (toastTimer <= 0) return
-  const h = 30
-  const y = VIEW_H - h
-  ctx.fillStyle = 'rgba(0,0,0,0.75)'
-  ctx.fillRect(0, y, VIEW_W, h)
+  ctx.font = 'bold 14px sans-serif'
+  const w = ctx.measureText(toastText).width + 36
+  const x = VIEW_W / 2 - w / 2
+  const y = VIEW_H - 44
+  ctx.globalAlpha = Math.min(1, toastTimer / 0.4)
+  ctx.fillStyle = 'rgba(20,16,8,0.9)'
+  ctx.beginPath()
+  ctx.roundRect(x, y, w, 32, 16)
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255,224,102,0.7)'
+  ctx.lineWidth = 1.5
+  ctx.stroke()
   ctx.fillStyle = '#ffe066'
-  ctx.font = 'bold 12px sans-serif'
-  ctx.textAlign = 'left'
-  ctx.fillText(toastText, 12, y + 20)
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(toastText, VIEW_W / 2, y + 17)
+  ctx.textBaseline = 'alphabetic'
+  ctx.globalAlpha = 1
 }
 
 function drawToolbar() {
   const y0 = VIEW_H
-  ctx.fillStyle = '#20241d'
+  const bg = ctx.createLinearGradient(0, y0, 0, y0 + TOOLBAR_H)
+  bg.addColorStop(0, '#2a3324')
+  bg.addColorStop(1, '#1a2016')
+  ctx.fillStyle = bg
   ctx.fillRect(0, y0, VIEW_W, TOOLBAR_H)
-  const btnW = VIEW_W / TOOLS.length
+  ctx.fillStyle = 'rgba(255,224,150,0.3)'
+  ctx.fillRect(0, y0, VIEW_W, 1.5)
+  const gap = 8
+  const btnW = (VIEW_W - gap * (TOOLS.length + 1)) / TOOLS.length
+  let hoverTool = null
   TOOLS.forEach((t, i) => {
-    const x = i * btnW
+    const x = gap + i * (btnW + gap)
+    const y = y0 + 8
+    const h = TOOLBAR_H - 16
     const selected = state.tool === t.id
-    ctx.fillStyle = selected ? '#3a4a30' : '#2a2e24'
-    ctx.fillRect(x + 2, y0 + 4, btnW - 4, TOOLBAR_H - 8)
+    const hover = ui.mouse.x >= x && ui.mouse.x <= x + btnW && ui.mouse.y >= y && ui.mouse.y <= y + h
+    if (hover) hoverTool = t
+    const afford = state.treasury >= t.cost
+    ctx.save()
+    if (selected) {
+      ctx.shadowColor = 'rgba(255,224,102,0.7)'
+      ctx.shadowBlur = 14
+    }
+    ctx.fillStyle = selected ? '#4a5c38' : hover ? '#3a4830' : '#2e3a28'
+    ctx.beginPath()
+    ctx.roundRect(x, selected ? y - 3 : y, btnW, h, 12)
+    ctx.fill()
+    ctx.restore()
     if (selected) {
       ctx.strokeStyle = '#ffe066'
-      ctx.lineWidth = 2
-      ctx.strokeRect(x + 3, y0 + 5, btnW - 6, TOOLBAR_H - 10)
+      ctx.lineWidth = 2.5
+      ctx.beginPath()
+      ctx.roundRect(x, y - 3, btnW, h, 12)
+      ctx.stroke()
     }
-    ctx.fillStyle = t.color
-    ctx.beginPath()
-    ctx.roundRect(x + btnW / 2 - 8, y0 + 10, 16, 16, 3)
-    ctx.fill()
+    const oy = selected ? -3 : 0
+    ctx.globalAlpha = afford || t.cost === 0 ? 1 : 0.45
+    drawToolIcon(t.id, x + 34, y + h / 2 + oy, 1.15)
+    ctx.globalAlpha = 1
+    ctx.textAlign = 'left'
     ctx.fillStyle = '#fff'
-    ctx.font = '11px sans-serif'
+    ctx.font = 'bold 16px sans-serif'
+    ctx.fillText(t.label, x + 62, y + 28 + oy)
+    ctx.font = '13px sans-serif'
+    ctx.fillStyle = afford || t.cost === 0 ? '#ffe9a8' : '#ff8a7a'
+    ctx.fillText(t.cost === 0 ? '무료' : `🪙 ${t.cost}`, x + 62, y + 48 + oy)
+    // 단축키 배지
+    ctx.fillStyle = 'rgba(0,0,0,0.4)'
+    ctx.beginPath()
+    ctx.roundRect(x + 6, y + 5 + oy, 18, 16, 5)
+    ctx.fill()
+    ctx.fillStyle = '#ffe9b0'
+    ctx.font = 'bold 11px sans-serif'
     ctx.textAlign = 'center'
-    ctx.fillText(`[${t.key}] ${t.label}`, x + btnW / 2, y0 + 44)
-    ctx.fillStyle = '#ccc'
-    ctx.font = '10px sans-serif'
-    ctx.fillText(`${t.cost}`, x + btnW / 2, y0 + 60)
+    ctx.fillText(t.key, x + 15, y + 17 + oy)
+    ui.hits.push({ x, y, w: btnW, h, fn: () => { state.tool = t.id; sfx.click() } })
   })
+  // 설명 말풍선 (마우스를 올렸거나 선택된 도구)
+  const tip = hoverTool || TOOLS.find((t) => t.id === state.tool)
+  ctx.font = '12px sans-serif'
+  const w = ctx.measureText(tip.desc).width + 28
+  const bx = VIEW_W / 2 - w / 2
+  const by = y0 - 30
+  if (!state.hover) {
+    ctx.fillStyle = 'rgba(14,18,10,0.85)'
+    ctx.beginPath()
+    ctx.roundRect(bx, by - (toastTimer > 0 ? 36 : 0), w, 24, 12)
+    ctx.fill()
+    ctx.fillStyle = '#e8e0c0'
+    ctx.textAlign = 'center'
+    ctx.fillText(tip.desc, VIEW_W / 2, by + 16 - (toastTimer > 0 ? 36 : 0))
+  }
 }
 
 // Stable pseudo-random so the skyline and its lit windows don't reshuffle
@@ -698,7 +1097,8 @@ function drawIntro() {
     '구역에 빨간 점이 뜨면 도로가 안 닿았다는 뜻이에요.',
     '화면 위쪽 💡 도우미가 다음에 할 일을 알려 줘요.',
     '',
-    '조작: 클릭/드래그로 짓기 · 숫자 1-5 또는 하단 버튼으로 도구 선택 · 방향키/WASD 이동 · 스페이스 일시정지',
+    '조작: 클릭/드래그로 짓기 · 숫자 1-5 또는 아래 버튼으로 도구 선택',
+    '화면 이동: 방향키/WASD, 마우스 우클릭 드래그, 오른쪽 아래 미니맵 클릭 · 스페이스 일시정지 · 위쪽 ▶/⏩로 속도 조절',
   ]
   lines.forEach((line, i) => ctx.fillText(line, canvas.width / 2, 108 + i * 28))
   ctx.fillStyle = '#ffe066'
@@ -716,26 +1116,32 @@ function render() {
     drawIntro()
     return
   }
+  ui.hits = []
   drawMap()
+  drawParts(frameDt)
   drawHoverPreview()
   drawHud()
-  drawToast()
+  drawFloaters(frameDt)
+  drawMinimap()
   drawToolbar()
+  drawToast()
 }
 
 // ---------- Loop ----------
 let lastTime = performance.now()
 let tickAccum = 0
+let frameDt = 0
 function loop(time) {
   const dt = Math.min(0.05, (time - lastTime) / 1000)
   lastTime = time
+  frameDt = dt
 
   if (toastTimer > 0) toastTimer -= dt
 
   if (state.phase === 'play') {
     updateCamera(dt)
     if (!state.paused) {
-      tickAccum += dt
+      tickAccum += dt * state.speed
       if (tickAccum >= TICK_SECONDS) {
         tickAccum -= TICK_SECONDS
         tick()
