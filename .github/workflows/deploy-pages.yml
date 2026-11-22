@@ -107,6 +107,9 @@ jobs:
       - run: npm run build -- --base=/angular_pc/robotbuilder/
         working-directory: robot-builder
       - run: mkdir -p dist/robotbuilder && cp -r robot-builder/dist/. dist/robotbuilder/
+      - run: mkdir -p dist/todo && cp app-todo/index.html dist/todo/
+      - run: mkdir -p dist/budget && cp app-budget/index.html dist/budget/
+      - run: mkdir -p dist/timer && cp app-timer/index.html dist/timer/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

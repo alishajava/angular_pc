@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>가계부</title>
+<style>
+  :root { --bg:#f3f1ec; --card:#fff; --ink:#23262b; --sub:#7b8088; --line:#e6e2d8; --inc:#2f9e6e; --exp:#e0584a; --accent:#4a7cf0; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171c; --card:#1d2229; --ink:#eef1f6; --sub:#8e97a5; --line:#2c3440; --inc:#4cc99a; --exp:#ff7a6b; --accent:#6c97ff; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,'Noto Sans KR',sans-serif; }
+  .wrap { max-width:720px; margin:0 auto; padding:32px 16px 80px; }
+  h1 { margin:0 0 14px; font-size:1.6rem; letter-spacing:-.02em; }
+  .month { display:flex; align-items:center; justify-content:center; gap:16px; margin-bottom:14px; }
+  .month b { font-size:1.15rem; min-width:130px; text-align:center; }
+  button { font:inherit; cursor:pointer; }
+  .month button { width:36px; height:36px; border-radius:50%; border:1px solid var(--line); background:var(--card); color:var(--ink); }
+  .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; }
+  .card small { color:var(--sub); }
+  .card div { font-size:1.15rem; font-weight:700; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .inc { color:var(--inc); } .exp { color:var(--exp); }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px 16px; margin-bottom:14px; }
+  .panel h2 { font-size:.95rem; margin:0 0 10px; color:var(--sub); font-weight:600; }
+  form { display:grid; grid-template-columns:auto 1fr 1fr; gap:8px; }
+  form .seg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; grid-row:span 1; }
+  form .seg button { border:0; padding:9px 14px; background:none; color:var(--sub); }
+  form .seg button.on.e { background:var(--exp); color:#fff; }
+  form .seg button.on.i { background:var(--inc); color:#fff; }
+  input, select { font:inherit; padding:9px 10px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--ink); min-width:0; }
+  form .wide { grid-column:1 / -1; display:flex; gap:8px; }
+  form .wide input { flex:1; }
+  .save { border:0; border-radius:10px; padding:0 18px; background:var(--accent); color:#fff; font-weight:700; }
+  .cat { display:flex; align-items:center; gap:10px; margin:7px 0; font-size:.9rem; }
+  .cat span:first-child { width:70px; }
+  .cat .bar { flex:1; height:10px; background:var(--line); border-radius:99px; overflow:hidden; }
+  .cat .bar i { display:block; height:100%; border-radius:99px; }
+  .cat span:last-child { width:92px; text-align:right; font-variant-numeric:tabular-nums; color:var(--sub); }
+  .day { font-size:.8rem; color:var(--sub); margin:14px 0 4px; display:flex; justify-content:space-between; }
+  .row { display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid var(--line); }
+  .row .ic { width:34px; height:34px; border-radius:10px; display:grid; place-items:center; background:var(--bg); font-size:1.1rem; flex:none; }
+  .row .mid { flex:1; min-width:0; }
+  .row .mid small { color:var(--sub); display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row .amt { font-weight:700; font-variant-numeric:tabular-nums; }
+  .row .del { border:0; background:none; color:var(--sub); opacity:.5; }
+  .empty { text-align:center; color:var(--sub); padding:26px 0; }
+  .tools { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
+  .tools button { border:1px solid var(--line); background:var(--card); color:var(--sub); border-radius:99px; padding:5px 12px; font-size:.8rem; }
+  @media (max-width:520px) { form { grid-template-columns:1fr 1fr; } form .seg { grid-column:1 / -1; } form .seg button { flex:1; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>💰 가계부</h1>
+  <div class="month"><button id="prev" aria-label="이전 달">‹</button><b id="monthLabel"></b><button id="next" aria-label="다음 달">›</button></div>
+  <div class="cards">
+    <div class="card"><small>수입</small><div class="inc" id="sumInc">0</div></div>
+    <div class="card"><small>지출</small><div class="exp" id="sumExp">0</div></div>
+    <div class="card"><small>잔액</small><div id="sumBal">0</div></div>
+  </div>
+  <div class="panel">
+    <h2>내역 추가</h2>
+    <form id="form">
+      <div class="seg"><button type="button" class="on e" data-k="e">지출</button><button type="button" data-k="i">수입</button></div>
+      <input type="number" id="amount" placeholder="금액" min="1" inputmode="numeric" required />
+      <select id="cat"></select>
+      <div class="wide"><input type="text" id="memo" placeholder="메모 (선택)" maxlength="40" /><input type="date" id="date" /><button class="save" type="submit">추가</button></div>
+    </form>
+  </div>
+  <div class="panel" id="catPanel"><h2>이번 달 지출 분류</h2><div id="cats"></div></div>
+  <div class="panel"><h2>내역</h2><div id="list"></div><div class="tools"><button id="csv">CSV 내보내기</button></div></div>
+</div>
+<script>
+const KEY = 'app-budget-v1'
+const EXP = [['식비','🍚','#ef7d57'],['교통','🚌','#4a7cf0'],['쇼핑','🛍️','#c46bd6'],['문화','🎬','#e0a93f'],['주거','🏠','#3aa9a0'],['의료','💊','#e0584a'],['기타','📦','#8a93a3']]
+const INC = [['급여','💼','#2f9e6e'],['용돈','🎁','#6bbf59'],['부수입','✨','#3aa9a0'],['기타','📥','#8a93a3']]
+let items = []
+try { items = JSON.parse(localStorage.getItem(KEY)) || [] } catch { items = [] }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(items)) } catch {} }
+const $ = (id) => document.getElementById(id)
+const won = (n) => n.toLocaleString('ko-KR') + '원'
+let kind = 'e'
+let cur = new Date(); cur.setDate(1)
+const ym = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
+$('date').value = today()
+const catInfo = (k, name) => (k === 'e' ? EXP : INC).find((c) => c[0] === name) || ['기타', '📦', '#8a93a3']
+
+function fillCats() { $('cat').innerHTML = (kind === 'e' ? EXP : INC).map((c) => `<option>${c[0]}</option>`).join('') }
+document.querySelectorAll('.seg button').forEach((b) => (b.onclick = () => {
+  kind = b.dataset.k
+  document.querySelectorAll('.seg button').forEach((x) => (x.className = x === b ? 'on ' + kind : ''))
+  fillCats()
+}))
+$('form').onsubmit = (e) => {
+  e.preventDefault()
+  const amount = Math.round(Number($('amount').value))
+  if (!amount || amount < 1) return
+  items.push({ id: Date.now(), kind, amount, cat: $('cat').value, memo: $('memo').value.trim(), date: $('date').value || today() })
+  $('amount').value = ''; $('memo').value = ''
+  const d = new Date($('date').value || today()); cur = new Date(d.getFullYear(), d.getMonth(), 1)
+  save(); render()
+}
+$('prev').onclick = () => { cur = new Date(cur.getFullYear(), cur.getMonth() - 1, 1); render() }
+$('next').onclick = () => { cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1); render() }
+
+function render() {
+  $('monthLabel').textContent = `${cur.getFullYear()}년 ${cur.getMonth() + 1}월`
+  const mine = items.filter((i) => i.date.startsWith(ym(cur))).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+  const inc = mine.filter((i) => i.kind === 'i').reduce((s, i) => s + i.amount, 0)
+  const exp = mine.filter((i) => i.kind === 'e').reduce((s, i) => s + i.amount, 0)
+  $('sumInc').textContent = won(inc); $('sumExp').textContent = won(exp)
+  const bal = inc - exp
+  $('sumBal').textContent = (bal < 0 ? '-' : '') + won(Math.abs(bal)); $('sumBal').className = bal < 0 ? 'exp' : 'inc'
+  // 분류별 지출
+  const by = {}
+  mine.filter((i) => i.kind === 'e').forEach((i) => (by[i.cat] = (by[i.cat] || 0) + i.amount))
+  const rows = Object.entries(by).sort((a, b) => b[1] - a[1])
+  $('cats').innerHTML = rows.length ? rows.map(([name, v]) => { const c = catInfo('e', name); return `<div class="cat"><span>${c[1]} ${name}</span><div class="bar"><i style="width:${(v / exp) * 100}%;background:${c[2]}"></i></div><span>${won(v)}</span></div>` }).join('') : '<div class="empty">아직 지출이 없어요</div>'
+  // 내역
+  const list = $('list'); list.innerHTML = ''
+  if (!mine.length) { list.innerHTML = '<div class="empty">이 달의 내역이 없어요</div>'; return }
+  let lastDate = ''
+  for (const it of mine) {
+    if (it.date !== lastDate) {
+      lastDate = it.date
+      const dayTotal = mine.filter((x) => x.date === it.date).reduce((s, x) => s + (x.kind === 'e' ? -x.amount : x.amount), 0)
+      const d = new Date(it.date)
+      const h = document.createElement('div'); h.className = 'day'
+      h.innerHTML = `<span>${d.getMonth() + 1}월 ${d.getDate()}일 (${'일월화수목금토'[d.getDay()]})</span><span>${dayTotal < 0 ? '-' : '+'}${won(Math.abs(dayTotal))}</span>`
+      list.append(h)
+    }
+    const c = catInfo(it.kind, it.cat)
+    const r = document.createElement('div'); r.className = 'row'
+    r.innerHTML = `<div class="ic">${c[1]}</div><div class="mid"><div>${it.cat}</div><small></small></div><div class="amt ${it.kind === 'e' ? 'exp' : 'inc'}">${it.kind === 'e' ? '-' : '+'}${won(it.amount)}</div><button class="del" aria-label="삭제">✕</button>`
+    r.querySelector('small').textContent = it.memo
+    r.querySelector('.del').onclick = () => { items = items.filter((x) => x !== it); save(); render() }
+    list.append(r)
+  }
+}
+$('csv').onclick = () => {
+  const esc = (v) => '"' + String(v).replace(/"/g, '""') + '"'
+  const lines = ['날짜,구분,분류,금액,메모', ...items.slice().sort((a, b) => a.date.localeCompare(b.date)).map((i) => [i.date, i.kind === 'e' ? '지출' : '수입', i.cat, i.amount, i.memo].map(esc).join(','))]
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\n')], { type: 'text/csv' }))
+  a.download = '가계부.csv'; a.click()
+}
+fillCats(); render()
+</script>
+</body>
+</html>
