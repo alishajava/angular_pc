@@ -1,4 +1,5 @@
 import { sfx, unlockSfx, toggleMute } from './sfx.js'
+import { createWorld3D } from './world3d.js'
 
 // Small SimCity-style city builder: zone residential/commercial/industrial
 // blocks, connect them with roads, keep them powered and watered, and
@@ -56,8 +57,6 @@ for (let c = CENTER_COL - 3; c <= CENTER_COL + 3; c++) tiles[CENTER_ROW + 1][c] 
 
 const state = {
   phase: 'title', // title -> intro -> play
-  camX: Math.max(0, CENTER_COL * TILE - VIEW_W / 2),
-  camY: Math.max(0, CENTER_ROW * TILE - VIEW_H / 2),
   tool: 'road',
   treasury: 1000,
   month: 0,
@@ -75,8 +74,6 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v))
 }
 
-state.camX = clamp(state.camX, 0, WORLD_W - VIEW_W)
-state.camY = clamp(state.camY, 0, WORLD_H - VIEW_H)
 
 // ---------- Toast ----------
 let toastText = ''
@@ -99,7 +96,8 @@ function say(text) {
 const canvas = document.getElementById('game')
 canvas.width = VIEW_W
 canvas.height = VIEW_H + TOOLBAR_H
-const ctx = canvas.getContext('2d')
+let ctx = canvas.getContext('2d') // 지형 텍스처를 그릴 때 잠깐 바꿔 끼운다
+const worldCanvas = document.getElementById('world')
 
 // ---------- Sim helpers ----------
 function inBounds(row, col) {
@@ -130,6 +128,10 @@ const ui = {
   mmDrag: false,
 }
 function burst(wx, wy, color, n) {
+  const sp = world.project(wx / TILE, 0.4, wy / TILE)
+  if (!sp.visible) return
+  wx = sp.x
+  wy = sp.y
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2
     const v = 20 + Math.random() * 50
@@ -168,6 +170,7 @@ function tick() {
       if (Math.random() < 0.45) {
         t.level += 1
         t.born = nowS()
+        world.refreshTile(r, c)
         burst(c * TILE + TILE / 2, r * TILE + TILE / 2, '#ffe066', 8)
       }
     }
@@ -220,6 +223,7 @@ function place(row, col, toolId) {
     state.treasury -= BULLDOZE_COST
     tiles[row][col] = makeTile()
     burst(col * TILE + TILE / 2, row * TILE + TILE / 2, '#b8b0a0', 8)
+    world.refreshTile(row, col)
     sfx.whoosh()
     return
   }
@@ -240,6 +244,7 @@ function place(row, col, toolId) {
   else if (toolId === 'com') tiles[row][col] = { type: 'com', level: 0 }
   else if (toolId === 'ind') tiles[row][col] = { type: 'ind', level: 0 }
   tiles[row][col].born = nowS()
+  world.refreshTile(row, col)
 }
 
 // ---------- Input ----------
@@ -289,16 +294,20 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
 
 function updateCamera(dt) {
-  let dx = 0
-  let dy = 0
-  if (held(MOVE_KEYS.left)) dx -= 1
-  if (held(MOVE_KEYS.right)) dx += 1
-  if (held(MOVE_KEYS.up)) dy -= 1
-  if (held(MOVE_KEYS.down)) dy += 1
-  if (dx === 0 && dy === 0) return
-  const speed = 320
-  state.camX = clamp(state.camX + dx * speed * dt, 0, Math.max(0, WORLD_W - VIEW_W))
-  state.camY = clamp(state.camY + dy * speed * dt, 0, Math.max(0, WORLD_H - VIEW_H))
+  const v = world.view
+  let fx = 0
+  let rx = 0
+  if (held(MOVE_KEYS.up)) fx += 1
+  if (held(MOVE_KEYS.down)) fx -= 1
+  if (held(MOVE_KEYS.right)) rx += 1
+  if (held(MOVE_KEYS.left)) rx -= 1
+  if (held(['q'])) v.yaw -= 1.6 * dt
+  if (held(['e'])) v.yaw += 1.6 * dt
+  if (fx === 0 && rx === 0) return
+  const sp = v.dist * 0.75 * dt
+  // 화면 기준 앞/오른쪽 방향 (yaw 회전 반영)
+  v.cx = clamp(v.cx + (-Math.sin(v.yaw) * fx + Math.cos(v.yaw) * rx) * sp, 0, COLS)
+  v.cz = clamp(v.cz + (-Math.cos(v.yaw) * fx - Math.sin(v.yaw) * rx) * sp, 0, ROWS)
 }
 
 function eventPos(e) {
@@ -314,10 +323,8 @@ function inRect(x, y, h) {
 const MM_X = () => VIEW_W - COLS * MM - 14
 const MM_Y = () => VIEW_H - ROWS * MM - 14
 function minimapJump(x, y) {
-  const col = (x - MM_X()) / MM
-  const row = (y - MM_Y()) / MM
-  state.camX = clamp(col * TILE - VIEW_W / 2, 0, Math.max(0, WORLD_W - VIEW_W))
-  state.camY = clamp(row * TILE - VIEW_H / 2, 0, Math.max(0, WORLD_H - VIEW_H))
+  world.view.cx = clamp((x - MM_X()) / MM, 0, COLS)
+  world.view.cz = clamp((y - MM_Y()) / MM, 0, ROWS)
 }
 function overMinimap(x, y) {
   return x >= MM_X() && x <= MM_X() + COLS * MM && y >= MM_Y() && y <= MM_Y() + ROWS * MM
@@ -338,7 +345,8 @@ function handlePointerDown(e) {
   }
   // 우클릭/휠클릭 드래그로 화면 이동
   if (e.button === 1 || e.button === 2) {
-    ui.pan = { x, y, camX: state.camX, camY: state.camY }
+    const v = world.view
+    ui.pan = { kind: e.button === 2 ? 'rotate' : 'pan', x, y, yaw: v.yaw, pitch: v.pitch, cx: v.cx, cz: v.cz }
     return
   }
   // 버튼류(속도, 도구 막대)
@@ -355,9 +363,8 @@ function handlePointerDown(e) {
     return
   }
   state.painting = true
-  const col = Math.floor((x + state.camX) / TILE)
-  const row = Math.floor((y + state.camY) / TILE)
-  place(row, col, state.tool)
+  const hit = world.pick(x, y)
+  if (hit) place(hit.row, hit.col, state.tool)
 }
 
 function handlePointerMove(e) {
@@ -365,8 +372,17 @@ function handlePointerMove(e) {
   ui.mouse.x = x
   ui.mouse.y = y
   if (ui.pan) {
-    state.camX = clamp(ui.pan.camX - (x - ui.pan.x), 0, Math.max(0, WORLD_W - VIEW_W))
-    state.camY = clamp(ui.pan.camY - (y - ui.pan.y), 0, Math.max(0, WORLD_H - VIEW_H))
+    const v = world.view
+    if (ui.pan.kind === 'rotate') {
+      v.yaw = ui.pan.yaw - (x - ui.pan.x) * 0.008
+      v.pitch = clamp(ui.pan.pitch + (y - ui.pan.y) * 0.005, 0.45, 1.35)
+    } else {
+      const k = v.dist * 0.0022
+      const dx = -(x - ui.pan.x) * k
+      const dy = -(y - ui.pan.y) * k
+      v.cx = clamp(ui.pan.cx + Math.cos(v.yaw) * dx + Math.sin(v.yaw) * dy, 0, COLS)
+      v.cz = clamp(ui.pan.cz - Math.sin(v.yaw) * dx + Math.cos(v.yaw) * dy, 0, ROWS)
+    }
     return
   }
   if (ui.mmDrag) {
@@ -376,10 +392,9 @@ function handlePointerMove(e) {
   if (y >= VIEW_H || state.phase !== 'play' || overMinimap(x, y)) {
     state.hover = null
   } else {
-    const col = Math.floor((x + state.camX) / TILE)
-    const row = Math.floor((y + state.camY) / TILE)
-    state.hover = inBounds(row, col) ? { row, col } : null
-    if (state.painting) place(row, col, state.tool)
+    const hit = world.pick(x, y)
+    state.hover = hit
+    if (state.painting && hit) place(hit.row, hit.col, state.tool)
   }
 }
 
@@ -392,6 +407,11 @@ function handlePointerUp() {
 canvas.addEventListener('mousedown', handlePointerDown)
 canvas.addEventListener('mousemove', handlePointerMove)
 canvas.addEventListener('contextmenu', (e) => e.preventDefault())
+canvas.addEventListener('wheel', (e) => {
+  if (state.phase !== 'play') return
+  e.preventDefault()
+  world.view.dist = clamp(world.view.dist * (1 + e.deltaY * 0.001), 9, 42)
+}, { passive: false })
 window.addEventListener('mouseup', handlePointerUp)
 canvas.addEventListener('mouseleave', () => {
   state.hover = null
@@ -405,7 +425,7 @@ const tHash = (a, b, k = 0) => {
 }
 const GRASS_SHADES = ['#3f5c38', '#43623b', '#3b5834', '#476a3e']
 
-function drawGrassTile(x, y, r, c, plain = false) {
+function drawGrassTile(x, y, r, c, plain = false, skipTree = false) {
   ctx.fillStyle = GRASS_SHADES[Math.floor(tHash(r, c) * 4)]
   ctx.fillRect(x, y, TILE, TILE)
   if (plain) return
@@ -422,7 +442,9 @@ function drawGrassTile(x, y, r, c, plain = false) {
     ctx.lineTo(gx + 2, gy - 3)
     ctx.stroke()
   }
-  if (h > 0.9) {
+  if (h > 0.9 && skipTree) {
+    // 나무는 3D 인스턴스로 따로 세운다
+  } else if (h > 0.9) {
     // a small tree
     ctx.fillStyle = 'rgba(0,0,0,0.2)'
     ctx.beginPath()
@@ -536,62 +558,53 @@ function drawZoneTile(x, y, t) {
   }
 }
 
-function drawMap() {
-  const startCol = Math.max(0, Math.floor(state.camX / TILE))
-  const endCol = Math.min(COLS, Math.ceil((state.camX + VIEW_W) / TILE))
-  const startRow = Math.max(0, Math.floor(state.camY / TILE))
-  const endRow = Math.min(ROWS, Math.ceil((state.camY + VIEW_H) / TILE))
-  const now = nowS()
+// 지형 한 칸을 3D 땅 텍스처에 그린다 (2D 타일 그리기 함수를 그대로 재사용)
+function paintTile(tctx, r, c) {
+  const prev = ctx
+  ctx = tctx
+  const t = tiles[r][c]
+  const x = c * TILE
+  const y = r * TILE
+  if (t.type === 'road') drawRoadTile(x, y, r, c)
+  else if (t.type === 'cityhall') {
+    drawGrassTile(x, y, r, c, true)
+    ctx.fillStyle = '#d8c898'
+    ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4)
+  } else if (t.type === 'res' || t.type === 'com' || t.type === 'ind') {
+    drawGrassTile(x, y, r, c, true)
+    if (t.level === 0) drawZoneTile(x, y, t)
+    else {
+      ctx.fillStyle = 'rgba(190,180,160,0.6)'
+      ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4)
+    }
+  } else drawGrassTile(x, y, r, c, false, true)
+  ctx.strokeStyle = 'rgba(0,0,0,0.07)'
+  ctx.lineWidth = 1
+  ctx.strokeRect(x + 0.5, y + 0.5, TILE - 1, TILE - 1)
+  ctx = prev
+}
 
-  for (let r = startRow; r < endRow; r++) {
-    for (let c = startCol; c < endCol; c++) {
+// 도로가 안 닿은 구역 위에 말풍선 표시
+function drawWarnings() {
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
       const t = tiles[r][c]
-      const x = c * TILE - state.camX
-      const y = r * TILE - state.camY
-      // 새로 지으면/자라면 통통 튀어 오른다
-      const age = t.born ? now - t.born : 9
-      const pop = age < 0.4
-      if (pop) {
-        const k = 1 + 0.25 * Math.sin((Math.PI * age) / 0.4)
-        ctx.save()
-        ctx.translate(x + TILE / 2, y + TILE)
-        ctx.scale(k, k)
-        ctx.translate(-(x + TILE / 2), -(y + TILE))
-      }
-      if (t.type === 'grass' || t.type === undefined || t.type === 'empty') drawGrassTile(x, y, r, c)
-      else if (t.type === 'road') drawRoadTile(x, y, r, c)
-      else {
-        // everything else stands on grass
-        drawGrassTile(x, y, r, c, true)
-        if (t.type === 'cityhall') {
-          ctx.fillStyle = '#c9a86a'
-          ctx.fillRect(x, y, TILE, TILE)
-        } else if (t.type === 'res' || t.type === 'com' || t.type === 'ind') drawZoneTile(x, y, t)
-      }
-      ctx.strokeStyle = 'rgba(0,0,0,0.1)'
-      ctx.strokeRect(x + 0.5, y + 0.5, TILE - 1, TILE - 1)
-
-      if (t.type === 'cityhall') {
-        ctx.fillStyle = '#5c431c'
-        ctx.font = 'bold 9px sans-serif'
-        ctx.textAlign = 'center'
-        ctx.fillText('시청', x + TILE / 2, y + TILE / 2 + 3)
-      }
-
-      if (t.type === 'res' || t.type === 'com' || t.type === 'ind') {
-        if (!hasRoadAdjacent(r, c)) {
-          // 도로가 안 닿은 구역: 깜빡이는 대신 또렷한 말풍선 표시
-          ctx.fillStyle = '#ff5050'
-          ctx.beginPath()
-          ctx.arc(x + TILE - 6, y + 6, 6, 0, Math.PI * 2)
-          ctx.fill()
-          ctx.fillStyle = '#fff'
-          ctx.font = 'bold 10px sans-serif'
-          ctx.textAlign = 'center'
-          ctx.fillText('!', x + TILE - 6, y + 10)
-        }
-      }
-      if (pop) ctx.restore()
+      if ((t.type !== 'res' && t.type !== 'com' && t.type !== 'ind') || hasRoadAdjacent(r, c)) continue
+      const p = world.project(c + 0.5, 0.35 + [0, 0.5, 0.95, 1.7][t.level], r + 0.5)
+      if (!p.visible || p.y < HUD_H || p.y > VIEW_H) continue
+      ctx.fillStyle = '#ff5050'
+      ctx.beginPath()
+      ctx.arc(p.x, p.y - 8, 9, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+      ctx.fillStyle = '#fff'
+      ctx.font = 'bold 12px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('!', p.x, p.y - 7.5)
+      ctx.textBaseline = 'alphabetic'
     }
   }
 }
@@ -680,32 +693,27 @@ function drawToolIcon(id, cx, cy, s = 1) {
 }
 
 function drawHoverPreview() {
-  if (!state.hover || state.phase !== 'play') return
+  if (!state.hover || state.phase !== 'play') {
+    world.setHover(null)
+    return
+  }
   const { row, col } = state.hover
-  const x = col * TILE - state.camX
-  const y = row * TILE - state.camY
   const tile = tiles[row][col]
   const tool = TOOLS.find((t) => t.id === state.tool)
   const bulldoze = state.tool === 'bulldoze'
   const blocked = bulldoze ? tile.type === 'empty' || tile.type === 'cityhall' : tile.type !== 'empty'
   const broke = state.treasury < tool.cost
   const bad = blocked || broke
-  ctx.save()
-  ctx.globalAlpha = 0.55
-  ctx.fillStyle = bad ? '#ff5050' : bulldoze ? '#ffb0a0' : '#fff6c0'
-  ctx.fillRect(x, y, TILE, TILE)
-  ctx.globalAlpha = bad ? 0.5 : 0.9
-  if (!blocked || bulldoze) drawToolIcon(state.tool, x + TILE / 2, y + TILE / 2 + 1, 0.7)
-  ctx.restore()
-  ctx.strokeStyle = bad ? '#ff6060' : '#ffe066'
-  ctx.lineWidth = 2
-  ctx.strokeRect(x + 1, y + 1, TILE - 2, TILE - 2)
+  const color = bad ? 0xff5050 : bulldoze ? 0xffb0a0 : 0xfff6c0
+  world.setHover(row, col, color, !bad && !bulldoze && state.tool !== 'road' ? 0.7 : 0)
   // 커서 옆 비용 표시
+  const sp = world.project(col + 0.5, 0.9, row + 0.5)
+  if (!sp.visible) return
   const label = blocked ? (bulldoze ? '치울 게 없어요' : '이미 뭔가 있어요') : broke ? '돈이 부족해요' : tool.cost === 0 ? '무료' : `🪙 -${tool.cost}`
   ctx.font = 'bold 11px sans-serif'
   const w = ctx.measureText(label).width + 14
-  const lx = clamp(x + TILE + 4, 4, VIEW_W - w - 4)
-  const ly = clamp(y - 2, HUD_H + 4, VIEW_H - 28)
+  const lx = clamp(sp.x + 18, 4, VIEW_W - w - 4)
+  const ly = clamp(sp.y - 12, HUD_H + 4, VIEW_H - 28)
   ctx.fillStyle = 'rgba(10,14,10,0.82)'
   ctx.beginPath()
   ctx.roundRect(lx, ly, w, 20, 10)
@@ -770,11 +778,11 @@ function drawHud() {
     const f = clamp((state.population - prev) / (next - prev), 0, 1)
     ctx.fillStyle = 'rgba(255,255,255,0.15)'
     ctx.beginPath()
-    ctx.roundRect(560, 31, 110, 9, 5)
+    ctx.roundRect(588, 31, 90, 9, 5)
     ctx.fill()
     ctx.fillStyle = '#ffd24a'
     ctx.beginPath()
-    ctx.roundRect(560, 31, Math.max(9, 110 * f), 9, 5)
+    ctx.roundRect(588, 31, Math.max(9, 90 * f), 9, 5)
     ctx.fill()
   }
 
@@ -850,7 +858,21 @@ function drawMinimap() {
   ctx.globalAlpha = 1
   ctx.strokeStyle = '#ffe066'
   ctx.lineWidth = 1.5
-  ctx.strokeRect(x0 + (state.camX / TILE) * MM, y0 + (state.camY / TILE) * MM, (VIEW_W / TILE) * MM, (VIEW_H / TILE) * MM)
+  const v = world.view
+  const mx = x0 + v.cx * MM
+  const my = y0 + v.cz * MM
+  // 보고 있는 방향(부채꼴)과 중심점
+  ctx.fillStyle = 'rgba(255,224,102,0.35)'
+  ctx.beginPath()
+  ctx.moveTo(mx, my)
+  const a0 = Math.atan2(-Math.cos(v.yaw), -Math.sin(v.yaw))
+  ctx.arc(mx, my, 22, a0 - 0.6, a0 + 0.6)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = '#ffe066'
+  ctx.beginPath()
+  ctx.arc(mx, my, 3, 0, Math.PI * 2)
+  ctx.fill()
 }
 
 function drawFloaters(dt) {
@@ -860,8 +882,15 @@ function drawFloaters(dt) {
   ctx.textAlign = 'center'
   for (const f of ui.floaters) {
     const a = 1 - f.t / 1.1
-    const x = f.wx !== undefined ? f.wx - state.camX : f.x
-    const y = (f.wy !== undefined ? f.wy - state.camY : f.y) - f.t * 30
+    let x = f.x
+    let y = f.y
+    if (f.wx !== undefined) {
+      const sp = world.project(f.wx / TILE, 0.9, f.wy / TILE + 0.5)
+      if (!sp.visible) continue
+      x = sp.x
+      y = sp.y
+    }
+    y -= f.t * 30
     ctx.globalAlpha = Math.max(0, a)
     ctx.lineWidth = 3
     ctx.strokeStyle = 'rgba(0,0,0,0.6)'
@@ -883,7 +912,7 @@ function drawParts(dt) {
   for (const p of ui.parts) {
     ctx.globalAlpha = Math.max(0, p.life / p.max)
     ctx.fillStyle = p.color
-    ctx.fillRect(p.x - state.camX - p.size / 2, p.y - state.camY - p.size / 2, p.size, p.size)
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size)
   }
   ctx.globalAlpha = 1
 }
@@ -1117,15 +1146,22 @@ function render() {
     return
   }
   ui.hits = []
-  drawMap()
-  drawParts(frameDt)
+  world.render(nowS(), frameDt)
   drawHoverPreview()
+  drawWarnings()
+  drawParts(frameDt)
   drawHud()
   drawFloaters(frameDt)
   drawMinimap()
   drawToolbar()
   drawToast()
 }
+
+// ---------- 3D 월드 ----------
+const world = createWorld3D({ canvas: worldCanvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H, paintTile })
+world.view.cx = CENTER_COL + 0.5
+world.view.cz = CENTER_ROW + 1.2
+setInterval(() => world.pruneSmokers(), 4000)
 
 // ---------- Loop ----------
 let lastTime = performance.now()

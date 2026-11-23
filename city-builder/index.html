@@ -19,12 +19,18 @@
         padding: 1rem;
         box-sizing: border-box;
       }
-      canvas {
-        border-radius: 8px;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      #stage {
+        position: relative;
+        width: 900px;
         max-width: 100%;
-        cursor: crosshair;
+        aspect-ratio: 900 / 608;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
       }
+      #stage canvas { position: absolute; left: 0; top: 0; width: 100%; }
+      #world { height: calc(520 / 608 * 100%); }
+      #game { height: 100%; cursor: crosshair; }
       #hint {
         font-size: 0.85rem;
         opacity: 0.8;
@@ -33,9 +39,9 @@
     </style>
   </head>
   <body>
-    <canvas id="game"></canvas>
+    <div id="stage"><canvas id="world"></canvas><canvas id="game"></canvas></div>
     <div id="hint">
-      도로를 깔고 그 옆에 집·가게·공장을 지으면 저절로 커져요 · 클릭/드래그로 짓기 · 숫자 1-5 또는 아래 버튼으로 도구 선택 · 방향키/WASD/우클릭 드래그/미니맵으로 이동 · 스페이스 일시정지 · 위쪽 버튼으로 속도 · M 소리
+      도로를 깔고 그 옆에 집·가게·공장을 지으면 저절로 커져요 · 클릭/드래그로 짓기 · 숫자 1-5 또는 아래 버튼으로 도구 선택 · WASD/방향키 이동 · Q/E·우클릭 드래그로 회전 · 휠로 확대/축소 · 휠클릭 드래그/미니맵으로 이동 · 스페이스 일시정지 · 위쪽 버튼으로 속도 · M 소리
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>
