@@ -24,7 +24,8 @@ export function createWorld3D({ canvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H,
   }
 
   // ---- 조명 ----
-  scene.add(new THREE.HemisphereLight(0xdff0ff, 0x7a8a60, 1.0))
+  const hemi = new THREE.HemisphereLight(0xdff0ff, 0x7a8a60, 1.0)
+  scene.add(hemi)
   const sun = new THREE.DirectionalLight(0xfff0d0, 2.2)
   sun.position.set(COLS / 2 + 22, 32, ROWS / 2 - 14)
   sun.target.position.set(COLS / 2, 0, ROWS / 2)
@@ -34,6 +35,9 @@ export function createWorld3D({ canvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H,
   sc.left = -34; sc.right = 34; sc.top = 30; sc.bottom = -30; sc.near = 1; sc.far = 90
   sun.shadow.bias = -0.0004
   scene.add(sun, sun.target)
+  const moonLight = new THREE.DirectionalLight(0x8fa8ff, 0)
+  moonLight.target.position.set(COLS / 2, 0, ROWS / 2)
+  scene.add(moonLight, moonLight.target)
 
   // ---- 땅: 타일 그림 텍스처(2D 캔버스) + 두께 있는 섬 + 바다 ----
   const terrainCanvas = document.createElement('canvas')
@@ -57,6 +61,7 @@ export function createWorld3D({ canvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H,
   scene.add(water)
 
   let terrainDirty = true
+  let lampsDirty = true
   function repaintTerrainTile(r, c) {
     if (r < 0 || c < 0 || r >= ROWS || c >= COLS) return
     paintTile(tctx, r, c)
@@ -100,24 +105,52 @@ export function createWorld3D({ canvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H,
   function facade(tint, seed, lit = 0.35) {
     const N = 4, S = 128, cell = S / N
     const cv = document.createElement('canvas'); cv.width = cv.height = S
+    const gl = document.createElement('canvas'); gl.width = gl.height = S
     const g = cv.getContext('2d')
+    const gg = gl.getContext('2d')
+    gg.fillStyle = '#000'; gg.fillRect(0, 0, S, S)
     g.fillStyle = tint; g.fillRect(0, 0, S, S)
     let sd = seed
     const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647)
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       g.fillStyle = 'rgba(20,30,50,0.85)'
       g.fillRect(x * cell + cell * 0.22, y * cell + cell * 0.2, cell * 0.56, cell * 0.6)
-      g.fillStyle = rnd() < lit ? '#ffe9a8' : '#a9d4f0'
+      const on = rnd() < lit
+      g.fillStyle = on ? '#ffe9a8' : '#a9d4f0'
       g.fillRect(x * cell + cell * 0.26, y * cell + cell * 0.24, cell * 0.48, cell * 0.52)
+      if (on) {
+        gg.fillStyle = '#ffd98a'
+        gg.fillRect(x * cell + cell * 0.26, y * cell + cell * 0.24, cell * 0.48, cell * 0.52)
+      }
     }
-    const t = new THREE.CanvasTexture(cv)
-    t.wrapS = t.wrapT = THREE.RepeatWrapping
-    t.colorSpace = THREE.SRGBColorSpace
-    t.anisotropy = 4
-    return t
+    const mk = (cvs) => {
+      const t = new THREE.CanvasTexture(cvs)
+      t.wrapS = t.wrapT = THREE.RepeatWrapping
+      t.colorSpace = THREE.SRGBColorSpace
+      t.anisotropy = 4
+      return t
+    }
+    return { map: mk(cv), glow: mk(gl) }
   }
-  const std = (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.85 })
-  const matFacade = (tex, rx, ry) => { const t = tex.clone(); t.needsUpdate = true; t.repeat.set(rx, ry); return new THREE.MeshStandardMaterial({ map: t, roughness: 0.8 }) }
+  const stdCache = new Map()
+  const std = (color) => {
+    if (!stdCache.has(color)) stdCache.set(color, new THREE.MeshStandardMaterial({ color, roughness: 0.85 }))
+    return stdCache.get(color)
+  }
+  // 창문 재질은 (모양, 반복 수)별로 하나만 만들어 공유한다. 밤에는 켜진 창이 빛난다.
+  const glowMats = []
+  const facadeCache = new Map()
+  const matFacade = (fac, id, rx, ry) => {
+    const k = `${id}|${rx}|${ry}`
+    if (!facadeCache.has(k)) {
+      const map = fac.map.clone(); map.needsUpdate = true; map.repeat.set(rx, ry)
+      const glow = fac.glow.clone(); glow.needsUpdate = true; glow.repeat.set(rx, ry)
+      const m = new THREE.MeshStandardMaterial({ map, emissive: 0xffffff, emissiveMap: glow, emissiveIntensity: 0, roughness: 0.8 })
+      glowMats.push(m)
+      facadeCache.set(k, m)
+    }
+    return facadeCache.get(k)
+  }
   const FAC = {
     res: [facade('#efe3c8', 3), facade('#e6d6b4', 7), facade('#d8e4ee', 11)],
     com: [facade('#8fb4e0', 5, 0.5), facade('#9fc0e6', 9, 0.5), facade('#7aa2d4', 13, 0.5)],
@@ -141,8 +174,8 @@ export function createWorld3D({ canvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H,
   }
   function sideMat(type, r, c, w, h) {
     const arr = FAC[type]
-    const tex = arr[Math.floor(hash(r, c, 2) * arr.length)]
-    return matFacade(tex, Math.max(1, Math.round(w * 1.5)), Math.max(1, Math.round(h * 2.2)))
+    const idx = Math.floor(hash(r, c, 2) * arr.length)
+    return matFacade(arr[idx], `${type}${idx}`, Math.max(1, Math.round(w * 1.5)), Math.max(1, Math.round(h * 2.2)))
   }
 
   function buildBuilding(t, r, c) {
@@ -245,6 +278,200 @@ export function createWorld3D({ canvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H,
       meshes.set(k, { group, born: t.born || 0 })
     }
     for (const [dr, dc] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) repaintTerrainTile(r + dr, c + dc)
+    lampsDirty = true
+  }
+
+  // ---- 가로등 (밤에 켜짐) ----
+  const MAX_LAMPS = 700
+  const lampPost = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.015, 0.02, 0.5, 5), new THREE.MeshStandardMaterial({ color: 0x3a3f4a }), MAX_LAMPS)
+  const lampBulb = new THREE.InstancedMesh(new THREE.SphereGeometry(0.04, 8, 6), new THREE.MeshBasicMaterial({ color: 0x665a3a }), MAX_LAMPS)
+  lampPost.count = lampBulb.count = 0
+  scene.add(lampPost, lampBulb)
+  const glowTex = (() => {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 64
+    const g = cv.getContext('2d')
+    const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32)
+    gr.addColorStop(0, 'rgba(255,226,150,1)'); gr.addColorStop(1, 'rgba(255,226,150,0)')
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64)
+    return new THREE.CanvasTexture(cv)
+  })()
+  const lampGlow = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ map: glowTex, size: 0.9, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }))
+  scene.add(lampGlow)
+  const isRoad = (r, c) => r >= 0 && c >= 0 && r < ROWS && c < COLS && tiles[r][c].type === 'road'
+  function rebuildLamps() {
+    lampsDirty = false
+    const pts = []
+    let n = 0
+    for (let r = 0; r < ROWS && n < MAX_LAMPS; r++) for (let c = 0; c < COLS && n < MAX_LAMPS; c++) {
+      if (!isRoad(r, c) || (r * 3 + c * 5) % 4 !== 0) continue
+      // 도로 옆 빈 쪽 가장자리에 세운다
+      const sides = [[0, 1, 0.46, 0], [0, -1, -0.46, 0], [1, 0, 0, 0.46], [-1, 0, 0, -0.46]]
+      const side = sides.find(([dr, dc]) => !isRoad(r + dr, c + dc) && r + dr >= 0 && c + dc >= 0 && r + dr < ROWS && c + dc < COLS && tiles[r + dr][c + dc].type === 'empty')
+      if (!side) continue
+      const x = c + 0.5 + side[2] * 0.94
+      const z = r + 0.5 + side[3] * 0.94
+      dummy.rotation.set(0, 0, 0); dummy.scale.setScalar(1)
+      dummy.position.set(x, 0.25, z); dummy.updateMatrix(); lampPost.setMatrixAt(n, dummy.matrix)
+      dummy.position.set(x, 0.52, z); dummy.updateMatrix(); lampBulb.setMatrixAt(n, dummy.matrix)
+      pts.push(x, 0.52, z)
+      n++
+    }
+    lampPost.count = lampBulb.count = n
+    lampPost.instanceMatrix.needsUpdate = lampBulb.instanceMatrix.needsUpdate = true
+    lampGlow.geometry.dispose()
+    lampGlow.geometry = new THREE.BufferGeometry()
+    lampGlow.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
+  }
+
+  // ---- 별과 달 ----
+  const starPos = []
+  for (let i = 0; i < 300; i++) {
+    const a = Math.random() * Math.PI * 2
+    const e = 0.15 + Math.random() * 1.3
+    starPos.push(COLS / 2 + Math.cos(a) * Math.cos(e) * 160, Math.sin(e) * 160, ROWS / 2 + Math.sin(a) * Math.cos(e) * 160)
+  }
+  const starGeo = new THREE.BufferGeometry()
+  starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3))
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false }))
+  scene.add(stars)
+  const moon = new THREE.Mesh(new THREE.SphereGeometry(5, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfff4d0, fog: false }))
+  scene.add(moon)
+
+  // ---- 자동차 (도로를 따라 오른쪽 차선으로 달린다) ----
+  const MAX_CARS = 36
+  const carBody = new THREE.InstancedMesh(new THREE.BoxGeometry(0.17, 0.09, 0.34), new THREE.MeshStandardMaterial({ roughness: 0.5 }), MAX_CARS)
+  const carCabin = new THREE.InstancedMesh(new THREE.BoxGeometry(0.13, 0.08, 0.16), new THREE.MeshStandardMaterial({ color: 0xcfe6f5, roughness: 0.3 }), MAX_CARS)
+  const carLights = new THREE.InstancedMesh(new THREE.BoxGeometry(0.04, 0.03, 0.02), new THREE.MeshBasicMaterial({ color: 0xfff2c0 }), MAX_CARS * 2)
+  carBody.castShadow = carCabin.castShadow = true
+  carBody.count = carCabin.count = 0
+  carLights.count = 0
+  scene.add(carBody, carCabin, carLights)
+  const CAR_COLORS = [0xe04a4a, 0x4a7ac0, 0xf0c040, 0xf2f2f2, 0x3a3f4a, 0x4aa86a, 0xc46bd6, 0xe0843a]
+  const cars = []
+  const roadNeighbors = (r, c) => [[0, 1], [0, -1], [1, 0], [-1, 0]].filter(([dr, dc]) => isRoad(r + dr, c + dc))
+  function spawnCar() {
+    const roads = []
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (isRoad(r, c) && roadNeighbors(r, c).length) roads.push([r, c])
+    if (!roads.length) return false
+    const [r, c] = roads[Math.floor(Math.random() * roads.length)]
+    const nb = roadNeighbors(r, c)
+    const [dr, dc] = nb[Math.floor(Math.random() * nb.length)]
+    const car = { r, c, nr: r + dr, nc: c + dc, pr: -1, pc: -1, t: Math.random(), speed: 1.1 + Math.random() * 0.8, color: CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)], ox: 0, oz: 0, heading: 0 }
+    cars.push(car)
+    return true
+  }
+  function stepCar(car) {
+    // 한 칸 도착: 다음 칸 고르기 (직진 우선, 막다른 길이면 되돌아감)
+    const prevR = car.r, prevC = car.c
+    car.pr = prevR; car.pc = prevC
+    car.r = car.nr; car.c = car.nc
+    const dr = car.r - prevR, dc = car.c - prevC
+    const opts = roadNeighbors(car.r, car.c).filter(([a, b]) => !(car.r + a === prevR && car.c + b === prevC))
+    let pick
+    if (!opts.length) pick = [-dr, -dc]
+    else {
+      const straight = opts.find(([a, b]) => a === dr && b === dc)
+      pick = straight && Math.random() < 0.65 ? straight : opts[Math.floor(Math.random() * opts.length)]
+    }
+    car.nr = car.r + pick[0]; car.nc = car.c + pick[1]
+    car.t -= 1
+  }
+  let carTimer = 0
+  const tmpCol = new THREE.Color()
+  function updateCars(dt, night, now) {
+    carTimer -= dt
+    if (carTimer <= 0) {
+      carTimer = 1
+      let roadCount = 0
+      for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (tiles[r][c].type === 'road') roadCount++
+      const want = Math.min(MAX_CARS, Math.floor(roadCount / 3))
+      while (cars.length < want && spawnCar()) { /* 도로 위에 새로 나타남 */ }
+      while (cars.length > want) cars.pop()
+    }
+    let n = 0
+    for (let i = cars.length - 1; i >= 0; i--) {
+      const car = cars[i]
+      // 철거된 도로 위에 있으면 사라지고 새로 나타난다
+      if (!isRoad(car.r, car.c) || !isRoad(car.nr, car.nc)) { cars.splice(i, 1); continue }
+    }
+    for (const car of cars) {
+      car.t += car.speed * dt
+      while (car.t >= 1) {
+        stepCar(car)
+        if (!isRoad(car.nr, car.nc)) { car.nr = car.pr; car.nc = car.pc }
+      }
+      const fx = car.nc - car.c, fz = car.nr - car.r
+      const bx = car.c + 0.5 + fx * car.t, bz = car.r + 0.5 + fz * car.t
+      const rx = -fz, rz = fx // 진행 방향의 오른쪽
+      car.ox += (rx * 0.17 - car.ox) * Math.min(1, dt * 7)
+      car.oz += (rz * 0.17 - car.oz) * Math.min(1, dt * 7)
+      const target = Math.atan2(fx, fz)
+      let d = target - car.heading
+      d = Math.atan2(Math.sin(d), Math.cos(d))
+      car.heading += d * Math.min(1, dt * 9)
+      const x = bx + car.ox, z = bz + car.oz
+      dummy.scale.setScalar(1)
+      dummy.rotation.set(0, car.heading, 0)
+      dummy.position.set(x, 0.07, z); dummy.updateMatrix(); carBody.setMatrixAt(n, dummy.matrix)
+      carBody.setColorAt(n, tmpCol.setHex(car.color))
+      dummy.position.set(x - Math.sin(car.heading) * 0.02, 0.145, z - Math.cos(car.heading) * 0.02); dummy.updateMatrix(); carCabin.setMatrixAt(n, dummy.matrix)
+      // 앞등 두 개
+      for (const side of [-1, 1]) {
+        const lx = x + Math.sin(car.heading) * 0.175 + Math.cos(car.heading) * 0.055 * side
+        const lz = z + Math.cos(car.heading) * 0.175 - Math.sin(car.heading) * 0.055 * side
+        dummy.position.set(lx, 0.075, lz); dummy.updateMatrix(); carLights.setMatrixAt(n * 2 + (side > 0 ? 1 : 0), dummy.matrix)
+      }
+      n++
+    }
+    carBody.count = carCabin.count = n
+    carLights.count = n * 2
+    carBody.instanceMatrix.needsUpdate = carCabin.instanceMatrix.needsUpdate = carLights.instanceMatrix.needsUpdate = true
+    if (carBody.instanceColor) carBody.instanceColor.needsUpdate = true
+    carLights.material.color.setRGB(0.35 + 0.65 * night, 0.32 + 0.6 * night, 0.2 + 0.4 * night)
+  }
+
+  // ---- 낮밤 ----
+  const state = { tod: 0.33 } // 0=자정, 0.25=해뜸, 0.5=정오, 0.75=해짐
+  const cDay = new THREE.Color(0xbfe3ff), cNight = new THREE.Color(0x0b1226), cDusk = new THREE.Color(0xf0a070)
+  const sky = new THREE.Color()
+  const sunCol = new THREE.Color()
+  const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
+  let lastNight = -1
+  function applyTime() {
+    const a = 2 * Math.PI * (state.tod - 0.25)
+    const elev = Math.sin(a)
+    const day = smooth(-0.12, 0.3, elev)
+    const night = 1 - day
+    const twilight = Math.max(0, 1 - Math.abs(elev) / 0.28) * 0.65
+    sky.copy(cNight).lerp(cDay, day).lerp(cDusk, twilight)
+    scene.background.copy(sky)
+    scene.fog.color.copy(sky)
+    sun.position.set(COLS / 2 + Math.cos(a) * 30, Math.sin(a) * 32 + 1, ROWS / 2 - 9)
+    sun.intensity = 2.3 * smooth(-0.02, 0.35, elev)
+    sunCol.setHex(0xfff0d0).lerp(new THREE.Color(0xff9a50), Math.max(0, 1 - elev * 3) * (elev < 0.35 ? 1 : 0))
+    sun.color.copy(sunCol)
+    sun.castShadow = elev > 0.02
+    moonLight.position.set(COLS / 2 - Math.cos(a) * 30, -Math.sin(a) * 32 + 1, ROWS / 2 + 9)
+    moonLight.intensity = 0.55 * night
+    hemi.intensity = 0.22 + 0.8 * day
+    hemi.color.setHex(0xdff0ff).lerp(new THREE.Color(0x6a7cc8), night * 0.8)
+    water.material.color.setHex(0x3a86c8).lerp(new THREE.Color(0x0e2a52), night * 0.85)
+    moon.position.set(COLS / 2 - Math.cos(a) * 110, -Math.sin(a) * 110, ROWS / 2 + 30)
+    moon.visible = -Math.sin(a) > 0.05
+    stars.material.opacity = Math.max(0, night - 0.25) * 1.2
+    if (Math.abs(night - lastNight) > 0.01) {
+      lastNight = night
+      const glow = Math.min(1.2, night * 1.3 + twilight * 0.4)
+      for (const m of glowMats) m.emissiveIntensity = glow
+      lampBulb.material.color.setRGB(0.4 + 0.6 * night, 0.36 + 0.55 * night, 0.22 + 0.3 * night)
+      lampGlow.material.opacity = Math.min(1, night * 1.2)
+    }
+    return night
+  }
+  function hourText() {
+    const h = Math.floor(state.tod * 24) % 24
+    const m = Math.floor((state.tod * 24 * 60) % 60)
+    return `${String(h).padStart(2, '0')}:${String(Math.floor(m / 10) * 10).padStart(2, '0')}`
   }
 
   // ---- 호버 표시 ----
@@ -292,7 +519,7 @@ export function createWorld3D({ canvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H,
   }
 
   // ---- 매 프레임 ----
-  function render(now, dt) {
+  function render(now, dt, scale = 1) {
     applyCamera()
     camera.updateMatrixWorld()
     if (terrainDirty) { terrainTex.needsUpdate = true; terrainDirty = false }
@@ -315,6 +542,10 @@ export function createWorld3D({ canvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H,
       })
     }
     water.position.y = -0.55 + Math.sin(now * 0.8) * 0.02
+    if (scale > 0) state.tod = (state.tod + (dt * scale) / 150) % 1 // 하루 = 150초(1배속)
+    const night = applyTime()
+    if (lampsDirty) rebuildLamps()
+    updateCars(dt * scale, night, now)
     renderer.render(scene, camera)
   }
   // 파괴된 건물의 연기 목록 정리
@@ -328,5 +559,5 @@ export function createWorld3D({ canvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H,
   trunkMesh.instanceMatrix.needsUpdate = true; leafMesh.instanceMatrix.needsUpdate = true
   applyCamera()
 
-  return { view, refreshTile, setHover, pick, project, render, pruneSmokers, repaintAll }
+  return { view, refreshTile, setHover, pick, project, render, pruneSmokers, repaintAll, hourText, setTime: (t) => { state.tod = t }, isNight: () => lastNight > 0.5 }
 }

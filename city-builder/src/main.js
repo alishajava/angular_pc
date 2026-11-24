@@ -804,6 +804,10 @@ function drawHud() {
     ctx.fillText(label, x + 20, 28)
     ctx.textBaseline = 'alphabetic'
   }
+  ctx.textAlign = 'right'
+  ctx.font = 'bold 13px sans-serif'
+  ctx.fillStyle = '#d8e8ff'
+  ctx.fillText(`${world.isNight() ? '🌙' : '☀️'} ${world.hourText()}`, VIEW_W - 152, 32)
   btn(VIEW_W - 138, '⏸', 0, 'pause')
   btn(VIEW_W - 94, '▶', 1, 'speed')
   btn(VIEW_W - 50, '⏩', 3, 'speed')
@@ -1146,7 +1150,7 @@ function render() {
     return
   }
   ui.hits = []
-  world.render(nowS(), frameDt)
+  world.render(nowS(), frameDt, state.paused ? 0 : state.speed)
   drawHoverPreview()
   drawWarnings()
   drawParts(frameDt)
