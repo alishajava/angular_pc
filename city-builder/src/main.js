@@ -52,12 +52,16 @@ const tiles = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, ()
 
 const CENTER_ROW = 17
 const CENTER_COL = 25
-tiles[CENTER_ROW][CENTER_COL] = { type: 'cityhall', level: 0 }
-for (let c = CENTER_COL - 3; c <= CENTER_COL + 3; c++) tiles[CENTER_ROW + 1][c] = { type: 'road', level: 0 }
+function resetTiles() {
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) tiles[r][c] = makeTile()
+  tiles[CENTER_ROW][CENTER_COL] = { type: 'cityhall', level: 0 }
+  for (let c = CENTER_COL - 3; c <= CENTER_COL + 3; c++) tiles[CENTER_ROW + 1][c] = { type: 'road', level: 0 }
+}
+resetTiles()
 
 const state = {
   phase: 'title', // title -> intro -> play
-  tool: 'road',
+  tool: 'road', // null이면 선택 없음 (Esc로 취소)
   treasury: 1000,
   month: 0,
   population: 0,
@@ -206,7 +210,7 @@ function tick() {
 
 // ---------- Placement ----------
 function place(row, col, toolId) {
-  if (!inBounds(row, col)) return
+  if (!toolId || !inBounds(row, col)) return
   const t = tiles[row][col]
   if (t.type === 'cityhall') {
     say('시청은 철거할 수 없어요.')
@@ -266,6 +270,13 @@ window.addEventListener('keydown', (e) => {
 
   if (state.phase === 'title') {
     if (key === ' ' || key === 'enter') {
+      if (hasSave() && loadGame()) startPlay()
+      else {
+        state.phase = 'intro'
+        sfx.click()
+      }
+    }
+    if (key === 'n' && hasSave()) {
       state.phase = 'intro'
       sfx.click()
     }
@@ -279,6 +290,15 @@ window.addEventListener('keydown', (e) => {
     return
   }
 
+  if (key === 'escape') {
+    if (ui.menuOpen) ui.menuOpen = false
+    else if (state.tool) {
+      state.tool = null
+      say('선택을 취소했어요 (숫자 1~5로 다시 고르기)')
+    }
+    sfx.click()
+    return
+  }
   const toolByKey = TOOLS.find((t) => t.key === key)
   if (toolByKey) {
     state.tool = toolByKey.id
@@ -334,8 +354,16 @@ function handlePointerDown(e) {
   const { x, y } = eventPos(e)
   unlockSfx()
   if (state.phase === 'title') {
-    state.phase = 'intro'
-    sfx.click()
+    for (let i = ui.hits.length - 1; i >= 0; i--) {
+      if (inRect(x, y, ui.hits[i])) {
+        ui.hits[i].fn()
+        return
+      }
+    }
+    if (!hasSave()) {
+      state.phase = 'intro'
+      sfx.click()
+    }
     return
   }
   if (state.phase === 'intro') {
@@ -355,6 +383,10 @@ function handlePointerDown(e) {
       ui.hits[i].fn()
       return
     }
+  }
+  if (ui.menuOpen) {
+    ui.menuOpen = false
+    return
   }
   if (y >= VIEW_H) return
   if (overMinimap(x, y)) {
@@ -398,7 +430,15 @@ function handlePointerMove(e) {
   }
 }
 
-function handlePointerUp() {
+function handlePointerUp(e) {
+  if (ui.pan && ui.pan.kind === 'rotate' && e && e.button === 2) {
+    const p = eventPos(e)
+    // 우클릭을 끌지 않고 짧게 누르면 선택한 도구를 취소한다
+    if (Math.hypot(p.x - ui.pan.x, p.y - ui.pan.y) < 5 && state.tool) {
+      state.tool = null
+      say('선택을 취소했어요 (숫자 1~5로 다시 고르기)')
+    }
+  }
   state.painting = false
   ui.pan = null
   ui.mmDrag = false
@@ -699,6 +739,29 @@ function drawHoverPreview() {
   }
   const { row, col } = state.hover
   const tile = tiles[row][col]
+  if (!state.tool) {
+    // 선택한 도구가 없으면 칸 정보만 보여 준다
+    world.setHover(row, col, 0xffffff, 0)
+    const names = { empty: '빈 땅', road: '도로', cityhall: '시청', res: '집', com: '가게', ind: '공장' }
+    const zone = tile.type === 'res' || tile.type === 'com' || tile.type === 'ind'
+    const info = names[tile.type] + (zone ? ` Lv.${tile.level}${hasRoadAdjacent(row, col) ? '' : ' · 도로 필요'}` : '')
+    const sp0 = world.project(col + 0.5, 0.9, row + 0.5)
+    if (!sp0.visible) return
+    ctx.font = 'bold 11px sans-serif'
+    const w0 = ctx.measureText(info).width + 14
+    const lx0 = clamp(sp0.x + 18, 4, VIEW_W - w0 - 4)
+    const ly0 = clamp(sp0.y - 12, HUD_H + 4, VIEW_H - 28)
+    ctx.fillStyle = 'rgba(10,14,10,0.82)'
+    ctx.beginPath()
+    ctx.roundRect(lx0, ly0, w0, 20, 10)
+    ctx.fill()
+    ctx.fillStyle = '#d8e8d0'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(info, lx0 + 7, ly0 + 10.5)
+    ctx.textBaseline = 'alphabetic'
+    return
+  }
   const tool = TOOLS.find((t) => t.id === state.tool)
   const bulldoze = state.tool === 'bulldoze'
   const blocked = bulldoze ? tile.type === 'empty' || tile.type === 'cityhall' : tile.type !== 'empty'
@@ -1003,7 +1066,7 @@ function drawToolbar() {
     ui.hits.push({ x, y, w: btnW, h, fn: () => { state.tool = t.id; sfx.click() } })
   })
   // 설명 말풍선 (마우스를 올렸거나 선택된 도구)
-  const tip = hoverTool || TOOLS.find((t) => t.id === state.tool)
+  const tip = hoverTool || TOOLS.find((t) => t.id === state.tool) || { desc: '도구를 골라 보세요 (숫자 1~5) · Esc 또는 우클릭으로 선택 취소' }
   ctx.font = '12px sans-serif'
   const w = ctx.measureText(tip.desc).width + 28
   const bx = VIEW_W / 2 - w / 2
@@ -1104,11 +1167,41 @@ function drawTitle() {
   ctx.font = '15px sans-serif'
   ctx.fillStyle = '#cfd8ff'
   ctx.fillText('도로를 깔고 집을 지으면 도시가 저절로 자라요', W / 2, 182)
-  ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
-  ctx.font = 'bold 16px sans-serif'
-  ctx.fillStyle = '#fff'
-  ctx.fillText('클릭 또는 스페이스를 눌러 시작', W / 2, 228)
-  ctx.globalAlpha = 1
+  const sv = readSave()
+  if (sv) {
+    ctx.fillStyle = 'rgba(8,10,30,0.6)'
+    ctx.beginPath()
+    ctx.roundRect(W / 2 - 190, 218, 380, 176, 18)
+    ctx.fill()
+    const btn = (y, label, sub, primary, fn) => {
+      const bw = 340
+      const bx = W / 2 - bw / 2
+      const hover = ui.mouse.x >= bx && ui.mouse.x <= bx + bw && ui.mouse.y >= y && ui.mouse.y <= y + 52
+      ctx.fillStyle = primary ? (hover ? '#ffd24a' : '#f0b92e') : hover ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.16)'
+      ctx.beginPath()
+      ctx.roundRect(bx, y, bw, 52, 14)
+      ctx.fill()
+      ctx.fillStyle = primary ? '#3a2a08' : '#fff'
+      ctx.font = 'bold 17px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText(label, W / 2, y + 22)
+      ctx.font = '12px sans-serif'
+      ctx.fillStyle = primary ? '#6a4c10' : '#c8d0e8'
+      ctx.fillText(sub, W / 2, y + 40)
+      ui.hits.push({ x: bx, y, w: bw, h: 52, fn })
+    }
+    btn(232, '▶ 이어하기', `${sv.month}개월차 · 인구 ${sv.population || 0}명 · 🪙 ${sv.treasury}`, true, () => { if (loadGame()) startPlay() })
+    btn(294, '✨ 새로 시작', '처음부터 새 도시를 만들어요', false, () => { state.phase = 'intro'; sfx.click() })
+    ctx.font = '12px sans-serif'
+    ctx.fillStyle = '#aab4d8'
+    ctx.fillText('스페이스: 이어하기 · N: 새로 시작', W / 2, 372)
+  } else {
+    ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
+    ctx.font = 'bold 16px sans-serif'
+    ctx.fillStyle = '#fff'
+    ctx.fillText('클릭 또는 스페이스를 눌러 시작', W / 2, 228)
+    ctx.globalAlpha = 1
+  }
 }
 
 function drawIntro() {
@@ -1131,7 +1224,8 @@ function drawIntro() {
     '화면 위쪽 💡 도우미가 다음에 할 일을 알려 줘요.',
     '',
     '조작: 클릭/드래그로 짓기 · 숫자 1-5 또는 아래 버튼으로 도구 선택',
-    '화면 이동: 방향키/WASD, 마우스 우클릭 드래그, 오른쪽 아래 미니맵 클릭 · 스페이스 일시정지 · 위쪽 ▶/⏩로 속도 조절',
+    '화면: WASD/방향키 이동 · Q/E나 우클릭 드래그로 회전 · 휠 확대/축소 · 미니맵 클릭으로 이동',
+    'Esc(또는 우클릭 짧게)로 선택한 도구 취소 · 스페이스 일시정지 · 💾 메뉴에서 저장/불러오기 (자동 저장도 돼요)',
   ]
   lines.forEach((line, i) => ctx.fillText(line, canvas.width / 2, 108 + i * 28))
   ctx.fillStyle = '#ffe066'
@@ -1142,6 +1236,7 @@ function drawIntro() {
 function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height)
   if (state.phase === 'title') {
+    ui.hits = []
     drawTitle()
     return
   }
@@ -1155,6 +1250,7 @@ function render() {
   drawWarnings()
   drawParts(frameDt)
   drawHud()
+  drawMenu()
   drawFloaters(frameDt)
   drawMinimap()
   drawToolbar()
@@ -1166,6 +1262,163 @@ const world = createWorld3D({ canvas: worldCanvas, tiles, COLS, ROWS, TILE, VIEW
 world.view.cx = CENTER_COL + 0.5
 world.view.cz = CENTER_ROW + 1.2
 setInterval(() => world.pruneSmokers(), 4000)
+
+// ---------- 저장 / 불러오기 ----------
+const SAVE_KEY = 'citybuilder-save-v1'
+const T2C = { empty: 'e', road: 'r', cityhall: 'h', res: 'R', com: 'C', ind: 'I' }
+const C2T = Object.fromEntries(Object.entries(T2C).map(([k, v]) => [v, k]))
+function readSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+function hasSave() {
+  return !!readSave()
+}
+function saveGame(manual = false) {
+  const v = world.view
+  const data = {
+    v: 1,
+    tiles: tiles.map((row) => row.map((t) => (T2C[t.type] || 'e') + t.level).join('')).join('|'),
+    treasury: state.treasury,
+    month: state.month,
+    population: state.population,
+    speed: state.speed,
+    milestones: [...state.milestonesHit],
+    view: { cx: v.cx, cz: v.cz, yaw: v.yaw, pitch: v.pitch, dist: v.dist },
+    tod: world.getTime(),
+    savedAt: Date.now(),
+  }
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data))
+    ui.lastSave = data.savedAt
+    if (manual) {
+      say('💾 저장했어요')
+      sfx.pickup()
+    }
+    return true
+  } catch {
+    if (manual) say('저장하지 못했어요 (브라우저 저장 공간을 쓸 수 없어요)')
+    return false
+  }
+}
+function loadGame() {
+  const d = readSave()
+  if (!d || typeof d.tiles !== 'string') return false
+  const rows = d.tiles.split('|')
+  if (rows.length !== ROWS || rows.some((r) => r.length !== COLS * 2)) return false
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const type = C2T[rows[r][c * 2]] || 'empty'
+      const level = Math.max(0, Math.min(MAX_LEVEL, Number(rows[r][c * 2 + 1]) || 0))
+      tiles[r][c] = { type, level }
+    }
+  }
+  state.treasury = Number.isFinite(d.treasury) ? d.treasury : 1000
+  state.month = d.month || 0
+  state.population = d.population || 0
+  state.speed = [1, 3].includes(d.speed) ? d.speed : 1
+  state.paused = false
+  state.milestonesHit = new Set(d.milestones || [])
+  state.tip = ''
+  world.rebuildAll()
+  if (d.view) Object.assign(world.view, d.view)
+  if (typeof d.tod === 'number') world.setTime(d.tod)
+  ui.lastSave = d.savedAt
+  return true
+}
+function newGame() {
+  resetTiles()
+  state.treasury = 1000
+  state.month = 0
+  state.population = 0
+  state.speed = 1
+  state.paused = false
+  state.milestonesHit = new Set()
+  state.tip = ''
+  state.tool = 'road'
+  world.rebuildAll()
+  Object.assign(world.view, { cx: CENTER_COL + 0.5, cz: CENTER_ROW + 1.2, yaw: 0.65, pitch: 0.95, dist: 22 })
+  world.setTime(0.33)
+}
+function startPlay() {
+  state.phase = 'play'
+  sfx.start()
+  say('도시를 불러왔어요')
+}
+setInterval(() => {
+  if (state.phase === 'play') saveGame(false)
+}, 15000)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state.phase === 'play') saveGame(false)
+})
+window.addEventListener('beforeunload', () => {
+  if (state.phase === 'play') saveGame(false)
+})
+
+// 메뉴 (💾 버튼) — 저장하기 / 불러오기 / 새로 시작
+function drawMenu() {
+  const bx = VIEW_W - 100
+  const by = HUD_H + 8
+  uiButton(bx, by, 92, 28, () => { ui.menuOpen = !ui.menuOpen; sfx.click() }, ui.menuOpen)
+  ctx.fillStyle = ui.menuOpen ? '#3a2a08' : '#fff'
+  ctx.font = 'bold 12px sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText('💾 메뉴', bx + 46, by + 15)
+  ctx.textBaseline = 'alphabetic'
+  if (!ui.menuOpen) return
+  const px = VIEW_W - 214
+  const py = by + 36
+  ctx.fillStyle = 'rgba(16,22,14,0.95)'
+  ctx.beginPath()
+  ctx.roundRect(px, py, 206, 172, 12)
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255,224,150,0.5)'
+  ctx.lineWidth = 1.5
+  ctx.stroke()
+  ui.hits.push({ x: px, y: py, w: 206, h: 172, fn: () => {} }) // 패널 안 클릭은 닫히지 않게
+  const save = readSave()
+  const rows = [
+    ['💾 저장하기', true, () => saveGame(true)],
+    ['📂 불러오기' + (save ? '' : ' (저장 없음)'), !!save, () => {
+      if (loadGame()) say('📂 불러왔어요')
+      else say('불러올 저장이 없어요')
+      ui.menuOpen = false
+    }],
+    [ui.confirmNew && nowS() - ui.confirmNew < 3 ? '⚠ 정말요? 한 번 더!' : '🆕 새로 시작', true, () => {
+      if (ui.confirmNew && nowS() - ui.confirmNew < 3) {
+        newGame()
+        say('새 도시를 시작했어요')
+        ui.confirmNew = 0
+        ui.menuOpen = false
+      } else ui.confirmNew = nowS()
+    }],
+  ]
+  rows.forEach(([label, enabled, fn], i) => {
+    const y = py + 10 + i * 44
+    const hover = enabled && ui.mouse.x >= px + 10 && ui.mouse.x <= px + 196 && ui.mouse.y >= y && ui.mouse.y <= y + 38
+    ctx.fillStyle = !enabled ? 'rgba(255,255,255,0.06)' : hover ? 'rgba(255,224,102,0.35)' : 'rgba(255,255,255,0.12)'
+    ctx.beginPath()
+    ctx.roundRect(px + 10, y, 186, 38, 9)
+    ctx.fill()
+    ctx.fillStyle = enabled ? '#fff' : '#8a8f84'
+    ctx.font = 'bold 13px sans-serif'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(label, px + 22, y + 20)
+    ctx.textBaseline = 'alphabetic'
+    if (enabled) ui.hits.push({ x: px + 10, y, w: 186, h: 38, fn: () => { fn(); sfx.click() } })
+  })
+  ctx.fillStyle = '#b8b098'
+  ctx.font = '11px sans-serif'
+  ctx.textAlign = 'center'
+  const t = ui.lastSave ? new Date(ui.lastSave) : null
+  ctx.fillText(t ? `마지막 저장 ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')} · 15초마다 자동 저장` : '15초마다 자동 저장돼요', px + 103, py + 156)
+}
 
 // ---------- Loop ----------
 let lastTime = performance.now()

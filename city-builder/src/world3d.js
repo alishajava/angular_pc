@@ -551,13 +551,33 @@ export function createWorld3D({ canvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H,
   // 파괴된 건물의 연기 목록 정리
   function pruneSmokers() { for (let i = smokers.length - 1; i >= 0; i--) if (!smokers[i].group.parent) smokers.splice(i, 1) }
 
-  repaintAll()
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-    const t = tiles[r][c]
-    if (t.level > 0 || treeAt[key(r, c)] !== undefined) refreshTile(r, c)
+  // 저장 불러오기/새로 시작: 타일 상태 전체를 3D에 다시 반영
+  function rebuildAll() {
+    for (const m of meshes.values()) scene.remove(m.group)
+    meshes.clear()
+    smokers.length = 0
+    cars.length = 0
+    treeSlots.forEach((_, i) => placeTree(i, true))
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      const t = tiles[r][c]
+      const k = key(r, c)
+      const ti = treeAt[k]
+      if (ti !== undefined && t.type !== 'empty') placeTree(ti, false)
+      if ((t.type === 'res' || t.type === 'com' || t.type === 'ind') && t.level > 0) {
+        const group = buildBuilding(t, r, c)
+        scene.add(group)
+        meshes.set(k, { group, born: 0 })
+      }
+    }
+    trunkMesh.instanceMatrix.needsUpdate = true
+    leafMesh.instanceMatrix.needsUpdate = true
+    if (leafMesh.instanceColor) leafMesh.instanceColor.needsUpdate = true
+    repaintAll()
+    lampsDirty = true
   }
+  rebuildAll()
   trunkMesh.instanceMatrix.needsUpdate = true; leafMesh.instanceMatrix.needsUpdate = true
   applyCamera()
 
-  return { view, refreshTile, setHover, pick, project, render, pruneSmokers, repaintAll, hourText, setTime: (t) => { state.tod = t }, isNight: () => lastNight > 0.5 }
+  return { view, refreshTile, setHover, pick, project, render, pruneSmokers, repaintAll, rebuildAll, getTime: () => state.tod, hourText, setTime: (t) => { state.tod = t }, isNight: () => lastNight > 0.5 }
 }
