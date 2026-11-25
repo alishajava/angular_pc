@@ -1,1082 +1,1133 @@
 import { sfx, unlockSfx, toggleMute } from './sfx.js'
+import { drawPerson } from './people.js'
+import { TILE, COLS, ROWS, W, H, MAPS } from './maps.js'
+import { LOOKS, buildGround, drawProp } from './draw.js'
+import * as C from './career.js'
 
-const app = document.getElementById('app')
+const { clamp, rand, pick, fmt, RANKS, STAT_KEYS, STAT_LABELS, STAT_COLORS, ARCHETYPES } = C
 
-const TOTAL_TURNS = 32 // 8 years x 4 quarters
-const QUARTER_NAMES = ['1분기', '2분기', '3분기', '4분기']
+// ====================================================================== 상수 ==
+const SLOT_NAMES = ['오전', '점심', '오후', '저녁', '밤']
+const SLOT_TIMES = ['09:00', '12:00', '14:00', '18:00', '21:00', '24:00']
+const SAVE_KEY = 'jobsim-topview-save-v1'
+const PLAYER_SPEED = 118
+const PLAYER_HALF = 9
 
-const HAIR_COLORS = [
-  { key: 'black', label: '검정', hex: '#2b2320' },
-  { key: 'brown', label: '밤색', hex: '#6b4226' },
-  { key: 'gray', label: '반백', hex: '#8a8a8a' },
-]
+const canvas = document.getElementById('game')
+canvas.width = W
+canvas.height = H
+const ctx = canvas.getContext('2d')
+const overlay = document.getElementById('overlay')
 
-// Ranks are earned through the yearly review (not handed out by the calendar).
-const RANKS = [
-  { key: 'junior', label: '신입사원', living: 600, minYears: 2 },
-  { key: 'staff', label: '대리', living: 720, minYears: 2 },
-  { key: 'manager', label: '과장', living: 860, minYears: 2 },
-  { key: 'director', label: '부장', living: 1000, minYears: 99 },
-]
-const fmt = (n) => `${Math.round(n).toLocaleString('ko-KR')}만`
-const round10 = (n) => Math.round(n / 10) * 10
-
-function moodForStress(stress) {
-  if (stress >= 85) return { key: 'sick', label: '탈진 직전' }
-  if (stress >= 60) return { key: 'tired', label: '피곤함' }
-  if (stress <= 25) return { key: 'bright', label: '활기찬' }
-  return { key: 'normal', label: '평온함' }
+// ====================================================================== 상태 ==
+let S = null
+function newState(name, hairKey) {
+  const s = C.freshCareerState()
+  s.name = name || '민준'
+  const h = C.HAIR_COLORS.find((x) => x.key === hairKey) || C.HAIR_COLORS[0]
+  s.hairKey = h.key
+  s.hairHex = h.hex
+  s.mapKey = 'home'
+  s.day = null
+  return s
 }
+const player = { x: 0, y: 0, facing: 'down', moving: false, walk: 0 }
+let elapsed = 0
+let runtimeNpcs = []
+let groundCache = {}
+let ui = { menu: null, hits: [], prompt: null, hint: 1 }
+let lockInput = false // 모달이 열려 있을 때
 
-const clamp = (v, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, v))
-const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
-const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
-
-// --- Activities -----------------------------------------------------------
-const STAT_KEYS = ['work', 'stamina', 'network', 'expertise', 'trust']
-const STAT_LABELS = { work: '업무력', stamina: '체력', network: '인맥', expertise: '전문성', trust: '신뢰' }
-const STAT_COLORS = { work: '#3f6fd1', stamina: '#e0633f', network: '#e06ba6', expertise: '#8f6bd6', trust: '#4fae7a' }
-
-const ACTIVITIES = [
-  {
-    key: 'overtime',
-    name: '야근하기',
-    desc: '밤늦게까지 업무를 처리한다 · 업무력 + / 수당',
-    run(s) {
-      s.stats.work = clamp(s.stats.work + rand(12, 18))
-      s.money += rand(30, 60)
-      s.stress = clamp(s.stress + rand(10, 15))
-      return `${s.name}은(는) 밤늦게까지 야근하며 업무를 처리했다.`
-    },
-  },
-  {
-    key: 'study',
-    name: '자기계발',
-    desc: '퇴근 후 강의를 듣는다 · 전문성 +',
-    run(s) {
-      s.stats.expertise = clamp(s.stats.expertise + rand(12, 18))
-      s.stress = clamp(s.stress + rand(8, 12))
-      return `${s.name}은(는) 퇴근 후 자기계발 강의를 들으며 실력을 쌓았다.`
-    },
-  },
-  {
-    key: 'dinner',
-    name: '회식 참여',
-    desc: '팀 회식에 참석한다 · 인맥 + / 체력 -',
-    run(s) {
-      s.stats.network = clamp(s.stats.network + rand(12, 18))
-      s.stats.stamina = clamp(s.stats.stamina - rand(4, 8))
-      s.stress = clamp(s.stress - rand(2, 6))
-      return `${s.name}은(는) 팀 회식에서 동료들과 친해졌다.`
-    },
-  },
-  {
-    key: 'volunteer',
-    name: '봉사·사내동아리',
-    desc: '사내 동아리 활동을 한다 · 신뢰 +',
-    run(s) {
-      s.stats.trust = clamp(s.stats.trust + rand(12, 18))
-      s.stress = clamp(s.stress - rand(4, 8))
-      return `${s.name}은(는) 사내 동아리 활동과 봉사로 주변의 신뢰를 쌓았다.`
-    },
-  },
-  {
-    key: 'sidejob',
-    name: '부업·투잡',
-    desc: '퇴근 후 부업을 한다 · 돈 + (120~180만)',
-    run(s) {
-      s.money += rand(120, 180)
-      s.stats.stamina = clamp(s.stats.stamina - rand(8, 12))
-      s.stress = clamp(s.stress + rand(10, 15))
-      return `${s.name}은(는) 퇴근 후 부업으로 짬짬이 돈을 벌었다.`
-    },
-  },
-  {
-    key: 'jobhunt',
-    name: '이직 준비',
-    desc: '이력서를 쓰고 면접을 본다 · 이직 제안 받기 · 전문성 + / 스트레스 +',
-    run(s) {
-      s.stats.expertise = clamp(s.stats.expertise + rand(2, 5))
-      s.stress = clamp(s.stress + rand(6, 10))
-      const p = 0.25 + (s.stats.expertise + s.stats.network) / 300
-      let n = 0
-      for (let i = 0; i < 3; i++) if (Math.random() < p) n++
-      s.offers = generateOffers(n)
-      return s.offers.length
-        ? `${s.name}은(는) 이력서를 돌리고 면접을 봤다. ${s.offers.length}곳에서 제안이 왔다!`
-        : `${s.name}은(는) 이력서를 돌리고 면접을 봤지만, 아직 마음에 드는 제안은 오지 않았다.`
-    },
-  },
-  {
-    key: 'rest',
-    name: '휴식',
-    desc: '집에서 푹 쉰다 · 체력 + / 스트레스 - -',
-    run(s) {
-      s.stress = clamp(s.stress - rand(20, 28))
-      s.stats.stamina = clamp(s.stats.stamina + rand(10, 15))
-      return `${s.name}은(는) 집에서 푹 쉬며 재충전했다.`
-    },
-  },
-  {
-    key: 'travel',
-    name: '여행',
-    desc: '휴가를 내고 떠난다 · 비용 250만 · 랜덤 대폭 성장',
-    cost: 250,
-    run(s) {
-      s.money -= 250
-      const picks = []
-      while (picks.length < 2) {
-        const k = pick(STAT_KEYS)
-        if (!picks.includes(k)) picks.push(k)
-      }
-      for (const k of picks) s.stats[k] = clamp(s.stats[k] + rand(8, 14))
-      s.stress = clamp(s.stress - rand(15, 22))
-      return `${s.name}은(는) 휴가를 내고 여행을 떠나 재충전하고 돌아왔다. (${picks.map((k) => STAT_LABELS[k]).join(', ')} 상승)`
-    },
-  },
-]
-
-// --- Random events ----------------------------------------------------------
-const EVENTS = [
-  { text: '상사에게 업무 성과로 칭찬을 받았다.', run: (s) => { s.stats.trust = clamp(s.stats.trust + 5); s.stress = clamp(s.stress - 4) } },
-  { text: '동료와 업무 방식으로 사소한 갈등이 있었다.', run: (s) => { s.stress = clamp(s.stress + 8); s.stats.network = clamp(s.stats.network - 2) } },
-  { text: '사내 이벤트 추첨에서 소소한 상금을 받았다.', run: (s) => { s.money += 60 } },
-  {
-    text: '지하철에서 지갑을 소매치기당했다.',
-    condition: (s) => s.money >= 70,
-    run: (s) => { s.money = Math.max(0, s.money - 70) },
-  },
-  { text: '중요한 프로젝트에 발탁되었다.', run: (s) => { s.stats.work = clamp(s.stats.work + 6); s.stress = clamp(s.stress + 5) } },
-  { text: '야근 중 실수를 저질러 질책을 받았다.', run: (s) => { s.stress = clamp(s.stress + 10); s.stats.trust = clamp(s.stats.trust - 3) } },
-  { text: '자기계발 강의에서 큰 깨달음을 얻었다.', run: (s) => { s.stats.expertise = clamp(s.stats.expertise + 6) } },
-  { text: '동료의 추천으로 사내 동아리에 가입했다.', run: (s) => { s.stats.network = clamp(s.stats.network + 4); s.stats.trust = clamp(s.stats.trust + 2) } },
-  { text: '과로로 몸이 으슬으슬했다.', run: (s) => { s.stress = clamp(s.stress + 12) } },
-  { text: '소액으로 투자해 짭짤한 수익을 얻었다.', run: (s) => { s.money += 50 } },
-  { text: '동기와 점심을 먹으며 수다로 힐링했다.', run: (s) => { s.stress = clamp(s.stress - 8); s.stats.network = clamp(s.stats.network + 2) } },
-  { text: '건강검진에서 체력 관리에 주의하라는 소견을 들었다.', run: (s) => { s.stats.stamina = clamp(s.stats.stamina - 5); s.stress = clamp(s.stress + 5) } },
-  { text: '사내 체육대회에서 활약했다.', run: (s) => { s.stats.stamina = clamp(s.stats.stamina + 5); s.stats.network = clamp(s.stats.network + 4) } },
-  { text: '야근 수당을 넉넉히 받았다.', run: (s) => { s.money += 50 } },
-  { text: '중요한 문서에 커피를 쏟아 당황했다.', run: (s) => { s.stress = clamp(s.stress + 10) } },
-  { text: '멘토에게 값진 조언을 들었다.', run: (s) => { s.stats.expertise = clamp(s.stats.expertise + 4); s.stats.trust = clamp(s.stats.trust + 3) } },
-  { text: '오랜만에 칼퇴근을 해서 기분이 좋았다.', run: (s) => { s.stress = clamp(s.stress - 10) } },
-  {
-    text: '회사 앞에서 사기성 설문조사에 돈을 뜯겼다.',
-    condition: (s) => s.money >= 60,
-    run: (s) => { s.money = Math.max(0, s.money - 60) },
-  },
-]
-
-// --- Career: companies, yearly review, job market -------------------------
-// Each company type bends the game a little: pay, how much stress piles up,
-// how fast you grow, how quickly promotions come and what the review rewards.
-const ARCHETYPES = {
-  mid: { key: 'mid', label: '중견기업', names: ['한결상사', '성진산업', '다온정밀', '우리화학'], pay: 1.0, stress: 0.9, growth: 1.0, raise: 0, promo: 0, w: { work: 0.35, expertise: 0.25, trust: 0.25, network: 0.15 }, note: '무난하고 균형 잡힌 직장' },
-  big: { key: 'big', label: '대기업', names: ['한빛전자', '대한중공업', '미래모빌리티', '동양제과'], pay: 1.08, stress: 1.0, growth: 1.0, raise: 0, promo: 1, w: { work: 0.3, expertise: 0.2, trust: 0.25, network: 0.25 }, note: '연봉이 높지만 승진이 느려요 · 인맥을 중시' },
-  startup: { key: 'startup', label: '스타트업', names: ['노바랩스', '피카테크', '버블웍스', '모두의AI'], pay: 0.92, stress: 1.25, growth: 1.15, raise: 2, promo: -1, stock: true, w: { work: 0.45, expertise: 0.2, trust: 0.2, network: 0.15 }, note: '빠른 성장·빠른 승진·스톡옵션(2년 이상 근속) / 스트레스 ↑' },
-  foreign: { key: 'foreign', label: '외국계', names: ['Globex 코리아', 'Nordic Systems', 'Aurora Korea'], pay: 1.18, stress: 1.1, growth: 1.05, raise: 1, promo: 0, need: (s) => s.stats.expertise >= 45, w: { work: 0.25, expertise: 0.4, trust: 0.2, network: 0.15 }, note: '최고 수준의 연봉 · 전문성을 평가 · 전문성 45 이상 필요' },
-  public: { key: 'public', label: '공공기관', names: ['한국에너지공단', '국가정보진흥원', '지역개발공사'], pay: 0.92, stress: 0.7, growth: 0.95, raise: -1, promo: 1, need: (s) => s.stats.trust >= 45, w: { work: 0.2, expertise: 0.2, trust: 0.4, network: 0.2 }, note: '안정적이고 스트레스가 적어요 · 신뢰 45 이상 필요' },
+function slotNow() {
+  return S && S.day ? S.day.slot : 0
 }
-const GRADE_RAISE = { S: 7, A: 4, B: 2, C: 1, D: 0 }
-const GRADE_BONUS = { S: 0.8, A: 0.5, B: 0.25, C: 0.1, D: 0 }
-const GRADE_TEXT = { S: '탁월', A: '우수', B: '보통', C: '미흡', D: '부진' }
+const isNight = () => slotNow() >= 4
+const isEvening = () => slotNow() === 3
+const workHours = () => slotNow() <= 2
 
-function makeCompany(arch, name) {
-  const a = ARCHETYPES[arch]
-  return { arch, name: name || pick(a.names) }
+// ================================================================== 저장/로드 ==
+function saveGame() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(S))
+  } catch { /* 저장 공간 없음 */ }
 }
-const archOf = (s) => ARCHETYPES[s.company.arch]
-
-function generateOffers(n) {
-  const s = state
-  const pool = Object.values(ARCHETYPES).filter((a) => !a.need || a.need(s))
-  const shuffled = [...pool].sort(() => Math.random() - 0.5)
-  const offers = []
-  for (const a of shuffled) {
-    if (offers.length >= n) break
-    let name = pick(a.names)
-    if (name === s.company.name) name = a.names.find((x) => x !== s.company.name) || name
-    const promoted = s.rankIdx < 3 && Math.random() < 0.2
-    const rankIdx = promoted ? s.rankIdx + 1 : s.rankIdx
-    const mult = Math.min(1.25, a.pay * (0.95 + (s.stats.expertise + s.stats.network) / 1500 + rand(0, 4) / 100) * (promoted ? 1.05 : 1))
-    offers.push({ arch: a.key, name, rankIdx, salary: round10(s.salary * mult), negotiated: false })
-  }
-  return offers
-}
-
-function computeReview() {
-  const s = state
-  const a = archOf(s)
-  const w = a.w
-  let score = s.stats.work * w.work + s.stats.expertise * w.expertise + s.stats.trust * w.trust + s.stats.network * w.network + rand(-6, 6)
-  if (s.stress >= 80) score -= 5
-  score = Math.round(score)
-  const grade = score >= 70 ? 'S' : score >= 56 ? 'A' : score >= 42 ? 'B' : score >= 30 ? 'C' : 'D'
-  const raisePct = Math.max(0, GRADE_RAISE[grade] + a.raise)
-  const before = s.salary
-  s.salary = round10(s.salary * (1 + raisePct / 100))
-  const quarterly = Math.round((s.salary * 0.88) / 4)
-  const bonus = Math.round(quarterly * GRADE_BONUS[grade])
-  s.money += bonus
-  const review = { year: yearAt(s.turn - 1), grade, score, raisePct, before, after: s.salary, bonus, promoted: null }
-  // promotion: enough time in the grade + a good review
-  const needQ = (RANKS[s.rankIdx].minYears + a.promo) * 4
-  if (s.rankIdx < 3 && s.qAtRank >= needQ && (grade === 'S' || grade === 'A' || (grade === 'B' && s.rankIdx === 0))) {
-    review.promoted = { from: RANKS[s.rankIdx].label, to: RANKS[s.rankIdx + 1].label }
-    s.rankIdx += 1
-    s.qAtRank = 0
-    s.salary = round10(s.salary * 1.08)
-    review.after = s.salary
-  }
-  s.history.push({ year: review.year, company: s.company.name, rank: RANKS[s.rankIdx].label, salary: s.salary, grade })
-  return review
-}
-
-function negotiate(i) {
-  const o = state.offers[i]
-  if (!o || o.negotiated) return
-  o.negotiated = true
-  const chance = clamp(0.35 + (state.stats.network + state.stats.expertise) / 400, 0.3, 0.85)
-  const roll = Math.random()
-  if (roll < chance) {
-    const up = round10(o.salary * 1.08)
-    state.negMsg = `협상 성공! ${o.name}이(가) 연봉을 ${fmt(o.salary)} → ${fmt(up)}으로 올려 주었다.`
-    o.salary = up
-    sfx.good()
-  } else if (roll > 0.88) {
-    state.negMsg = `협상이 틀어져 ${o.name}이(가) 제안을 철회했다...`
-    state.offers.splice(i, 1)
-    sfx.bad()
-  } else {
-    state.negMsg = `${o.name}은(는) 조건을 더 올려 줄 수 없다고 했다. 기존 조건은 유효하다.`
-    sfx.click()
-  }
-  render()
-}
-
-function acceptOffer(i) {
-  const o = state.offers[i]
-  if (!o) return
-  const a = ARCHETYPES[o.arch]
-  const prevCompany = state.company.name
-  const prevSalary = state.salary
-  state.company = makeCompany(o.arch, o.name)
-  if (o.rankIdx !== state.rankIdx) state.qAtRank = 0
-  state.rankIdx = o.rankIdx
-  state.salary = o.salary
-  state.tenureQ = 0
-  state.transfers += 1
-  // starting over in a new place: trust has to be earned again
-  state.stats.trust = Math.max(5, Math.round(state.stats.trust * 0.5))
-  state.stress = clamp(state.stress - 5)
-  state.history.push({ year: yearAt(Math.max(0, state.turn - 1)), company: o.name, rank: RANKS[state.rankIdx].label, salary: o.salary, moved: true })
-  state.offers = []
-  state.joinMsg = `${state.name}은(는) ${prevCompany}을(를) 떠나 ${a.label} ${o.name}에 ${RANKS[state.rankIdx].label}(으)로 입사했다.\n연봉 ${fmt(prevSalary)} → ${fmt(o.salary)} (${o.salary >= prevSalary ? '+' : ''}${Math.round(((o.salary - prevSalary) / prevSalary) * 100)}%)\n새 환경에서는 신뢰를 처음부터 다시 쌓아야 한다. (신뢰 -50%)`
-  state.phase = 'joined'
-  sfx.start()
-  render()
-}
-
-// --- Endings ------------------------------------------------------------
-const HIGH = 70
-const VERY_HIGH = 85
-
-function computeEnding(s) {
-  // 마지막 턴에 쉬어서 모면하지 못하도록, 고스트레스 상태가 여러 턴 이어졌다면 번아웃
-  if (s.stress >= 85 || s.burnoutTurns >= 4) {
-    return {
-      title: '번아웃 퇴사 엔딩',
-      text: `${s.name}은(는) 더 이상 버틸 수 없다고 느껴 사직서를 내고 회사를 떠났다.\n오랜만에 연락한 지인에게는 "이제야 숨을 쉴 수 있을 것 같아요"라고 말했다.\n\n조금 더 쉬어가게 했다면 어땠을까, 하는 아쉬움이 오래 남았다.`,
-    }
-  }
-  const { work, stamina, network, expertise, trust } = s.stats
-  // startup stock options pay off (or don't) at the end for those who stayed 2+ years
-  s.stockNote = ''
-  if (archOf(s).stock && s.tenureQ >= 8) {
-    if (Math.random() < 0.3) {
-      s.money += 6000
-      s.stockNote = '\n\n💎 근속한 스타트업이 상장에 성공해 스톡옵션으로 6,000만을 손에 쥐었다!'
-    } else s.stockNote = '\n\n스톡옵션은 끝내 휴지조각이 되었지만, 값진 경험이 남았다.'
-  }
-  const rankIdx = s.rankIdx
-
-  if (s.salary >= 8000) {
-    return {
-      title: '연봉킹 엔딩',
-      text: `꾸준한 성과와 영리한 이직으로 연봉 ${fmt(s.salary)}까지 오른 ${s.name}은(는) 업계에서 손꼽히는 고연봉자가 되었다.${s.stockNote}`,
-    }
-  }
-  if (s.transfers >= 3 && s.salary >= 5800) {
-    return {
-      title: '프로 이직러 엔딩',
-      text: `${s.transfers}번의 이직으로 몸값을 차곡차곡 올린 ${s.name}은(는) 어디서든 러브콜을 받는 프로 이직러가 되었다.${s.stockNote}`,
-    }
-  }
-  if (s.transfers === 0 && rankIdx === 3 && trust >= 60) {
-    return {
-      title: '한 우물 엔딩',
-      text: `한 회사에서 묵묵히 일해 부장까지 오른 ${s.name}은(는) 동료와 후배 모두가 믿고 따르는 회사의 산증인이 되었다.${s.stockNote}`,
-    }
-  }
-  if (work >= HIGH && trust >= HIGH && rankIdx >= 2) {
-    return {
-      title: '임원 엔딩',
-      text: `뛰어난 업무 성과와 두터운 신뢰를 바탕으로, ${s.name}은(는) 마침내 임원으로 승진해 회사의 핵심 의사결정에 참여하게 되었다.${s.stockNote}`,
-    }
-  }
-  if (trust >= HIGH && network >= HIGH) {
-    return {
-      title: '신뢰받는 리더 엔딩',
-      text: `깊은 신뢰와 넓은 인맥을 쌓은 ${s.name}은(는) 팀원들이 가장 따르고 싶어하는 리더로 자리매김했다.`,
-    }
-  }
-  if (s.money >= 10000 && network >= HIGH) {
-    return {
-      title: '창업가 엔딩',
-      text: `차곡차곡 모은 자금과 넓은 인맥을 발판으로, ${s.name}은(는) 회사를 나와 자신만의 사업을 시작했다.`,
-    }
-  }
-  if (stamina >= HIGH && s.stress <= 30) {
-    return {
-      title: '워라밸 고수 엔딩',
-      text: `건강한 체력과 낮은 스트레스를 유지하며, ${s.name}은(는) 일과 삶의 균형을 지킨 워라밸의 달인이 되었다.`,
-    }
-  }
-  if (expertise >= VERY_HIGH) {
-    return {
-      title: '전문가 엔딩',
-      text: `깊고 전문적인 역량을 갈고닦은 ${s.name}은(는) 업계에서 손꼽히는 전문가로 이름을 떨쳤다.`,
-    }
-  }
-
-  return {
-    title: '평범한 직장인 엔딩',
-    text: `${s.name}은(는) 특별히 두각을 드러내지는 않았지만, 동료들과 어울려 소박하고 성실한 직장 생활을 이어갔다.\n때때로 지난 8년을 돌아보며, 평범함 속의 보람에 미소 짓곤 했다.`,
+function readSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    const d = raw ? JSON.parse(raw) : null
+    return d && d.stats && d.turn !== undefined ? d : null
+  } catch {
+    return null
   }
 }
-
-// --- Portrait drawing (canvas, procedural - no external art assets) -------
-// Detailed face painter shared by every portrait stage: layered eyes (white,
-// iris, pupil, two highlights, lash line), shaped brows, nose, cheeks and a
-// mouth with lips - all driven by the mood so the expression changes with
-// stress. Drawn after the hair/head so it always sits on top.
-function drawFaceDetail(ctx, cx, headY, headR, moodKey, { eyeHex = '#4a332b', lashes = false, eyeScale = 1, browHex = '#3a2a22', skinHex = '#ffd9b8', lines = 0 } = {}) {
-  const eyeY = headY + headR * 0.08
-  const eyeDX = headR * 0.38
-  const sleepy = moodKey === 'tired' || moodKey === 'sick'
-  const R = headR
-
-  // cheeks
-  ctx.fillStyle = moodKey === 'sick' ? 'rgba(224,99,63,0.45)' : 'rgba(255,130,130,0.32)'
-  for (const sx of [-1, 1]) {
-    ctx.beginPath()
-    ctx.ellipse(cx + sx * R * 0.58, headY + R * 0.36, R * 0.15, R * 0.09, 0, 0, Math.PI * 2)
-    ctx.fill()
-  }
-
-  for (const sx of [-1, 1]) {
-    const ex = cx + sx * eyeDX
-    const rx = R * 0.16 * eyeScale
-    const ry = (sleepy ? R * 0.1 : R * 0.17) * eyeScale
-
-    ctx.beginPath()
-    ctx.ellipse(ex, eyeY, rx, ry, 0, 0, Math.PI * 2)
-    ctx.fillStyle = '#ffffff'
-    ctx.fill()
-
-    ctx.save()
-    ctx.beginPath()
-    ctx.ellipse(ex, eyeY, rx, ry, 0, 0, Math.PI * 2)
-    ctx.clip()
-    const ir = R * 0.115 * eyeScale
-    const iy = eyeY + (sleepy ? ry * 0.1 : ry * 0.08)
-    const grad = ctx.createRadialGradient(ex, iy - ir * 0.3, ir * 0.15, ex, iy, ir)
-    grad.addColorStop(0, '#a8805f')
-    grad.addColorStop(0.45, eyeHex)
-    grad.addColorStop(1, '#1d1210')
-    ctx.fillStyle = eyeHex
-    ctx.beginPath()
-    ctx.arc(ex, iy, ir, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = grad
-    ctx.globalAlpha = 0.85
-    ctx.fill()
-    ctx.globalAlpha = 1
-    ctx.fillStyle = '#120a08'
-    ctx.beginPath()
-    ctx.arc(ex, iy, ir * 0.5, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = '#ffffff'
-    ctx.beginPath()
-    ctx.arc(ex + ir * 0.38, iy - ir * 0.4, ir * 0.3, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.beginPath()
-    ctx.arc(ex - ir * 0.35, iy + ir * 0.4, ir * 0.15, 0, Math.PI * 2)
-    ctx.fill()
-    if (sleepy) {
-      // heavy lid drawn over the upper half of the eye
-      ctx.fillStyle = skinHex
-      ctx.fillRect(ex - rx - 1, eyeY - ry - 1, rx * 2 + 2, ry * 1.05)
-    }
-    ctx.restore()
-
-    // upper lash line (+ outer flicks)
-    ctx.strokeStyle = '#2a1c18'
-    ctx.lineWidth = Math.max(1.6, R * 0.05)
-    ctx.beginPath()
-    if (sleepy) {
-      ctx.moveTo(ex - rx, eyeY - ry * 0.1)
-      ctx.quadraticCurveTo(ex, eyeY + ry * 0.05, ex + rx, eyeY - ry * 0.1)
-    } else {
-      ctx.ellipse(ex, eyeY, rx, ry, 0, Math.PI * 1.07, Math.PI * 1.93)
-    }
-    ctx.stroke()
-    if (lashes && !sleepy) {
-      ctx.lineWidth = Math.max(1.2, R * 0.035)
-      for (const k of [0, 1, 2]) {
-        ctx.beginPath()
-        ctx.moveTo(ex + sx * rx * 0.9, eyeY - ry * (0.5 - k * 0.3))
-        ctx.lineTo(ex + sx * (rx + R * 0.09), eyeY - ry * (0.85 - k * 0.3))
-        ctx.stroke()
-      }
-    }
-    if (moodKey === 'tired' || moodKey === 'sick') {
-      ctx.strokeStyle = 'rgba(120,80,110,0.45)'
-      ctx.lineWidth = Math.max(1.2, R * 0.04)
-      ctx.beginPath()
-      ctx.arc(ex, eyeY + ry * 0.3, rx * 0.95, Math.PI * 0.15, Math.PI * 0.85)
-      ctx.stroke()
-    }
-
-    // brow
-    const by = eyeY - ry - R * (moodKey === 'bright' ? 0.2 : 0.14)
-    let tiltIn = 0
-    let tiltOut = 0
-    if (moodKey === 'sick') { tiltIn = -R * 0.1; tiltOut = R * 0.04 }
-    else if (moodKey === 'tired') { tiltIn = R * 0.02; tiltOut = R * 0.05 }
-    else if (moodKey === 'bright') { tiltIn = 0; tiltOut = -R * 0.02 }
-    ctx.strokeStyle = browHex
-    ctx.lineWidth = Math.max(2, R * 0.07)
-    ctx.lineCap = 'round'
-    ctx.beginPath()
-    ctx.moveTo(ex - sx * rx * 1.05, by + tiltIn)
-    ctx.quadraticCurveTo(ex + sx * rx * 0.1, by - R * 0.07 + (tiltIn + tiltOut) / 2, ex + sx * rx * 1.15, by + tiltOut)
-    ctx.stroke()
-    ctx.lineCap = 'butt'
-  }
-
-  // nose
-  ctx.strokeStyle = 'rgba(150,90,70,0.65)'
-  ctx.lineWidth = Math.max(1.4, R * 0.04)
-  ctx.beginPath()
-  ctx.moveTo(cx - R * 0.02, headY + R * 0.14)
-  ctx.quadraticCurveTo(cx - R * 0.09, headY + R * 0.33, cx + R * 0.02, headY + R * 0.34)
-  ctx.stroke()
-
-  // mouth
-  const my = headY + R * 0.56
-  ctx.lineCap = 'round'
-  if (moodKey === 'bright') {
-    ctx.beginPath()
-    ctx.moveTo(cx - R * 0.24, my - R * 0.04)
-    ctx.quadraticCurveTo(cx, my + R * 0.3, cx + R * 0.24, my - R * 0.04)
-    ctx.quadraticCurveTo(cx, my + R * 0.02, cx - R * 0.24, my - R * 0.04)
-    ctx.fillStyle = '#9c3f46'
-    ctx.fill()
-    ctx.fillStyle = '#ffffff'
-    ctx.beginPath()
-    ctx.moveTo(cx - R * 0.2, my - R * 0.03)
-    ctx.quadraticCurveTo(cx, my + R * 0.04, cx + R * 0.2, my - R * 0.03)
-    ctx.quadraticCurveTo(cx, my + R * 0.1, cx - R * 0.2, my - R * 0.03)
-    ctx.fill()
-    ctx.strokeStyle = '#7a2f38'
-    ctx.lineWidth = Math.max(1.4, R * 0.04)
-    ctx.beginPath()
-    ctx.moveTo(cx - R * 0.24, my - R * 0.04)
-    ctx.quadraticCurveTo(cx, my + R * 0.3, cx + R * 0.24, my - R * 0.04)
-    ctx.stroke()
-  } else if (moodKey === 'sick') {
-    ctx.strokeStyle = '#a85a46'
-    ctx.lineWidth = Math.max(1.6, R * 0.05)
-    ctx.beginPath()
-    ctx.moveTo(cx - R * 0.18, my + R * 0.06)
-    ctx.quadraticCurveTo(cx - R * 0.06, my - R * 0.04, cx, my + R * 0.03)
-    ctx.quadraticCurveTo(cx + R * 0.06, my + R * 0.1, cx + R * 0.18, my + R * 0.02)
-    ctx.stroke()
-  } else if (moodKey === 'tired') {
-    ctx.strokeStyle = '#a85a46'
-    ctx.lineWidth = Math.max(1.6, R * 0.05)
-    ctx.beginPath()
-    ctx.moveTo(cx - R * 0.16, my + R * 0.02)
-    ctx.quadraticCurveTo(cx, my - R * 0.01, cx + R * 0.16, my + R * 0.03)
-    ctx.stroke()
-  } else {
-    ctx.strokeStyle = '#a85a46'
-    ctx.lineWidth = Math.max(1.6, R * 0.05)
-    ctx.beginPath()
-    ctx.moveTo(cx - R * 0.17, my)
-    ctx.quadraticCurveTo(cx, my + R * 0.14, cx + R * 0.17, my)
-    ctx.stroke()
-    ctx.fillStyle = 'rgba(214,110,110,0.55)'
-    ctx.beginPath()
-    ctx.ellipse(cx, my + R * 0.075, R * 0.07, R * 0.03, 0, 0, Math.PI * 2)
-    ctx.fill()
-  }
-  ctx.lineCap = 'butt'
-
-  // age lines for senior ranks: nasolabial folds, plus a forehead crease at the top rank
-  if (lines) {
-    ctx.strokeStyle = 'rgba(150,95,70,0.45)'
-    ctx.lineWidth = Math.max(1.2, R * 0.035)
-    ctx.lineCap = 'round'
-    for (const sx of [-1, 1]) {
-      ctx.beginPath()
-      ctx.moveTo(cx + sx * R * 0.17, headY + R * 0.32)
-      ctx.quadraticCurveTo(cx + sx * R * 0.34, headY + R * 0.4, cx + sx * R * 0.33, headY + R * 0.6)
-      ctx.stroke()
-    }
-    if (lines >= 2) {
-      ctx.beginPath()
-      ctx.moveTo(cx - R * 0.3, headY - R * 0.42)
-      ctx.quadraticCurveTo(cx, headY - R * 0.47, cx + R * 0.3, headY - R * 0.42)
-      ctx.stroke()
-    }
-    ctx.lineCap = 'butt'
-  }
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY) } catch { /* noop */ }
 }
 
-function drawPortrait(canvas, { rankKey, moodKey, hairHex }) {
-  const ctx = canvas.getContext('2d')
-  const W = canvas.width
-  const H = canvas.height
-  ctx.clearRect(0, 0, W, H)
-
-  const cx = W / 2
-  // Higher ranks get a slightly smaller head (more "grown-up" proportions)
-  // and broader shoulders.
-  const proportions = {
-    junior: { headR: 0.27, headY: 0.33, shoulderW: 0.74 },
-    staff: { headR: 0.26, headY: 0.32, shoulderW: 0.78 },
-    manager: { headR: 0.25, headY: 0.31, shoulderW: 0.82 },
-    director: { headR: 0.245, headY: 0.3, shoulderW: 0.86 },
+// ================================================================= 지도 / NPC ==
+function curMap() {
+  return MAPS[S.mapKey]
+}
+function loadNpcs() {
+  const m = curMap()
+  runtimeNpcs = m.npcs
+    .filter((n) => {
+      if (S.mapKey === 'office' && slotNow() >= 3) return false // 퇴근 후 사무실은 텅 비어 있다
+      return true
+    })
+    .map((n) => ({ ...n, hx: n.x, hy: n.y, walk: 0, moving: false, facing: n.facing || 'down', timer: Math.random() * 3, dir: Math.random() < 0.5 ? 1 : -1, emote: null, emoteT: 0 }))
+}
+function enterMap(key, pos, facing = 'down') {
+  S.mapKey = key
+  player.x = pos.x
+  player.y = pos.y
+  player.facing = facing
+  loadNpcs()
+  getGround()
+  ui.menu = null
+}
+function getGround() {
+  const key = S.mapKey === 'office' ? `office|${S.company.name}` : S.mapKey
+  if (!groundCache[key]) groundCache[key] = buildGround(S.mapKey, S.company)
+  return groundCache[key]
+}
+function solidAt(c, r) {
+  if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return true
+  return curMap().solid[r][c] === 1
+}
+function canMoveTo(x, y) {
+  for (const [cx, cy] of [[x - PLAYER_HALF, y - PLAYER_HALF + 6], [x + PLAYER_HALF, y - PLAYER_HALF + 6], [x - PLAYER_HALF, y + PLAYER_HALF - 2], [x + PLAYER_HALF, y + PLAYER_HALF - 2]]) {
+    if (solidAt(Math.floor(cx / TILE), Math.floor(cy / TILE))) return false
   }
-  const p = proportions[rankKey] || proportions.junior
-  const R = H * p.headR
-  const headY = H * p.headY
-  const SKIN = '#ffd9b8'
-  const SKIN_SHADE = '#f0c09c'
-  const chinY = headY + R
-  const shoulderY = chinY + R * 0.2
-  const SW = W * p.shoulderW
-
-  // --- suit jacket with real shoulders ---
-  const suitColors = { junior: '#8fa3c9', staff: '#5f7cb0', manager: '#3a4f7a', director: '#23314f' }
-  const lapelColors = { junior: '#7b90ba', staff: '#4f6a9c', manager: '#2e4066', director: '#19243c' }
-  const suit = suitColors[rankKey] || suitColors.junior
-  ctx.fillStyle = suit
-  ctx.beginPath()
-  ctx.moveTo(cx - SW / 2, H)
-  ctx.lineTo(cx - SW / 2, shoulderY + R * 0.42)
-  ctx.quadraticCurveTo(cx - SW / 2, shoulderY + R * 0.06, cx - R * 0.42, shoulderY)
-  ctx.lineTo(cx + R * 0.42, shoulderY)
-  ctx.quadraticCurveTo(cx + SW / 2, shoulderY + R * 0.06, cx + SW / 2, shoulderY + R * 0.42)
-  ctx.lineTo(cx + SW / 2, H)
-  ctx.closePath()
-  ctx.fill()
-
-  // shirt front
-  ctx.fillStyle = '#ffffff'
-  ctx.beginPath()
-  ctx.moveTo(cx - R * 0.42, shoulderY)
-  ctx.lineTo(cx, shoulderY + R * 0.95)
-  ctx.lineTo(cx + R * 0.42, shoulderY)
-  ctx.closePath()
-  ctx.fill()
-
-  // tie: knot + blade
-  ctx.fillStyle = rankKey === 'director' || rankKey === 'manager' ? '#c23b3b' : '#3f6fd1'
-  ctx.beginPath()
-  ctx.moveTo(cx - R * 0.1, shoulderY + R * 0.08)
-  ctx.lineTo(cx + R * 0.1, shoulderY + R * 0.08)
-  ctx.lineTo(cx + R * 0.07, shoulderY + R * 0.24)
-  ctx.lineTo(cx - R * 0.07, shoulderY + R * 0.24)
-  ctx.closePath()
-  ctx.fill()
-  ctx.beginPath()
-  ctx.moveTo(cx - R * 0.07, shoulderY + R * 0.24)
-  ctx.lineTo(cx + R * 0.07, shoulderY + R * 0.24)
-  ctx.lineTo(cx + R * 0.13, shoulderY + R * 0.8)
-  ctx.lineTo(cx, shoulderY + R * 0.95)
-  ctx.lineTo(cx - R * 0.13, shoulderY + R * 0.8)
-  ctx.closePath()
-  ctx.fill()
-
-  // lapels over the shirt
-  ctx.fillStyle = lapelColors[rankKey] || lapelColors.junior
-  for (const sx of [-1, 1]) {
-    ctx.beginPath()
-    ctx.moveTo(cx + sx * R * 0.42, shoulderY)
-    ctx.lineTo(cx + sx * R * 0.78, shoulderY + R * 0.2)
-    ctx.lineTo(cx + sx * R * 0.5, shoulderY + R * 0.5)
-    ctx.lineTo(cx + sx * R * 0.6, shoulderY + R * 0.62)
-    ctx.lineTo(cx, shoulderY + R * 0.95)
-    ctx.closePath()
-    ctx.fill()
-  }
-  // shirt collar points
-  ctx.fillStyle = '#f2f5fb'
-  for (const sx of [-1, 1]) {
-    ctx.beginPath()
-    ctx.moveTo(cx + sx * R * 0.42, shoulderY - R * 0.02)
-    ctx.lineTo(cx + sx * R * 0.02, shoulderY + R * 0.1)
-    ctx.lineTo(cx + sx * R * 0.3, shoulderY + R * 0.34)
-    ctx.closePath()
-    ctx.fill()
-  }
-
-  // Director's lapel pin
-  if (rankKey === 'director') {
-    ctx.fillStyle = '#d4af37'
-    ctx.beginPath()
-    ctx.arc(cx - R * 0.62, shoulderY + R * 0.36, R * 0.07, 0, Math.PI * 2)
-    ctx.fill()
-  }
-
-  // --- neck (with a soft shadow under the chin) ---
-  ctx.fillStyle = SKIN
-  ctx.fillRect(cx - R * 0.27, chinY - R * 0.2, R * 0.54, R * 0.44)
-  ctx.fillStyle = SKIN_SHADE
-  ctx.beginPath()
-  ctx.ellipse(cx, chinY + R * 0.02, R * 0.27, R * 0.12, 0, 0, Math.PI)
-  ctx.fill()
-
-  // --- ears ---
-  for (const sx of [-1, 1]) {
-    ctx.fillStyle = SKIN
-    ctx.beginPath()
-    ctx.ellipse(cx + sx * R * 0.95, headY + R * 0.12, R * 0.13, R * 0.2, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = SKIN_SHADE
-    ctx.beginPath()
-    ctx.ellipse(cx + sx * R * 0.97, headY + R * 0.12, R * 0.06, R * 0.11, 0, 0, Math.PI * 2)
-    ctx.fill()
-  }
-
-  // --- face ---
-  ctx.fillStyle = SKIN
-  ctx.beginPath()
-  ctx.ellipse(cx, headY, R * 0.93, R, 0, 0, Math.PI * 2)
-  ctx.fill()
-
-  // --- short, side-parted office haircut: covers the top and temples only,
-  //     so the forehead, brows, ears and jaw all stay visible ---
-  ctx.fillStyle = hairHex
-  ctx.beginPath()
-  ctx.moveTo(cx - R * 0.98, headY + R * 0.02)
-  ctx.arc(cx, headY - R * 0.04, R * 1.03, Math.PI * 0.98, Math.PI * 2.02)
-  ctx.lineTo(cx + R * 0.84, headY + R * 0.04) // right sideburn
-  ctx.lineTo(cx + R * 0.8, headY - R * 0.36)
-  ctx.quadraticCurveTo(cx + R * 0.35, headY - R * 0.5, cx - R * 0.3, headY - R * 0.7) // sweep to the part
-  ctx.quadraticCurveTo(cx - R * 0.62, headY - R * 0.62, cx - R * 0.8, headY - R * 0.36)
-  ctx.lineTo(cx - R * 0.84, headY + R * 0.04) // left sideburn
-  ctx.closePath()
-  ctx.fill()
-  // parting line + shine
-  ctx.strokeStyle = 'rgba(0,0,0,0.18)'
-  ctx.lineWidth = Math.max(1, R * 0.03)
-  ctx.beginPath()
-  ctx.moveTo(cx - R * 0.3, headY - R * 0.7)
-  ctx.quadraticCurveTo(cx - R * 0.36, headY - R * 0.9, cx - R * 0.26, headY - R * 1.05)
-  ctx.stroke()
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)'
-  ctx.lineWidth = Math.max(1.5, R * 0.05)
-  ctx.beginPath()
-  ctx.arc(cx, headY - R * 0.04, R * 0.82, Math.PI * 1.55, Math.PI * 1.8)
-  ctx.stroke()
-
-  drawFaceDetail(ctx, cx, headY, R, moodKey, { eyeHex: '#3a2a22', browHex: hairHex, lines: rankKey === 'director' ? 2 : rankKey === 'manager' ? 1 : 0 })
-
-  // Glasses for manager/director ranks, drawn over the eyes
-  if (rankKey === 'manager' || rankKey === 'director') {
-    const eyeY = headY + R * 0.08
-    const eyeDX = R * 0.38
-    ctx.strokeStyle = '#2c2c34'
-    ctx.lineWidth = Math.max(1.6, R * 0.045)
-    for (const sx of [-1, 1]) {
-      ctx.beginPath()
-      ctx.roundRect(cx + sx * eyeDX - R * 0.26, eyeY - R * 0.2, R * 0.52, R * 0.4, R * 0.1)
-      ctx.fillStyle = 'rgba(200,225,255,0.14)'
-      ctx.fill()
-      ctx.stroke()
-      ctx.beginPath()
-      ctx.moveTo(cx + sx * (eyeDX + R * 0.26), eyeY - R * 0.06)
-      ctx.lineTo(cx + sx * R * 0.93, eyeY - R * 0.02)
-      ctx.stroke()
-    }
-    ctx.beginPath()
-    ctx.moveTo(cx - eyeDX + R * 0.26, eyeY - R * 0.04)
-    ctx.quadraticCurveTo(cx, eyeY - R * 0.1, cx + eyeDX - R * 0.26, eyeY - R * 0.04)
-    ctx.stroke()
-  }
-
-  // Sweat drop if sick
-  if (moodKey === 'sick') {
-    ctx.fillStyle = '#7fc4e8'
-    ctx.beginPath()
-    ctx.moveTo(cx + R * 0.78, headY - R * 0.38)
-    ctx.quadraticCurveTo(cx + R * 0.9, headY - R * 0.12, cx + R * 0.78, headY - R * 0.02)
-    ctx.quadraticCurveTo(cx + R * 0.66, headY - R * 0.12, cx + R * 0.78, headY - R * 0.38)
-    ctx.fill()
-  }
+  for (const n of runtimeNpcs) if (Math.hypot(x - n.x, y - n.y) < 16) return false
+  return true
 }
 
-// --- State ----------------------------------------------------------------
-function freshState() {
-  return {
-    phase: 'title',
-    name: '',
-    hairHex: HAIR_COLORS[0].hex,
-    hairKey: HAIR_COLORS[0].key,
-    turn: 0,
-    stats: { work: 20, stamina: 20, network: 20, expertise: 20, trust: 20 },
-    money: 300, // 만원
-    salary: 3200, // 연봉 (만원)
-    company: makeCompany('mid', '한결상사'),
-    rankIdx: 0,
-    qAtRank: 0, // 현재 직급에서 보낸 분기 수
-    tenureQ: 0, // 현재 회사 근속 분기 수
-    transfers: 0,
-    totalEarned: 0,
-    offers: [],
-    history: [{ year: 1, company: '한결상사', rank: '신입사원', salary: 3200 }],
-    lastPay: null,
-    review: null,
-    stress: 20,
-    burnoutTurns: 0, // 스트레스 85 이상으로 끝난 턴 수
-    sick: false,
-    lastResult: '',
-    ending: null,
-  }
+// =================================================================== 대화/연출 ==
+const dlg = { active: false, speaker: '', text: '', shown: 0, onClose: null }
+function say(speaker, text, onClose = null) {
+  dlg.active = true
+  dlg.speaker = speaker
+  dlg.text = text
+  dlg.shown = 0
+  dlg.onClose = onClose
 }
-let state = freshState()
-
-function yearAt(turn) {
-  return Math.floor(turn / 4) + 1
-}
-function quarterAt(turn) {
-  return QUARTER_NAMES[turn % 4]
-}
-
-function resolveTurn(activity) {
-  const lines = []
-  const before = { stats: { ...state.stats }, stress: state.stress }
-  if (state.sick) {
-    state.stress = clamp(state.stress - rand(20, 28))
-    lines.push(`${state.name}은(는) 번아웃 조짐으로 이번 분기는 병가를 내고 쉬었다.`)
-    state.sick = false
-  } else {
-    lines.push(activity.run(state))
-    if (Math.random() < 0.55) {
-      const candidates = EVENTS.filter((e) => !e.condition || e.condition(state))
-      const ev = pick(candidates)
-      ev.run(state)
-      lines.push(ev.text)
-    }
-  }
-  // the company's culture bends what you just gained (growth) and what it cost (stress)
-  const co = archOf(state)
-  for (const k of ['work', 'expertise']) {
-    const d = state.stats[k] - before.stats[k]
-    if (d > 0) state.stats[k] = clamp(before.stats[k] + Math.round(d * co.growth))
-  }
-  const sd = state.stress - before.stress
-  if (sd > 0) state.stress = clamp(before.stress + Math.round(sd * co.stress))
-  // headhunters call people with a good profile
-  if (!state.sick && !state.offers.length && Math.random() < (state.stats.expertise + state.stats.network) / 650) {
-    state.offers = generateOffers(1)
-    if (state.offers.length) lines.push(`헤드헌터에게서 이직 제안이 왔다! (${state.offers[0].name})`)
-  }
-  if (!state.sick && state.stress >= 92 && Math.random() < 0.35) {
-    state.sick = true
-    lines.push(`${state.name}은(는) 무리를 한 탓인지 몸이 으슬으슬하다... (다음 분기는 병가를 낸다)`)
-  }
-  if (state.stress >= 85) state.burnoutTurns += 1
-  // payday: take-home pay minus the cost of living
-  const income = Math.round((state.salary * 0.88) / 4)
-  // lifestyle grows with income, so a bigger paycheck is not all pure savings
-  const living = Math.round(income * 0.55 + RANKS[state.rankIdx].living * 0.45)
-  state.money = Math.max(0, state.money + income - living)
-  state.totalEarned += income
-  state.lastPay = { income, living }
-  state.tenureQ += 1
-  state.qAtRank += 1
-  state.lastResult = lines.join(' ')
-  setTimeout(() => (state.sick ? sfx.bad() : sfx.pickup()), 90)
-  state.turn += 1
-  state.phase = 'result'
-}
-
-function continueFromResult() {
-  // the fourth quarter closes the year: performance review, raise, promotion
-  if (state.turn % 4 === 0 && state.turn > 0 && !state.sickBurnout) {
-    state.review = computeReview()
-    state.phase = 'review'
-    const g = state.review.grade
-    setTimeout(() => (state.review.promoted ? sfx.fanfare() : g === 'S' || g === 'A' ? sfx.good() : g === 'D' ? sfx.bad() : sfx.pickup()), 120)
-    render()
+function advanceDialogue() {
+  if (!dlg.active) return
+  if (dlg.shown < dlg.text.length) {
+    dlg.shown = dlg.text.length
     return
   }
-  proceedAfterTurn()
+  dlg.active = false
+  sfx.click()
+  const cb = dlg.onClose
+  dlg.onClose = null
+  if (cb) cb()
 }
-
-function proceedAfterTurn() {
-  if (state.turn >= TOTAL_TURNS) {
-    state.offers = []
-    state.ending = computeEnding(state)
-    state.phase = 'ending'
-    setTimeout(() => (state.ending.title.includes('번아웃') ? sfx.lose() : sfx.fanfare()), 120)
-  } else if (state.offers.length) {
-    state.phase = 'offers'
-    state.negMsg = ''
-    sfx.alarm()
-  } else {
-    state.phase = 'choose'
-  }
-  render()
+const fade = { t: 0, dir: 0, mid: null }
+function transition(cb) {
+  fade.dir = 1
+  fade.t = 0
+  fade.mid = cb
 }
-
-// --- Render -----------------------------------------------------------------
-function render() {
-  if (state.phase === 'title') return renderTitle()
-  if (state.phase === 'choose') return renderChoose()
-  if (state.phase === 'result') return renderResult()
-  if (state.phase === 'review') return renderReview()
-  if (state.phase === 'offers') return renderOffers()
-  if (state.phase === 'joined') return renderJoined()
-  if (state.phase === 'ending') return renderEnding()
-}
-
-function renderTitle() {
-  app.innerHTML = `
-    <div class="title-wrap">
-      <h1>직장 시뮬레이터</h1>
-      <div class="subtitle">신입사원부터 임원까지, 8년간의 회사 생활을 살아보세요</div>
-      <div class="field-row">
-        <label>이름</label>
-        <input id="name-input" type="text" maxlength="8" placeholder="예: 민준" value="민준" />
-      </div>
-      <div class="field-row">
-        <label>머리색</label>
-        <div class="swatch-row">
-          ${HAIR_COLORS.map(
-            (h) => `<div class="swatch ${h.key === state.hairKey ? 'selected' : ''}" data-hair="${h.key}" style="background:${h.hex}" title="${h.label}"></div>`,
-          ).join('')}
-        </div>
-      </div>
-      <button class="primary-btn" id="start-btn">입사하기</button>
-      <div class="hint">매 분기마다 활동을 선택해 능력치를 키우세요. 4분기마다 인사평가로 연봉·승진이 정해지고, 이직 제안으로 회사를 옮길 수도 있어요. 무리하면 번아웃이 올 수 있어요. 8년이 지나면 그동안의 성장에 따라 엔딩이 결정됩니다.</div>
-    </div>
-  `
-  const nameInput = document.getElementById('name-input')
-  document.querySelectorAll('.swatch').forEach((el) => {
-    el.onclick = () => {
-      const h = HAIR_COLORS.find((x) => x.key === el.dataset.hair)
-      state.hairKey = h.key
-      state.hairHex = h.hex
-      render()
-    }
-  })
-  document.getElementById('start-btn').onclick = () => {
-    state.name = nameInput.value.trim() || '민준'
-    state.phase = 'choose'
-    render()
+const particles = []
+function sparkle(x, y, color = '#ffe066', n = 10) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2
+    const v = 30 + Math.random() * 60
+    particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 25, life: 0.7, max: 0.7, color, size: 2 + Math.random() * 2 })
   }
 }
 
-function statBar(key, val) {
-  return `
-    <div class="stat-row">
-      <div class="stat-label">${STAT_LABELS[key]}</div>
-      <div class="stat-bar-bg"><div class="stat-bar-fill" style="width:${val}%; background:${STAT_COLORS[key]}"></div></div>
-      <div class="stat-val">${val}</div>
-    </div>
-  `
+// ================================================================== 능력치 변화 ==
+function snap() {
+  return { ...S.stats, stress: S.stress, money: S.money }
+}
+function gain(k, n) {
+  if (k === 'stress') S.stress = clamp(S.stress + n)
+  else if (k === 'money') S.money = Math.max(0, S.money + n)
+  else S.stats[k] = clamp(S.stats[k] + n)
+}
+function diffText(before) {
+  const parts = []
+  for (const k of STAT_KEYS) {
+    const d = S.stats[k] - before[k]
+    if (d) parts.push(`${STAT_LABELS[k]} ${d > 0 ? '+' : ''}${d}`)
+  }
+  if (S.stress !== before.stress) parts.push(`스트레스 ${S.stress - before.stress > 0 ? '+' : ''}${S.stress - before.stress}`)
+  if (S.money !== before.money) parts.push(`💰 ${S.money - before.money > 0 ? '+' : ''}${S.money - before.money}만`)
+  return parts.join(' · ')
 }
 
-function renderTopAndPortrait(extraBodyHtml) {
-  const rank = RANKS[state.rankIdx]
-  const mood = moodForStress(state.stress)
-  const arch = archOf(state)
-  app.innerHTML = `
-    <div class="game-wrap">
-      <div class="topbar">
-        <span>${Math.min(8, yearAt(state.turn))}년차 · ${quarterAt(state.turn)}</span>
-        <span class="salary">연봉 ${fmt(state.salary)}</span>
-        <span class="money">💰 ${fmt(state.money)}</span>
-      </div>
-      <div class="body-row">
-        <div class="portrait-col">
-          <canvas id="portrait-canvas" width="200" height="240"></canvas>
-          <div class="worker-name">${state.name}</div>
-          <div class="worker-rank">${rank.label}</div>
-          <div class="worker-company">${state.company.name}<small>${arch.label}</small></div>
-          <div class="mood-tag">${mood.label}</div>
-        </div>
-        <div class="stats-col">
-          ${STAT_KEYS.map((k) => statBar(k, state.stats[k])).join('')}
-          <div class="stat-row">
-            <div class="stat-label">스트레스</div>
-            <div class="stat-bar-bg"><div class="stat-bar-fill" style="width:${state.stress}%; background:#999"></div></div>
-            <div class="stat-val">${state.stress}</div>
-          </div>
-          ${extraBodyHtml}
-        </div>
-      </div>
-    </div>
-  `
-  const canvas = document.getElementById('portrait-canvas')
-  if (canvas) drawPortrait(canvas, { rankKey: rank.key, moodKey: mood.key, hairHex: state.hairHex })
-}
-
-function renderChoose() {
-  const forcedSick = state.sick
-  const body = forcedSick
-    ? `<div class="log-box">${state.name}은(는) 번아웃 조짐이 있어 이번 분기는 쉬어야 할 것 같다.</div>
-       <button class="continue-btn" id="go-btn">분기 보내기</button>`
-    : `<div class="activity-grid">
-        ${ACTIVITIES.map((a) => {
-          const disabled = a.cost && state.money < a.cost
-          return `<button class="activity-btn" data-act="${a.key}" ${disabled ? 'disabled' : ''}>
-            <span class="act-name">${a.name}</span>
-            <span class="act-desc">${a.desc}</span>
-          </button>`
-        }).join('')}
-      </div>`
-  renderTopAndPortrait(body)
-  if (forcedSick) {
-    document.getElementById('go-btn').onclick = () => {
-      resolveTurn(null)
-      render()
-    }
-  } else {
-    document.querySelectorAll('.activity-btn').forEach((btn) => {
-      btn.onclick = () => {
-        const a = ACTIVITIES.find((x) => x.key === btn.dataset.act)
-        resolveTurn(a)
-        render()
+// ================================================================ 활동(스테이션) ==
+const T = (arr) => pick(arr)
+function menuFor(id) {
+  const slot = slotNow()
+  const co = C.archOf(S)
+  const wh = workHours()
+  const closed = (why) => ({ ok: false, why })
+  const O = (label, desc, ok, run, extra = {}) => ({ label, desc, ok: ok === true, why: ok === true ? '' : ok.why, run, ...extra })
+  switch (id) {
+    case 'desk':
+      return {
+        title: '내 자리',
+        options: [
+          wh
+            ? O('업무에 집중하기', '근무 시간 · 업무력 ↑ / 스트레스 약간 ↑', true, () => {
+                gain('work', rand(4, 7)); gain('stress', rand(2, 4)); S.day.workSlots++
+                return T(['밀린 보고서를 한 장씩 처리해 나갔다.', '메일 답장을 쳐내고 기획안을 다듬었다.', '집중해서 자료를 정리하니 시간이 훌쩍 지나갔다.'])
+              })
+            : O('야근하기', '업무력 ↑↑ · 야근 수당 · 스트레스 ↑', true, () => {
+                gain('work', rand(5, 9)); gain('money', rand(12, 22)); gain('stress', rand(4, 7))
+                return T(['불 꺼진 사무실에서 혼자 남아 일을 마무리했다.', '야식을 시켜 놓고 밤늦게까지 업무를 처리했다.'])
+              }),
+        ],
       }
-    })
+    case 'boss':
+      if (!wh) return { title: '이사실', options: [O('면담', '', closed('이사님은 퇴근하셨다'), () => '')] }
+      return {
+        title: '한 이사 (상사)',
+        options: [
+          O('업무 보고하기', '신뢰 ↑ (업무력이 높을수록 좋은 평가)', true, () => {
+            S.day.workSlots++
+            if (S.stats.work >= 45) {
+              gain('trust', rand(4, 7)); gain('stress', -rand(0, 2))
+              return T(['"요즘 일 잘하고 있다더군." 한 이사가 만족스럽게 고개를 끄덕였다.', '보고가 깔끔하다는 칭찬을 들었다.'])
+            }
+            gain('trust', rand(1, 3)); gain('stress', rand(3, 5))
+            return T(['"아직 많이 부족하네. 더 분발해 주게." 쓴소리를 들었다.', '보고 내용에 빈틈이 많다는 지적을 받았다.'])
+          }),
+        ],
+      }
+    case 'meeting':
+      return {
+        title: '회의실',
+        options: [
+          O('회의 참석하기', '업무력·신뢰 ↑ / 스트레스 ↑', slot === 0 || slot === 2 ? true : closed('지금은 잡힌 회의가 없다 (오전·오후 회의)'), () => {
+            gain('work', rand(2, 4)); gain('trust', rand(3, 5)); gain('stress', rand(2, 4)); S.day.workSlots++
+            return T(['주간 회의에서 의견을 내 팀원들의 호응을 얻었다.', '길고 긴 회의였지만 핵심을 정리해 발표했다.'])
+          }),
+        ],
+      }
+    case 'library':
+      return {
+        title: '자료실',
+        options: [O('자료실에서 공부하기', '전문성 ↑', true, () => {
+          gain('expertise', rand(4, 7)); gain('stress', rand(1, 3))
+          return T(['업계 보고서와 전문 서적을 파고들었다.', '조용한 자료실에서 새로운 기술을 익혔다.'])
+        })],
+      }
+    case 'club':
+      return {
+        title: '동아리방 (사내 동아리)',
+        options: [O('동아리 활동하기', '신뢰 ↑ / 스트레스 ↓', slot >= 2 ? true : closed('동아리 활동은 오후 2시 이후에'), () => {
+          gain('trust', rand(4, 6)); gain('network', rand(1, 2)); gain('stress', -rand(2, 4))
+          return T(['사내 탁구 동아리에서 땀을 흘리며 동료들과 웃었다.', '동아리 봉사활동에 참여해 사람들의 신뢰를 얻었다.'])
+        })],
+      }
+    case 'academy':
+      return {
+        title: '직무 학원',
+        options: [O('저녁 강의 듣기', '전문성 ↑↑ / 스트레스 ↑', slot >= 3 ? true : closed('저녁 강의는 퇴근 후(18시~)에'), () => {
+          gain('expertise', rand(5, 8)); gain('stress', rand(3, 5))
+          return T(['퇴근 후 직무 강의를 들으며 노트를 빼곡히 채웠다.', '실무 사례 수업에서 새로운 관점을 배웠다.'])
+        })],
+      }
+    case 'restaurant':
+      return {
+        title: '식당',
+        options: [
+          slot === 1
+            ? O('동료와 점심 먹기', '인맥 ↑ / 스트레스 ↓', true, () => {
+                gain('network', rand(2, 4)); gain('stress', -rand(3, 6))
+                return T(['동료들과 점심을 먹으며 수다를 떨었다.', '맛집 순례로 스트레스를 풀었다.'])
+              })
+            : O('혼자 저녁 먹기', '스트레스 ↓', slot === 3 ? true : closed('식사 시간이 아니다 (점심 12시 · 저녁 18시)'), () => {
+                gain('stress', -rand(3, 5)); gain('network', 1)
+                return '따뜻한 저녁을 먹고 마음이 한결 편안해졌다.'
+              }),
+        ],
+      }
+    case 'bar':
+      return {
+        title: '호프집 (회식)',
+        options: [O('회식·술자리', '인맥 ↑↑ / 체력 ↓', slot >= 3 ? true : closed('호프집은 저녁(18시~)에 연다'), () => {
+          gain('network', rand(4, 7)); gain('stamina', -rand(2, 4)); gain('stress', -rand(1, 3)); gain('money', -rand(2, 5))
+          return T(['팀 회식에서 상사와 동료들과 한층 가까워졌다.', '술잔을 부딪치며 속 깊은 얘기를 나눴다.'])
+        })],
+      }
+    case 'convenience':
+      return {
+        title: '편의점',
+        options: [O('편의점 알바하기', '돈 ↑↑ / 체력 ↓ / 스트레스 ↑', slot >= 3 ? true : closed('알바는 퇴근 후(18시~)에'), () => {
+          gain('money', rand(35, 55)); gain('stamina', -rand(3, 5)); gain('stress', rand(3, 5))
+          return T(['야간 알바로 짬짬이 돈을 벌었다.', '진열대를 채우고 계산대를 보며 시급을 벌었다.'])
+        })],
+      }
+    case 'headhunter':
+      return {
+        title: '헤드헌팅 사무소',
+        options: [O('이직 상담받기', '이직 제안 받기 · 전문성 약간 ↑', slot <= 3 ? true : closed('상담 시간이 끝났다 (21시 전까지)'), () => {
+          gain('expertise', rand(1, 2)); gain('stress', rand(2, 4))
+          const p = 0.25 + (S.stats.expertise + S.stats.network) / 300
+          let n = 0
+          for (let i = 0; i < 3; i++) if (Math.random() < p) n++
+          S.offers = C.generateOffers(n)
+          S.afterNote = S.offers.length ? 'offers' : ''
+          return S.offers.length ? `이력서를 맡기고 면접을 봤다. ${S.offers.length}곳에서 제안이 왔다!` : '이력서를 맡기고 상담을 받았지만, 아직 마음에 드는 제안은 없었다.'
+        })],
+      }
+    case 'travel':
+      return {
+        title: '여행사',
+        options: [O('휴가 내고 여행 떠나기 (250만)', '남은 하루를 모두 쓴다 · 랜덤 대폭 성장', S.money >= 250 ? (slot <= 3 ? true : closed('늦은 시간이라 떠날 수 없다')) : closed('여행 경비 250만이 필요하다'), () => {
+          gain('money', -250)
+          const picks = []
+          while (picks.length < 2) { const k = pick(STAT_KEYS); if (!picks.includes(k)) picks.push(k) }
+          for (const k of picks) gain(k, rand(8, 14))
+          gain('stress', -rand(15, 22))
+          return `휴가를 내고 여행을 떠나 재충전하고 돌아왔다. (${picks.map((k) => STAT_LABELS[k]).join(', ')} 상승)`
+        }, { slots: 'all' })],
+      }
+    case 'park':
+      return {
+        title: '공원 벤치',
+        options: [O('벤치에서 쉬기', '스트레스 ↓ / 체력 ↑', true, () => {
+          gain('stress', -rand(4, 7)); gain('stamina', rand(2, 3))
+          return T(['벤치에 앉아 멍하니 연못을 바라봤다.', '산책하며 머릿속을 비웠다.'])
+        })],
+      }
+    case 'sofa':
+      return {
+        title: '소파',
+        options: [O('소파에서 쉬기', '스트레스 ↓↓ / 체력 ↑', slot >= 3 ? true : closed('퇴근 후에 쉴 수 있다'), () => {
+          gain('stress', -rand(5, 8)); gain('stamina', rand(3, 5))
+          return T(['소파에 누워 드라마를 보며 푹 쉬었다.', '좋아하는 음악을 틀어 놓고 늘어져 있었다.'])
+        })],
+      }
+    case 'homepc':
+      return {
+        title: '컴퓨터 (재택 부업)',
+        options: [O('재택 부업하기', '돈 ↑ / 체력 ↓', slot >= 3 ? true : closed('퇴근 후에 할 수 있다'), () => {
+          gain('money', rand(30, 45)); gain('stamina', -rand(2, 4)); gain('stress', rand(2, 4))
+          return '집 컴퓨터로 번역·디자인 부업을 했다.'
+        })],
+      }
+    case 'bed':
+      return {
+        title: '침대',
+        options: [O('잠자기 (하루 마치기)', `남은 시간이 많을수록 푹 쉰다 (남은 ${5 - slot}칸)`, true, null, { sleep: true })],
+      }
+    default:
+      return null
   }
 }
 
-function renderResult() {
-  const pay = state.lastPay
-  const payLine = pay
-    ? `<div class="pay-line"><span>급여(세후) +${fmt(pay.income)}</span><span>생활비 −${fmt(pay.living)}</span><b>${pay.income - pay.living >= 0 ? '+' : ''}${fmt(pay.income - pay.living)}</b></div>`
-    : ''
-  const body = `<div class="log-box">${state.lastResult}</div>
-    ${payLine}
-    <button class="continue-btn" id="continue-btn">계속</button>`
-  renderTopAndPortrait(body)
-  document.getElementById('continue-btn').onclick = continueFromResult
+function openMenu(id, label) {
+  const m = menuFor(id)
+  if (!m) return
+  ui.menu = { id, title: m.title, options: m.options, sel: 0 }
+  sfx.click()
 }
 
-function renderReview() {
-  const r = state.review
-  const a = archOf(state)
+function chooseOption(i) {
+  const m = ui.menu
+  if (!m) return
+  const o = m.options[i]
+  if (!o) return
+  if (!o.ok) {
+    sfx.bad()
+    return
+  }
+  ui.menu = null
+  if (o.sleep) return sleepNow()
+  const before = snap()
+  const n = o.slots === 'all' ? 5 - S.day.slot : 1
+  transition(() => {
+    const text = o.run()
+    const slotName = SLOT_NAMES[S.day.slot]
+    S.day.slot = Math.min(5, S.day.slot + n)
+    S.day.log.push(`[${slotName}] ${text}`)
+    const d = diffText(before)
+    dlgAfterAction(text, d)
+    sfx.pickup()
+  })
+}
+function dlgAfterAction(text, d) {
+  const next = S.day.slot < 5 ? `\n(다음: ${SLOT_NAMES[S.day.slot]} ${SLOT_TIMES[S.day.slot]})` : '\n(하루가 끝났다...)'
+  say('', `${text}\n${d}${next}`, () => {
+    if (S.afterNote === 'offers') {
+      S.afterNote = ''
+      return showOffers(() => afterActionContinue())
+    }
+    afterActionContinue()
+  })
+  loadNpcs()
+}
+function afterActionContinue() {
+  if (S.day.slot >= 5) sleepNow(true)
+}
+function freeAction(text, fn) {
+  const before = snap()
+  fn()
+  const d = diffText(before)
+  say('', d ? `${text}\n${d}` : text)
+}
+
+// ================================================================ 상호작용 감지 ==
+function nearestInteractable() {
+  const m = curMap()
+  let best = null
+  const consider = (item) => {
+    const d = Math.hypot(player.x - item.x, player.y - item.y)
+    if (d <= item.radius && (!best || d < best.d)) best = { ...item, d }
+  }
+  for (const s of m.stations) consider({ kind: 'station', id: s.id, x: s.x, y: s.y, radius: s.radius, label: s.label })
+  for (const n of runtimeNpcs) {
+    if (n.role === 'walker') continue
+    consider({ kind: 'npc', id: n.id, x: n.x, y: n.y, radius: 46, label: n.name, npc: n })
+  }
+  return best
+}
+
+const FREE_STATIONS = new Set(['elevator', 'door_office', 'door_home', 'door_street', 'coffee', 'copier'])
+function activate(it) {
+  if (it.kind === 'npc') return talkTo(it.npc)
+  const id = it.id
+  if (id === 'elevator') return go('street', MAPS.street.spawnFromOffice, 'down')
+  if (id === 'door_office') return go('office', MAPS.office.spawn, 'up')
+  if (id === 'door_home') return go('home', MAPS.home.spawnFromStreet, 'up')
+  if (id === 'door_street') return go('street', MAPS.street.spawnFromHome, 'down')
+  if (id === 'coffee') {
+    if (S.day.coffee) return say('', '이미 커피를 한 잔 마셨다. (하루 한 번)')
+    S.day.coffee = true
+    sfx.pickup()
+    return freeAction('탕비실에서 커피를 내려 마셨다. 잠깐의 여유가 생겼다.', () => { gain('stress', -rand(2, 4)); gain('network', 1) })
+  }
+  if (id === 'copier') {
+    if (S.day.copier) return say('', '오늘 복사할 서류는 다 했다. (하루 한 번)')
+    S.day.copier = true
+    sfx.pickup()
+    return freeAction('복사기 앞에서 서류를 뽑으며 선배의 잡무를 도왔다.', () => { gain('work', 1); gain('trust', rand(1, 2)); gain('stress', 1) })
+  }
+  openMenu(id, it.label)
+}
+function go(key, pos, facing) {
+  sfx.door()
+  transition(() => enterMap(key, pos, facing))
+}
+
+// ----------------------------------------------------------------- NPC 대화 ----
+const LINES = {
+  colleague: [
+    '요즘 분기마다 평가가 빡빡하더라고요. 같이 힘내요!',
+    '점심은 뭐 드실래요? 근처에 새로 생긴 식당 괜찮대요.',
+    '이번 프로젝트 마감이 코앞이에요... 커피 수혈이 필요해요.',
+    '이직 생각해 봤어요? 헤드헌터 사무소가 길 건너편에 있잖아요.',
+    '야근도 좋지만 스트레스 관리부터 해야 오래 가요.',
+    '인사팀에 물어보면 승진까지 얼마나 남았는지 알려 줘요.',
+  ],
+  oh: ['부장은 말이야, 후배들이 믿고 따라와야 하는 자리야. 신뢰가 제일 중요해.', '일만 잘해서는 안 돼. 사람을 얻어야지.'],
+}
+function talkTo(n) {
+  n.facing = (() => {
+    const dx = player.x - n.x
+    const dy = player.y - n.y
+    return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up'
+  })()
+  n.emote = '!'
+  n.emoteT = 1.2
+  sfx.click()
+  if (n.role === 'hr') return hrTalk(n)
+  if (n.role === 'boss') return openMenu('boss', n.name)
+  const first = !S.day.talked[n.id]
+  S.day.talked[n.id] = true
+  const line = n.id === 'oh' ? T(LINES.oh) : T(LINES.colleague)
+  if (!first) return say(n.name, line)
+  const before = snap()
+  gain('network', rand(1, 2))
+  if (n.id === 'oh') gain('trust', 1)
+  say(n.name, `${line}\n${diffText(before)}`)
+}
+function hrTalk(n) {
+  const rank = RANKS[S.rankIdx]
+  const a = C.archOf(S)
+  const needQ = (rank.minYears + a.promo) * 4
+  const left = Math.max(0, needQ - S.qAtRank)
+  const w = a.w
+  const promo = S.rankIdx >= 3 ? '더 이상 올라갈 직급은 없네요.' : left > 0 ? `${rank.label} 승진까지 최소 ${Math.ceil(left / 4 * 10) / 10}년 남았어요. (평가 A 이상 필요)` : `승진 요건 시간은 채웠어요! 이번 평가에서 A 이상이면 승진 가능해요.`
+  say(n.name, `${S.name}님은 지금 ${rank.label}, 연봉 ${fmt(S.salary)}이고 근속 ${(S.tenureQ / 4).toFixed(1)}년이에요.\n${promo}\n우리 회사(${a.label})는 업무 ${Math.round(w.work * 100)}% · 전문성 ${Math.round(w.expertise * 100)}% · 신뢰 ${Math.round(w.trust * 100)}% · 인맥 ${Math.round(w.network * 100)}%로 평가해요.`)
+}
+
+// ================================================================== 하루의 끝 ==
+function sleepNow(auto = false) {
+  const leftover = 5 - S.day.slot
+  S.day.leftover = leftover
+  // 집으로 돌아가 잠드는 연출
+  transition(() => {
+    endDay(leftover)
+  })
+}
+
+function endDay(leftover) {
+  const lines = []
+  const d = S.day
+  // 1) 회사 문화: 하루 동안 쌓은 성장/스트레스에 보정
+  const co = C.archOf(S)
+  for (const k of ['work', 'expertise']) {
+    const diff = S.stats[k] - d.start.stats[k]
+    if (diff > 0) S.stats[k] = clamp(d.start.stats[k] + Math.round(diff * co.growth))
+  }
+  const sd = S.stress - d.start.stress
+  if (sd > 0) S.stress = clamp(d.start.stress + Math.round(sd * co.stress))
+  // 2) 근태: 근무 시간(오전·점심 외 오후)에 일한 칸 수
+  if (!S.sickDay) {
+    if (d.workSlots === 0) { gain('trust', -4); gain('stress', 3); lines.push('근무 시간에 거의 자리를 비워 근태 평가가 나빠졌다. (신뢰 -4)') }
+    else if (d.workSlots === 1) { gain('trust', -1); lines.push('업무 시간에 자리를 자주 비웠다. (신뢰 -1)') }
+    else if (d.workSlots >= 3) { gain('trust', 1); lines.push('근무 시간을 성실하게 채웠다. (신뢰 +1)') }
+    // 3) 무작위 사건
+    if (Math.random() < 0.55) {
+      const cand = C.EVENTS.filter((e) => !e.condition || e.condition(S))
+      const ev = pick(cand)
+      ev.run(S)
+      lines.push('오늘의 일: ' + ev.text)
+    }
+  }
+  // 4) 잠: 남은 시간이 많을수록 푹 쉰다
+  const rest = S.sickDay ? rand(20, 28) : rand(4, 6) + 3 * leftover
+  S.stress = clamp(S.stress - rest)
+  S.stats.stamina = clamp(S.stats.stamina + (S.sickDay ? 8 : 2 * leftover))
+  lines.push(S.sickDay ? '병가를 내고 하루 종일 쉬었다.' : leftover > 0 ? `일찍 쉬어서 푹 잤다. (스트레스 -${rest})` : '늦게까지 일정을 소화하고 쓰러지듯 잠들었다.')
+  // 5) 헤드헌터 연락 / 병가
+  if (!S.sickDay && !S.offers.length && Math.random() < (S.stats.expertise + S.stats.network) / 650) {
+    S.offers = C.generateOffers(1)
+    if (S.offers.length) lines.push(`헤드헌터에게서 이직 제안이 왔다! (${S.offers[0].name})`)
+  }
+  S.sick = false
+  if (!S.sickDay && S.stress >= 92 && Math.random() < 0.35) {
+    S.sick = true
+    lines.push('무리를 한 탓인지 몸이 으슬으슬하다... (다음 분기 시작은 병가)')
+  }
+  S.sickDay = false
+  if (S.stress >= 85) S.burnoutTurns += 1
+  // 6) 급여: 세후 월급 - 생활비
+  const income = Math.round((S.salary * 0.88) / 4)
+  const living = Math.round(income * 0.55 + RANKS[S.rankIdx].living * 0.45)
+  S.money = Math.max(0, S.money + income - living)
+  S.totalEarned += income
+  S.lastPay = { income, living }
+  S.tenureQ += 1
+  S.qAtRank += 1
+  S.turn += 1
+  // 요약 창
+  showDaySummary(lines)
+}
+
+// ================================================================ 모달(DOM) ==
+function showOverlay(html) {
+  overlay.innerHTML = html
+  overlay.classList.add('on')
+  lockInput = true
+}
+function hideOverlay() {
+  overlay.classList.remove('on')
+  overlay.innerHTML = ''
+  lockInput = false
+}
+function cardHtml(title, body, btns) {
+  return `<div class="modal"><div class="modal-title">${title}</div><div class="modal-body">${body}</div><div class="modal-btns">${btns}</div></div>`
+}
+
+function showDaySummary(lines) {
+  const d = S.day
+  const ws = d.workSlots
+  const pay = S.lastPay
+  const quarterIdx = (S.turn - 1) % 4
+  const yr = Math.min(8, C.yearAt(S.turn - 1))
+  const body = `
+    <div class="log-box">${d.log.length ? d.log.join('\n') : '(오늘은 별다른 활동 없이 지나갔다)'}</div>
+    <div class="log-box">${lines.join('\n')}</div>
+    <div class="pay-line"><span>급여(세후) +${fmt(pay.income)}</span><span>생활비 −${fmt(pay.living)}</span><b>${pay.income - pay.living >= 0 ? '+' : ''}${fmt(pay.income - pay.living)}</b></div>
+    <div class="muted" style="margin-top:.4rem">근무 시간 업무 ${ws}칸 · 💰 ${fmt(S.money)} · 스트레스 ${S.stress}</div>`
+  showOverlay(cardHtml(`${yr}년차 ${C.QUARTER_NAMES[quarterIdx]} 마감`, body, '<button class="continue-btn" id="m-ok">계속</button>'))
+  document.getElementById('m-ok').onclick = () => {
+    hideOverlay()
+    afterSummary()
+  }
+}
+
+function afterSummary() {
+  if (S.turn >= C.TOTAL_TURNS) return showEnding()
+  if (S.turn % 4 === 0 && S.turn > 0) {
+    S.review = C.computeReview()
+    const g = S.review.grade
+    setTimeout(() => (S.review.promoted ? sfx.fanfare() : g === 'S' || g === 'A' ? sfx.good() : g === 'D' ? sfx.bad() : sfx.pickup()), 120)
+    return showReview(() => afterReview())
+  }
+  afterReview()
+}
+function afterReview() {
+  if (S.offers.length) {
+    sfx.alarm()
+    return showOffers(() => nextDay())
+  }
+  nextDay()
+}
+
+function showReview(next) {
+  const r = S.review
+  const a = C.archOf(S)
   const wtxt = `업무 ${Math.round(a.w.work * 100)}% · 전문성 ${Math.round(a.w.expertise * 100)}% · 신뢰 ${Math.round(a.w.trust * 100)}% · 인맥 ${Math.round(a.w.network * 100)}%`
   const body = `
     <div class="review-card">
-      <div class="review-head">
-        <div class="grade grade-${r.grade}">${r.grade}</div>
-        <div>
-          <div class="review-title">${r.year}년차 인사평가 · ${GRADE_TEXT[r.grade]}</div>
-          <div class="review-sub">평가 점수 ${r.score}점 · ${a.label} 기준 (${wtxt})</div>
-        </div>
-      </div>
+      <div class="review-head"><div class="grade grade-${r.grade}">${r.grade}</div>
+        <div><div class="review-title">${r.year}년차 인사평가 · ${C.GRADE_TEXT[r.grade]}</div>
+        <div class="review-sub">평가 점수 ${r.score}점 · ${a.label} 기준 (${wtxt})</div></div></div>
       <div class="review-row"><span>연봉</span><b>${fmt(r.before)} → ${fmt(r.after)} <em>${r.raisePct > 0 ? `+${r.raisePct}%` : '동결'}</em></b></div>
       <div class="review-row"><span>성과급</span><b>${r.bonus > 0 ? `+${fmt(r.bonus)}` : '없음'}</b></div>
       ${r.promoted ? `<div class="promo">🎉 승진! ${r.promoted.from} → ${r.promoted.to} (연봉 +8%)</div>` : ''}
-      ${!r.promoted && state.rankIdx < 3 ? `<div class="review-note">다음 승진까지: 현재 직급 ${Math.floor(state.qAtRank / 4)}년 근무 · 평가 A 이상 필요</div>` : ''}
-    </div>
-    <button class="continue-btn" id="review-ok">확인</button>`
-  renderTopAndPortrait(body)
-  document.getElementById('review-ok').onclick = proceedAfterTurn
+      ${!r.promoted && S.rankIdx < 3 ? `<div class="review-note">다음 승진까지: 현재 직급 ${Math.floor(S.qAtRank / 4)}년 근무 · 평가 A 이상 필요</div>` : ''}
+    </div>`
+  showOverlay(cardHtml('연말 인사평가', body, '<button class="continue-btn" id="m-ok">확인</button>'))
+  document.getElementById('m-ok').onclick = () => {
+    hideOverlay()
+    next()
+  }
 }
 
-function renderOffers() {
-  const cur = state.salary
-  const cards = state.offers
-    .map((o, i) => {
-      const a = ARCHETYPES[o.arch]
-      const diff = Math.round(((o.salary - cur) / cur) * 100)
-      return `<div class="offer-card">
-        <div class="offer-head"><b>${o.name}</b><span class="tag">${a.label}</span>${o.rankIdx > state.rankIdx ? '<span class="tag up-tag">직급 상승</span>' : ''}</div>
-        <div class="offer-line">${RANKS[o.rankIdx].label} · 연봉 <b>${fmt(o.salary)}</b> <em class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '+' : ''}${diff}%</em></div>
-        <div class="offer-note">${a.note}</div>
-        <div class="offer-actions">
-          <button class="mini-btn" data-neg="${i}" ${o.negotiated ? 'disabled' : ''}>${o.negotiated ? '협상 완료' : '연봉 협상'}</button>
-          <button class="mini-btn go" data-accept="${i}">이직하기</button>
-        </div>
-      </div>`
-    })
-    .join('')
-  const body = `
-    <div class="log-box">이직 제안이 도착했다. 지금 회사: <b>${state.company.name}</b> (${archOf(state).label}) · 연봉 ${fmt(cur)}${state.negMsg ? `\n${state.negMsg}` : ''}</div>
+let negMsg = ''
+function showOffers(next) {
+  const cur = S.salary
+  const cards = S.offers.map((o, i) => {
+    const a = ARCHETYPES[o.arch]
+    const diff = Math.round(((o.salary - cur) / cur) * 100)
+    return `<div class="offer-card">
+      <div class="offer-head"><b>${o.name}</b><span class="tag">${a.label}</span>${o.rankIdx > S.rankIdx ? '<span class="tag up-tag">직급 상승</span>' : ''}</div>
+      <div class="offer-line">${RANKS[o.rankIdx].label} · 연봉 <b>${fmt(o.salary)}</b> <em class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '+' : ''}${diff}%</em></div>
+      <div class="offer-note">${a.note}</div>
+      <div class="offer-actions">
+        <button class="mini-btn" data-neg="${i}" ${o.negotiated ? 'disabled' : ''}>${o.negotiated ? '협상 완료' : '연봉 협상'}</button>
+        <button class="mini-btn go" data-accept="${i}">이직하기</button></div></div>`
+  }).join('')
+  const body = `<div class="log-box">이직 제안이 도착했다. 지금 회사: <b>${S.company.name}</b> (${C.archOf(S).label}) · 연봉 ${fmt(cur)}${negMsg ? `\n${negMsg}` : ''}</div>
     <div class="offer-list">${cards || '<div class="muted">제안이 모두 사라졌다.</div>'}</div>
-    <div class="offer-tip">이직하면 근속이 초기화되고 신뢰가 절반으로 줄어요. 회사 성격에 따라 스트레스·성장·승진 속도가 달라집니다.</div>
-    <button class="continue-btn" id="decline-btn">${state.offers.length ? '모두 거절하고 남는다' : '돌아가기'}</button>`
-  renderTopAndPortrait(body)
-  document.querySelectorAll('[data-neg]').forEach((b) => (b.onclick = () => negotiate(Number(b.dataset.neg))))
-  document.querySelectorAll('[data-accept]').forEach((b) => (b.onclick = () => acceptOffer(Number(b.dataset.accept))))
-  document.getElementById('decline-btn').onclick = () => {
-    state.offers = []
-    state.phase = 'choose'
-    render()
+    <div class="offer-tip">이직하면 근속이 초기화되고 신뢰가 절반으로 줄어요. 회사 성격에 따라 스트레스·성장·승진 속도가 달라집니다.</div>`
+  showOverlay(cardHtml('이직 제안', body, `<button class="continue-btn" id="m-decline">${S.offers.length ? '모두 거절하고 남는다' : '돌아가기'}</button>`))
+  overlay.querySelectorAll('[data-neg]').forEach((b) => (b.onclick = () => {
+    const r = C.negotiateOffer(Number(b.dataset.neg))
+    if (r) { negMsg = r.msg; r.kind === 'good' ? sfx.good() : r.kind === 'bad' ? sfx.bad() : sfx.click() }
+    showOffers(next)
+  }))
+  overlay.querySelectorAll('[data-accept]').forEach((b) => (b.onclick = () => {
+    const msg = C.acceptOfferAt(Number(b.dataset.accept))
+    negMsg = ''
+    sfx.start()
+    groundCache = {}
+    showOverlay(cardHtml('새 직장', `<div class="log-box">${msg}</div>`, '<button class="continue-btn" id="m-ok">출근하기</button>'))
+    document.getElementById('m-ok').onclick = () => { hideOverlay(); next() }
+  }))
+  document.getElementById('m-decline').onclick = () => {
+    S.offers = []
+    negMsg = ''
+    hideOverlay()
+    next()
   }
 }
 
-function renderJoined() {
-  const body = `<div class="log-box">${state.joinMsg}</div>
-    <button class="continue-btn" id="joined-ok">출근하기</button>`
-  renderTopAndPortrait(body)
-  document.getElementById('joined-ok').onclick = () => {
-    state.phase = state.turn >= TOTAL_TURNS ? 'choose' : 'choose'
-    render()
-  }
-}
-
-function renderEnding() {
-  const rank = RANKS[state.rankIdx]
-  const career = state.history
-    .map((h) => `<li>${h.moved ? '↪ ' : ''}${h.year}년차 · ${h.company} · ${h.rank} · ${fmt(h.salary)}${h.grade ? ` (평가 ${h.grade})` : ''}</li>`)
-    .join('')
-  app.innerHTML = `
-    <div class="ending-wrap">
-      <canvas id="ending-canvas" width="220" height="264"></canvas>
-      <h2 class="ending-title">${state.ending.title}</h2>
-      <div class="ending-text">${state.ending.text}</div>
-      <div class="ending-stats">업무력 ${state.stats.work} · 체력 ${state.stats.stamina} · 인맥 ${state.stats.network} · 전문성 ${state.stats.expertise} · 신뢰 ${state.stats.trust}<br>최종 연봉 ${fmt(state.salary)} · 이직 ${state.transfers}회 · 누적 수입 ${fmt(state.totalEarned)} · 자산 ${fmt(state.money)}</div>
+function showEnding() {
+  S.offers = []
+  S.ending = C.computeEnding(S)
+  setTimeout(() => (S.ending.title.includes('번아웃') ? sfx.lose() : sfx.fanfare()), 120)
+  clearSave()
+  const career = S.history.map((h) => `<li>${h.moved ? '↪ ' : ''}${h.year}년차 · ${h.company} · ${h.rank} · ${fmt(h.salary)}${h.grade ? ` (평가 ${h.grade})` : ''}</li>`).join('')
+  overlay.innerHTML = `<div class="ending-wrap">
+      <canvas id="ending-canvas" width="160" height="200"></canvas>
+      <h2 class="ending-title">${S.ending.title}</h2>
+      <div class="ending-text">${S.ending.text}</div>
+      <div class="ending-stats">업무력 ${S.stats.work} · 체력 ${S.stats.stamina} · 인맥 ${S.stats.network} · 전문성 ${S.stats.expertise} · 신뢰 ${S.stats.trust}<br>최종 연봉 ${fmt(S.salary)} · 이직 ${S.transfers}회 · 누적 수입 ${fmt(S.totalEarned)} · 자산 ${fmt(S.money)}</div>
       <details class="career"><summary>커리어 기록 보기</summary><ul>${career}</ul></details>
-      <button class="restart-btn" id="restart-btn">다시 시작하기</button>
-    </div>
-  `
-  drawPortrait(document.getElementById('ending-canvas'), { rankKey: rank.key, moodKey: 'bright', hairHex: state.hairHex })
+      <button class="restart-btn" id="restart-btn">다시 시작하기</button></div>`
+  overlay.classList.add('on', 'solid')
+  lockInput = true
+  const ec = document.getElementById('ending-canvas').getContext('2d')
+  drawPerson(ec, 80, 150, { ...playerLook(), outfit: 'suit' }, { facing: 'down', t: 0 })
   document.getElementById('restart-btn').onclick = () => {
-    state = freshState()
-    render()
+    overlay.classList.remove('solid')
+    showTitle()
   }
 }
 
-render()
+// ================================================================== 하루 시작 ==
+function nextDay() {
+  hideOverlay()
+  startDay()
+}
+function startDay() {
+  S.day = {
+    slot: 0,
+    talked: {},
+    workSlots: 0,
+    log: [],
+    coffee: false,
+    copier: false,
+    start: { stats: { ...S.stats }, stress: S.stress },
+    intro: false,
+  }
+  S.afterNote = ''
+  saveGame()
+  enterMap('home', MAPS.home.spawn, 'down')
+  ui.hint = 1
+  if (S.sick) {
+    S.sickDay = true
+    S.day.slot = 5
+    showOverlay(cardHtml('병가', `<div class="log-box">${S.name}은(는) 번아웃 조짐으로 이번 분기는 병가를 내고 쉬기로 했다.</div>`, '<button class="continue-btn" id="m-ok">푹 쉬기</button>'))
+    document.getElementById('m-ok').onclick = () => {
+      hideOverlay()
+      transition(() => endDay(5))
+    }
+    return
+  }
+  const yr = Math.min(8, C.yearAt(S.turn))
+  const co = C.archOf(S)
+  say('', `${yr}년차 ${C.quarterAt(S.turn)}. ${S.company.name}(${co.label}) ${RANKS[S.rankIdx].label} ${S.name}의 하루가 시작된다.\n집을 나서 회사로 출근하자. 근무 시간(오전·점심·오후)에는 일을 해야 평가가 좋아져요.`)
+}
 
-// 버튼 클릭음 + 소리 켜기/끄기 버튼 (화면이 통째로 다시 그려지므로 문서 단위로 한 번만 등록)
+// ================================================================== 타이틀 ==
+function showTitle() {
+  const save = readSave()
+  let hairKey = (S && S.hairKey) || C.HAIR_COLORS[0].key
+  const render = () => {
+    overlay.innerHTML = `<div class="title-wrap">
+      <h1>직장 시뮬레이터</h1>
+      <div class="subtitle">신입사원부터 임원까지, 8년간의 회사 생활을 직접 걸어 다니며 살아보세요</div>
+      <div class="field-row"><label>이름</label><input id="name-input" type="text" maxlength="8" placeholder="예: 민준" value="${(document.getElementById('name-input') && document.getElementById('name-input').value) || '민준'}" /></div>
+      <div class="field-row"><label>머리색</label><div class="swatch-row">${C.HAIR_COLORS.map((h) => `<div class="swatch ${h.key === hairKey ? 'selected' : ''}" data-hair="${h.key}" style="background:${h.hex}" title="${h.label}"></div>`).join('')}</div></div>
+      <button class="primary-btn" id="start-btn">입사하기</button>
+      ${save ? `<button class="mini-btn" id="cont-btn" style="margin-top:.7rem;padding:.55rem 1.4rem">이어하기 · ${Math.min(8, C.yearAt(save.turn))}년차 ${C.QUARTER_NAMES[save.turn % 4]} (${save.name})</button>` : ''}
+      <div class="hint">집에서 출근해 사무실·거리를 걸어 다니세요. 하루(분기)에는 오전·점심·오후·저녁·밤 다섯 칸이 있고, 장소마다 할 수 있는 일이 달라요. 4분기마다 인사평가, 이직 제안, 번아웃에 주의하세요. 8년이 지나면 엔딩이 결정됩니다.</div>
+      <div class="hint">조작: 방향키/WASD 이동 · E/Space 상호작용 · 숫자키/클릭 선택 · Esc 닫기</div></div>`
+    overlay.classList.add('on', 'solid')
+    lockInput = true
+    document.querySelectorAll('.swatch').forEach((el) => (el.onclick = () => { hairKey = el.dataset.hair; render() }))
+    document.getElementById('start-btn').onclick = () => {
+      const name = document.getElementById('name-input').value.trim() || '민준'
+      S = newState(name, hairKey)
+      C.bindState(S)
+      groundCache = {}
+      overlay.classList.remove('solid')
+      hideOverlay()
+      sfx.start()
+      startDay()
+    }
+    const cont = document.getElementById('cont-btn')
+    if (cont) cont.onclick = () => {
+      S = save
+      C.bindState(S)
+      groundCache = {}
+      overlay.classList.remove('solid')
+      hideOverlay()
+      sfx.start()
+      startDay()
+    }
+  }
+  if (!S) { S = newState('민준'); C.bindState(S) }
+  render()
+}
+
+// ================================================================== 입력 ==
+const held = new Set()
+const MOVE = { up: ['w', 'arrowup'], down: ['s', 'arrowdown'], left: ['a', 'arrowleft'], right: ['d', 'arrowright'] }
+const heldAny = (names) => names.some((k) => held.has(k))
+window.addEventListener('keydown', (e) => {
+  const key = e.key.toLowerCase()
+  unlockSfx()
+  if (key === ' ' || key.startsWith('arrow')) e.preventDefault()
+  held.add(key)
+  if (e.repeat) return
+  if (key === 'm') return void toggleMute()
+  if (lockInput) return
+  if (dlg.active) {
+    if (key === ' ' || key === 'enter' || key === 'e') advanceDialogue()
+    return
+  }
+  if (fade.dir) return
+  if (ui.menu) {
+    if (key === 'escape' || key === 'e' && false) ui.menu = null
+    else if (/^[1-9]$/.test(key)) chooseOption(Number(key) - 1)
+    else if (key === 'arrowup') ui.menu.sel = (ui.menu.sel + ui.menu.options.length - 1) % ui.menu.options.length
+    else if (key === 'arrowdown') ui.menu.sel = (ui.menu.sel + 1) % ui.menu.options.length
+    else if (key === 'enter' || key === ' ' || key === 'e') chooseOption(ui.menu.sel)
+    return
+  }
+  if (key === ' ' || key === 'enter' || key === 'e') {
+    const it = nearestInteractable()
+    if (it) activate(it)
+  }
+})
+window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()))
+window.addEventListener('blur', () => held.clear())
+canvas.addEventListener('pointerdown', (e) => {
+  unlockSfx()
+  const r = canvas.getBoundingClientRect()
+  const x = ((e.clientX - r.left) * W) / r.width
+  const y = ((e.clientY - r.top) * H) / r.height
+  if (lockInput || fade.dir) return
+  if (dlg.active) return advanceDialogue()
+  if (ui.menu) {
+    for (const h of ui.hits) if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h.fn()
+    ui.menu = null
+    return
+  }
+  for (const h of ui.hits) if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h.fn()
+})
 document.addEventListener('pointerdown', unlockSfx)
-document.addEventListener('keydown', unlockSfx)
 document.addEventListener('click', (e) => {
-  const muteBtn = e.target.closest('#mute-btn')
-  if (muteBtn) {
-    muteBtn.textContent = toggleMute() ? '소리 끔' : '소리 켬'
+  const mute = e.target.closest('#mute-btn')
+  if (mute) {
+    mute.textContent = toggleMute() ? '소리 끔' : '소리 켬'
     return
   }
   if (e.target.closest('button')) sfx.click()
 })
+
+// ================================================================== 업데이트 ==
+function updatePlayer(dt) {
+  const locked = lockInput || dlg.active || fade.dir !== 0 || !!ui.menu
+  let dx = 0
+  let dy = 0
+  if (!locked) {
+    if (heldAny(MOVE.left)) dx -= 1
+    if (heldAny(MOVE.right)) dx += 1
+    if (heldAny(MOVE.up)) dy -= 1
+    if (heldAny(MOVE.down)) dy += 1
+  }
+  player.moving = dx !== 0 || dy !== 0
+  if (player.moving) {
+    if (dx && dy) { dx *= Math.SQRT1_2; dy *= Math.SQRT1_2 }
+    player.facing = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up'
+    player.walk += dt * 10
+    const tx = player.x + dx * PLAYER_SPEED * dt
+    if (canMoveTo(tx, player.y)) player.x = tx
+    const ty = player.y + dy * PLAYER_SPEED * dt
+    if (canMoveTo(player.x, ty)) player.y = ty
+  }
+  ui.prompt = locked ? null : nearestInteractable()
+}
+function updateNpcs(dt) {
+  for (const n of runtimeNpcs) {
+    if (n.emoteT > 0) { n.emoteT -= dt; if (n.emoteT <= 0) n.emote = null }
+    if (n.wander) {
+      n.moving = true
+      const cx = n.x + n.dir * 26 * dt
+      if (cx < n.wander.x0 * TILE || cx > n.wander.x1 * TILE) n.dir *= -1
+      else if (!(Math.hypot(cx - player.x, n.y - player.y) < 22)) n.x = cx
+      n.facing = n.dir > 0 ? 'right' : 'left'
+      n.walk += dt * 6
+    } else if (n.role === 'colleague' || n.role === 'hr' || n.role === 'boss') {
+      n.moving = false
+      const d = Math.hypot(player.x - n.x, player.y - n.y)
+      if (d < 70 && !dlg.active) {
+        const dx = player.x - n.x
+        const dy = player.y - n.y
+        n.facing = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up'
+      } else if (n.sit) n.facing = 'up'
+    }
+  }
+}
+const cars = [
+  { x: 100, lane: 7.55, dir: -1, speed: 70, color: '#d94a4a' },
+  { x: 500, lane: 8.55, dir: -1, speed: 50, color: '#4a7ac0' },
+  { x: 250, lane: 9.55, dir: 1, speed: 80, color: '#f0c040' },
+  { x: 650, lane: 10.4, dir: 1, speed: 60, color: '#e8e8ee' },
+]
+function updateCars(dt) {
+  for (const c of cars) {
+    c.x += c.dir * c.speed * dt
+    if (c.x < -60) c.x = W + 60
+    if (c.x > W + 60) c.x = -60
+  }
+}
+function updateFx(dt) {
+  for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 60 * dt; p.life -= dt }
+  for (let i = particles.length - 1; i >= 0; i--) if (particles[i].life <= 0) particles.splice(i, 1)
+  if (dlg.active && dlg.shown < dlg.text.length) {
+    const b = Math.floor(dlg.shown)
+    dlg.shown = Math.min(dlg.text.length, dlg.shown + dt * 55)
+    if (Math.floor(dlg.shown) % 2 === 0 && Math.floor(dlg.shown) > b && dlg.text[Math.floor(dlg.shown) - 1] !== ' ') sfx.blip && sfx.blip(380)
+  }
+  if (fade.dir === 1) {
+    fade.t += dt * 4.5
+    if (fade.t >= 1) {
+      const cb = fade.mid
+      fade.mid = null
+      fade.dir = -1
+      fade.t = 1
+      if (cb) cb()
+    }
+  } else if (fade.dir === -1) {
+    fade.t = Math.max(0, fade.t - dt * 6)
+    if (fade.t <= 0) { fade.dir = 0; fade.t = 0 }
+  }
+}
+
+// ================================================================== 그리기 ==
+function playerLook() {
+  const r = S.rankIdx
+  const base = { skin: '#f4cba2', hair: S.hairHex, hairStyle: 'messy', pants: '#3a4a6a', shoes: '#2b2440', eye: '#2f5fa0' }
+  if (r === 0) return { ...base, shirt: '#3f9fd1', outfit: 'tee' }
+  if (r === 1) return { ...base, shirt: '#3a4a6a', jacket: '#3a4a6a', pants: '#2c3446', outfit: 'suit', tie: '#d86a4a' }
+  if (r === 2) return { ...base, shirt: '#2f3a52', jacket: '#2f3a52', pants: '#252c3c', outfit: 'suit', tie: '#2f6fb0', glasses: false }
+  return { ...base, shirt: '#22262e', jacket: '#22262e', pants: '#1a1c24', outfit: 'suit', tie: '#7a1e2a' }
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H)
+  if (!S || !S.day) { ctx.fillStyle = '#c7d4ec'; ctx.fillRect(0, 0, W, H); return }
+  const m = curMap()
+  ctx.drawImage(getGround(), 0, 0)
+  const env = { t: elapsed, night: isEvening() || isNight() }
+  const objs = []
+  for (const p of m.props) {
+    const under = p.kind === 'rug' || p.kind === 'pond'
+    objs.push({ y: under ? -1 : (p.r + p.h) * TILE - 2, f: () => drawProp(ctx, p, elapsed, env) })
+  }
+  for (const n of runtimeNpcs) {
+    objs.push({ y: n.y + 6, f: () => drawNpc(n) })
+  }
+  if (S.mapKey === 'street') for (const c of cars) objs.push({ y: c.lane * TILE + 14, f: () => drawCar(c) })
+  objs.push({ y: player.y + 8, f: drawPlayer })
+  objs.sort((a, b) => a.y - b.y)
+  for (const o of objs) o.f()
+  drawFx()
+  drawTint()
+  drawHud()
+  drawPrompt()
+  drawMenu()
+  drawDialogue()
+  if (fade.dir) { ctx.fillStyle = `rgba(0,0,0,${Math.min(1, fade.t)})`; ctx.fillRect(0, 0, W, H) }
+}
+function drawNpc(n) {
+  const look = LOOKS[n.look]
+  drawPerson(ctx, n.x, n.y + 6, look, { facing: n.facing, walk: n.walk, moving: n.moving, t: elapsed, sit: !!n.sit, emote: n.emote, pose: n.emote === '!' ? { type: 'wave', p: 0 } : null })
+}
+function drawPlayer() {
+  drawPerson(ctx, player.x, player.y + 8, playerLook(), { facing: player.facing, walk: player.walk, moving: player.moving, t: elapsed })
+}
+function drawCar(c) {
+  const y = c.lane * TILE
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'
+  ctx.fillRect(c.x - 26, y + 12, 54, 6)
+  ctx.fillStyle = c.color
+  ctx.beginPath(); ctx.roundRect(c.x - 28, y - 2, 56, 20, 7); ctx.fill()
+  ctx.fillStyle = 'rgba(190,225,250,0.9)'
+  ctx.fillRect(c.x - 10, y + 1, 20, 12)
+  ctx.fillStyle = (isEvening() || isNight()) ? '#fff6c0' : '#d8d8d0'
+  ctx.fillRect(c.dir > 0 ? c.x + 24 : c.x - 28, y + 2, 4, 5)
+  ctx.fillRect(c.dir > 0 ? c.x + 24 : c.x - 28, y + 11, 4, 5)
+}
+function drawFx() {
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life / p.max)
+    ctx.fillStyle = p.color
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size)
+  }
+  ctx.globalAlpha = 1
+}
+function drawTint() {
+  const s = slotNow()
+  if (s === 3) { ctx.fillStyle = S.mapKey === 'street' ? 'rgba(255,140,60,0.2)' : 'rgba(255,170,90,0.1)'; ctx.fillRect(0, 0, W, H) }
+  else if (s >= 4) { ctx.fillStyle = S.mapKey === 'street' ? 'rgba(14,22,70,0.5)' : 'rgba(14,22,70,0.26)'; ctx.fillRect(0, 0, W, H) }
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, H * 0.95)
+  v.addColorStop(0, 'rgba(0,0,0,0)')
+  v.addColorStop(1, 'rgba(0,0,0,0.3)')
+  ctx.fillStyle = v
+  ctx.fillRect(0, 0, W, H)
+}
+function panel(x, y, w, h, r = 10, fill = 'rgba(16,22,40,0.82)', stroke = 'rgba(160,190,255,0.35)') {
+  ctx.fillStyle = fill
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill()
+  ctx.strokeStyle = stroke; ctx.lineWidth = 1.3; ctx.stroke()
+}
+function drawHud() {
+  const rank = RANKS[S.rankIdx]
+  ctx.fillStyle = 'rgba(14,20,40,0.88)'
+  ctx.fillRect(0, 0, W, 38)
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 13px sans-serif'
+  const yr = Math.min(8, C.yearAt(Math.min(S.turn, C.TOTAL_TURNS - 1)))
+  ctx.fillText(`${yr}년차 ${C.quarterAt(S.turn)} · ${rank.label} · ${S.company.name}`, 12, 19)
+  // 시간 칸
+  const sx = 330
+  for (let i = 0; i < 5; i++) {
+    const x = sx + i * 58
+    const cur = i === S.day.slot
+    const done = i < S.day.slot
+    ctx.fillStyle = cur ? '#ffd24a' : done ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.38)'
+    ctx.beginPath(); ctx.roundRect(x, 7, 54, 24, 7); ctx.fill()
+    ctx.fillStyle = cur ? '#3a2a08' : done ? 'rgba(255,255,255,0.4)' : '#fff'
+    ctx.font = 'bold 11px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(`${SLOT_NAMES[i]} ${SLOT_TIMES[i].slice(0, 2)}시`, x + 27, 19.5)
+  }
+  ctx.textAlign = 'right'
+  ctx.font = 'bold 13px sans-serif'
+  ctx.fillStyle = '#ffe066'
+  ctx.fillText(`💰 ${fmt(S.money)}`, W - 12, 19)
+  // 능력치 패널
+  panel(8, 46, 168, 126)
+  ctx.textAlign = 'left'
+  ctx.font = '11px sans-serif'
+  const rows = [...STAT_KEYS.map((k) => [STAT_LABELS[k], S.stats[k], STAT_COLORS[k]]), ['스트레스', S.stress, S.stress >= 85 ? '#ff5050' : S.stress >= 60 ? '#e0a030' : '#9aa3b8']]
+  rows.forEach(([label, v, color], i) => {
+    const y = 58 + i * 18
+    ctx.fillStyle = '#dfe6ff'
+    ctx.fillText(label, 16, y)
+    ctx.fillStyle = 'rgba(255,255,255,0.14)'
+    ctx.beginPath(); ctx.roundRect(70, y - 5, 80, 9, 4); ctx.fill()
+    ctx.fillStyle = color
+    ctx.beginPath(); ctx.roundRect(70, y - 5, Math.max(4, (80 * v) / 100), 9, 4); ctx.fill()
+    ctx.fillStyle = '#b8c4e8'
+    ctx.textAlign = 'right'
+    ctx.fillText(String(v), 170, y)
+    ctx.textAlign = 'left'
+  })
+  // 오늘의 목표
+  if (workHours()) {
+    panel(W / 2 - 92, 44, 184, 26)
+    ctx.fillStyle = S.day.workSlots >= 2 ? '#9fe8a0' : '#ffe9a8'
+    ctx.font = 'bold 11px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(`📌 근무 시간 업무 ${S.day.workSlots}/2칸`, W / 2, 61)
+  }
+  ctx.textBaseline = 'alphabetic'
+  // 처음 안내
+  if (ui.hint > 0 && S.turn === 0) {
+    ui.hint -= 0.0008
+    panel(W / 2 - 250, H - 60, 500, 26, 13)
+    ctx.fillStyle = '#d8e4ff'
+    ctx.font = '12px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('방향키/WASD 이동 · E 또는 Space로 상호작용 · 장소에서 활동을 고르면 시간 한 칸이 흘러요', W / 2, H - 43)
+  }
+}
+function drawPrompt() {
+  const it = ui.prompt
+  if (!it || ui.menu || dlg.active) return
+  const text = it.kind === 'npc' ? `[E] ${it.label}와(과) 대화` : `[E] ${it.label}`
+  ctx.font = 'bold 13px sans-serif'
+  const w = ctx.measureText(text).width + 24
+  const x = clamp(it.x - w / 2, 6, W - w - 6)
+  const y = clamp(it.y - 62, 44, H - 40)
+  panel(x, y, w, 26, 13, 'rgba(255,248,214,0.95)', '#c9a040')
+  ctx.fillStyle = '#4a3410'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, x + w / 2, y + 13.5)
+  ctx.textBaseline = 'alphabetic'
+}
+function drawMenu() {
+  ui.hits = []
+  const m = ui.menu
+  if (!m) return
+  const w = 520
+  const rowH = 62
+  const h = 54 + m.options.length * (rowH + 8) + 28
+  const x = W / 2 - w / 2
+  const y = H / 2 - h / 2
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'
+  ctx.fillRect(0, 0, W, H)
+  panel(x, y, w, h, 16, 'rgba(18,24,44,0.96)', 'rgba(160,190,255,0.5)')
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#ffe066'
+  ctx.font = 'bold 17px sans-serif'
+  ctx.fillText(m.title, x + 22, y + 34)
+  ctx.font = '12px sans-serif'
+  ctx.fillStyle = '#9fb0d8'
+  ctx.textAlign = 'right'
+  ctx.fillText(`${SLOT_NAMES[S.day.slot]} ${SLOT_TIMES[S.day.slot]}`, x + w - 22, y + 34)
+  m.options.forEach((o, i) => {
+    const oy = y + 50 + i * (rowH + 8)
+    const sel = m.sel === i
+    ctx.fillStyle = !o.ok ? 'rgba(255,255,255,0.06)' : sel ? 'rgba(255,210,74,0.3)' : 'rgba(255,255,255,0.12)'
+    ctx.beginPath(); ctx.roundRect(x + 16, oy, w - 32, rowH, 10); ctx.fill()
+    if (sel && o.ok) { ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 2; ctx.stroke() }
+    ctx.textAlign = 'left'
+    ctx.fillStyle = o.ok ? '#fff' : '#7f88a4'
+    ctx.font = 'bold 15px sans-serif'
+    ctx.fillText(`${i + 1}. ${o.label}`, x + 32, oy + 26)
+    ctx.font = '12px sans-serif'
+    ctx.fillStyle = o.ok ? '#b8c4e8' : '#ff9a8a'
+    ctx.fillText(o.ok ? o.desc : `🔒 ${o.why}`, x + 32, oy + 47)
+    ui.hits.push({ x: x + 16, y: oy, w: w - 32, h: rowH, fn: () => { m.sel = i; chooseOption(i) } })
+  })
+  ctx.textAlign = 'center'
+  ctx.fillStyle = '#7f88a4'
+  ctx.font = '11px sans-serif'
+  ctx.fillText('숫자키 또는 클릭으로 선택 · Esc 닫기', x + w / 2, y + h - 12)
+}
+function wrapLines(text, maxW) {
+  const lines = []
+  for (const para of text.split('\n')) {
+    let line = ''
+    for (const ch of para) {
+      if (ctx.measureText(line + ch).width > maxW) { lines.push(line); line = ch === ' ' ? '' : ch } else line += ch
+    }
+    lines.push(line)
+  }
+  return lines
+}
+function drawDialogue() {
+  if (!dlg.active) return
+  const x = 16
+  const w = W - 32
+  ctx.font = '15px sans-serif'
+  const full = wrapLines(dlg.text, w - 36)
+  const shown = wrapLines(dlg.text.slice(0, Math.floor(dlg.shown)), w - 36)
+  const h = 36 + full.length * 22
+  const y = H - h - 14
+  panel(x, y, w, h, 12, 'rgba(14,18,34,0.94)', 'rgba(160,190,255,0.6)')
+  if (dlg.speaker) {
+    ctx.font = 'bold 13px sans-serif'
+    const nw = ctx.measureText(dlg.speaker).width + 24
+    panel(x + 16, y - 14, nw, 26, 8, '#26324f', 'rgba(160,190,255,0.7)')
+    ctx.fillStyle = '#ffe066'
+    ctx.textAlign = 'left'
+    ctx.fillText(dlg.speaker, x + 28, y + 4)
+  }
+  ctx.fillStyle = '#fff'
+  ctx.font = '15px sans-serif'
+  ctx.textAlign = 'left'
+  shown.forEach((l, i) => ctx.fillText(l, x + 18, y + 30 + i * 22))
+  if (dlg.shown >= dlg.text.length) {
+    const b = Math.sin(elapsed * 6) * 2
+    ctx.fillStyle = '#ffe066'
+    ctx.beginPath(); ctx.moveTo(x + w - 30, y + h - 20 + b); ctx.lineTo(x + w - 18, y + h - 20 + b); ctx.lineTo(x + w - 24, y + h - 12 + b); ctx.closePath(); ctx.fill()
+  }
+}
+
+// ================================================================== 루프 ==
+let last = performance.now()
+function loop(t) {
+  const dt = Math.min(0.05, (t - last) / 1000)
+  last = t
+  elapsed += dt
+  if (S && S.day) {
+    updatePlayer(dt)
+    updateNpcs(dt)
+    updateCars(dt)
+  }
+  updateFx(dt)
+  render()
+  requestAnimationFrame(loop)
+}
+// Esc: 메뉴 닫기 (위 keydown 핸들러의 조건식 정리)
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && ui.menu && !lockInput) { ui.menu = null; e.preventDefault() }
+})
+
+showTitle()
+requestAnimationFrame(loop)
+// 디버그/테스트용 훅 (게임 로직에는 영향 없음)
+window.__job = { get S() { return S }, player, go, MAPS, nearestInteractable, activate, chooseOption, get ui() { return ui }, dlg, advanceDialogue, endDay, sleepNow }
