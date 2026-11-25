@@ -63,7 +63,7 @@ function buildOffice() {
   prop(m, 'readtable', 3, 15, 2, 1)
   // 동아리방 (아래 가운데) / 인사팀 (오른쪽 아래)
   prop(m, 'sofa', 8, 16, 3, 1)
-  prop(m, 'pingpong', 12, 15, 3, 2)
+  prop(m, 'pingpong', 14, 15, 3, 2)
   prop(m, 'hrdesk', 19, 16, 4, 1)
   prop(m, 'plant', 1, 8)
   prop(m, 'plant', 23, 16)
@@ -89,7 +89,7 @@ function buildOffice() {
     { id: 'boss', name: '한 이사 (상사)', x: px(21) + 16, y: py(2) + 18, look: 'boss_m', facing: 'down', role: 'boss' },
     { id: 'hr', name: '정 매니저 (인사팀)', x: px(20) + 16, y: py(15), look: 'hr_f', facing: 'down', role: 'hr' },
   )
-  m.spawn = { x: px(12) + 16, y: py(15) - 6 }
+  m.spawn = { x: px(12) + 16, y: 14.6 * TILE }
   return m
 }
 
