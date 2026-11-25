@@ -31,7 +31,7 @@ function newState(name, hairKey) {
   s.day = null
   return s
 }
-const player = { x: 0, y: 0, facing: 'down', moving: false, walk: 0 }
+const player = { x: 0, y: 0, facing: 'down', moving: false, walk: 0, invuln: 0 }
 let elapsed = 0
 let runtimeNpcs = []
 let groundCache = {}
@@ -695,7 +695,7 @@ function startDay() {
   }
   const yr = Math.min(8, C.yearAt(S.turn))
   const co = C.archOf(S)
-  say('', `${yr}년차 ${C.quarterAt(S.turn)}. ${S.company.name}(${co.label}) ${RANKS[S.rankIdx].label} ${S.name}의 하루가 시작된다.\n집을 나서 회사로 출근하자. 근무 시간(오전·점심·오후)에는 일을 해야 평가가 좋아져요.`)
+  say('', `${yr}년차 ${C.quarterAt(S.turn)}. ${S.company.name}(${co.label}) ${RANKS[S.rankIdx].label} ${S.name}의 하루가 시작된다.\n집을 나서 회사로 출근하자. 근무 시간(오전·점심·오후)에는 일을 해야 평가가 좋아져요.\n🚗 길은 횡단보도로 건너세요! 아무 데서나 건너면 차에 치여 병원에 갑니다.`)
 }
 
 // ================================================================== 타이틀 ==
@@ -863,16 +863,70 @@ function updateNpcs(dt) {
   }
 }
 const cars = [
-  { x: 100, lane: 7.55, dir: -1, speed: 70, color: '#d94a4a' },
-  { x: 500, lane: 8.55, dir: -1, speed: 50, color: '#4a7ac0' },
-  { x: 250, lane: 9.55, dir: 1, speed: 80, color: '#f0c040' },
-  { x: 650, lane: 10.4, dir: 1, speed: 60, color: '#e8e8ee' },
+  { x: 100, lane: 7.55, dir: -1, speed: 70, color: '#d94a4a', v: 1 },
+  { x: 500, lane: 8.55, dir: -1, speed: 50, color: '#4a7ac0', v: 1 },
+  { x: 250, lane: 9.55, dir: 1, speed: 80, color: '#f0c040', v: 1 },
+  { x: 650, lane: 10.4, dir: 1, speed: 60, color: '#e8e8ee', v: 1 },
 ]
+// 횡단보도(x 192~288)를 건너는 사람이 있으면 차들이 서 준다. 그 밖에서 길을 건너다 치이면 사고가 난다.
+const CROSS = { x0: 6 * TILE, x1: 9 * TILE }
+function onRoad() {
+  const fy = player.y + 8
+  return S.mapKey === 'street' && fy > 7 * TILE - 2 && fy < 11 * TILE + 2
+}
+function onCrosswalk() {
+  return onRoad() && player.x > CROSS.x0 - 8 && player.x < CROSS.x1 + 8
+}
 function updateCars(dt) {
+  const yieldNow = S.mapKey === 'street' && onCrosswalk()
   for (const c of cars) {
-    c.x += c.dir * c.speed * dt
+    let want = 1
+    if (yieldNow) {
+      const gap = c.dir < 0 ? c.x - CROSS.x1 : CROSS.x0 - c.x
+      if (gap > -10 && gap < 110) want = 0
+    }
+    c.v += (want - c.v) * Math.min(1, dt * 6)
+    c.x += c.dir * c.speed * c.v * dt
     if (c.x < -60) c.x = W + 60
     if (c.x > W + 60) c.x = -60
+  }
+  if (player.invuln > 0) player.invuln -= dt
+}
+function checkRoadAccident() {
+  if (S.mapKey !== 'street' || !onRoad() || player.invuln > 0 || fade.dir || dlg.active || lockInput || ui.menu) return
+  if (onCrosswalk()) return
+  const fy = player.y + 8
+  for (const c of cars) {
+    if (c.v < 0.25) continue
+    if (Math.abs(player.x - c.x) < 28 + 8 && fy > c.lane * TILE - 4 && fy < c.lane * TILE + 22) return accident()
+  }
+}
+function accident() {
+  held.clear()
+  player.invuln = 99
+  sfx.heavy()
+  say('', '쾅! 달려오던 자동차에 치였다...!', () => transition(() => hospital()))
+}
+function hospital() {
+  const before = snap()
+  const bill = rand(25, 60)
+  gain('stamina', -rand(8, 14))
+  gain('stress', rand(8, 12))
+  gain('money', -bill)
+  const n = Math.min(2, 5 - S.day.slot)
+  const slotName = SLOT_NAMES[Math.min(4, S.day.slot)]
+  S.day.slot = Math.min(5, S.day.slot + n)
+  S.day.log.push(`[${slotName}] 도로에서 교통사고가 나 병원에 실려 갔다. (진료비 ${bill}만)`)
+  const d = diffText(before)
+  sfx.lose()
+  showOverlay(cardHtml('🏥 병원', `<div class="log-box">응급실에서 치료를 받고 입원 수속까지 마쳤다. 다행히 큰 부상은 아니었다.\n의사: "길은 꼭 횡단보도로 건너세요. 차들이 그때만 서 줍니다."\n\n${d}\n시간이 ${n}칸 흘렀다.${S.day.slot >= 5 ? '\n(하루가 끝났다...)' : ''}</div>`, '<button class="continue-btn" id="m-ok">퇴원하기</button>'))
+  document.getElementById('m-ok').onclick = () => {
+    hideOverlay()
+    transition(() => {
+      enterMap('street', MAPS.street.spawnFromHome, 'down')
+      player.invuln = 2.5
+      if (S.day.slot >= 5) sleepNow(true)
+    })
   }
 }
 function updateFx(dt) {
@@ -939,6 +993,7 @@ function drawNpc(n) {
   drawPerson(ctx, n.x, n.y + 6, look, { facing: n.facing, walk: n.walk, moving: n.moving, t: elapsed, sit: !!n.sit, emote: n.emote, pose: n.emote === '!' ? { type: 'wave', p: 0 } : null })
 }
 function drawPlayer() {
+  if (player.invuln > 0 && player.invuln < 50 && Math.floor(elapsed * 10) % 2) return
   drawPerson(ctx, player.x, player.y + 8, playerLook(), { facing: player.facing, walk: player.walk, moving: player.moving, t: elapsed })
 }
 function drawCar(c) {
@@ -952,6 +1007,11 @@ function drawCar(c) {
   ctx.fillStyle = (isEvening() || isNight()) ? '#fff6c0' : '#d8d8d0'
   ctx.fillRect(c.dir > 0 ? c.x + 24 : c.x - 28, y + 2, 4, 5)
   ctx.fillRect(c.dir > 0 ? c.x + 24 : c.x - 28, y + 11, 4, 5)
+  if (c.v < 0.6) {
+    ctx.fillStyle = '#ff3030'
+    ctx.fillRect(c.dir > 0 ? c.x - 28 : c.x + 24, y + 2, 4, 5)
+    ctx.fillRect(c.dir > 0 ? c.x - 28 : c.x + 24, y + 11, 4, 5)
+  }
 }
 function drawFx() {
   for (const p of particles) {
@@ -1145,6 +1205,7 @@ function loop(t) {
     updatePlayer(dt)
     updateNpcs(dt)
     updateCars(dt)
+    checkRoadAccident()
   }
   updateFx(dt)
   render()
