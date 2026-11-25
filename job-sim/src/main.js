@@ -99,7 +99,11 @@ function canMoveTo(x, y) {
   for (const [cx, cy] of [[x - PLAYER_HALF, y - PLAYER_HALF + 6], [x + PLAYER_HALF, y - PLAYER_HALF + 6], [x - PLAYER_HALF, y + PLAYER_HALF - 2], [x + PLAYER_HALF, y + PLAYER_HALF - 2]]) {
     if (solidAt(Math.floor(cx / TILE), Math.floor(cy / TILE))) return false
   }
-  for (const n of runtimeNpcs) if (Math.hypot(x - n.x, y - n.y) < 16) return false
+  // 사람과는 부딪히지만, 이미 겹쳐 있으면 멀어지는 방향으로는 움직일 수 있게 한다 (끼어서 못 움직이는 문제 방지)
+  for (const n of runtimeNpcs) {
+    const d = Math.hypot(x - n.x, y - n.y)
+    if (d < 16 && d < Math.hypot(player.x - n.x, player.y - n.y) + 0.01) return false
+  }
   return true
 }
 
@@ -525,11 +529,13 @@ function endDay(leftover) {
 
 // ================================================================ 모달(DOM) ==
 function showOverlay(html) {
+  held.clear()
   overlay.innerHTML = html
   overlay.classList.add('on')
   lockInput = true
 }
 function hideOverlay() {
+  held.clear()
   overlay.classList.remove('on')
   overlay.innerHTML = ''
   lockInput = false
@@ -738,10 +744,25 @@ function showTitle() {
 const held = new Set()
 const MOVE = { up: ['w', 'arrowup'], down: ['s', 'arrowdown'], left: ['a', 'arrowleft'], right: ['d', 'arrowright'] }
 const heldAny = (names) => names.some((k) => held.has(k))
+// 키 이름을 e.code 기준으로 통일한다. (한글 입력기 상태나 키보드 배열이 달라도 WASD/방향키가 똑같이 동작하고,
+// keydown/keyup의 key 값이 달라서 키가 '눌린 채로' 남아 혼자 걸어가는 문제를 막는다)
+function keyName(e) {
+  const c = e.code || ''
+  if (c.startsWith('Key')) return c.slice(3).toLowerCase()
+  if (c.startsWith('Digit')) return c.slice(5)
+  if (c === 'Space') return ' '
+  if (c === 'Enter' || c === 'NumpadEnter') return 'enter'
+  if (c === 'Escape') return 'escape'
+  if (c.startsWith('Arrow')) return c.toLowerCase()
+  return (e.key || '').toLowerCase()
+}
+const clearHeld = () => held.clear()
 window.addEventListener('keydown', (e) => {
-  const key = e.key.toLowerCase()
+  const key = keyName(e)
   unlockSfx()
+  if (e.target && e.target.tagName === 'INPUT') return // 이름 입력 중에는 게임 키로 처리하지 않는다
   if (key === ' ' || key.startsWith('arrow')) e.preventDefault()
+  if (e.metaKey) clearHeld() // 맥에서 Cmd를 누르면 keyup이 오지 않아 키가 남는 문제
   held.add(key)
   if (e.repeat) return
   if (key === 'm') return void toggleMute()
@@ -752,7 +773,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (fade.dir) return
   if (ui.menu) {
-    if (key === 'escape' || key === 'e' && false) ui.menu = null
+    if (key === 'escape') ui.menu = null
     else if (/^[1-9]$/.test(key)) chooseOption(Number(key) - 1)
     else if (key === 'arrowup') ui.menu.sel = (ui.menu.sel + ui.menu.options.length - 1) % ui.menu.options.length
     else if (key === 'arrowdown') ui.menu.sel = (ui.menu.sel + 1) % ui.menu.options.length
@@ -764,8 +785,15 @@ window.addEventListener('keydown', (e) => {
     if (it) activate(it)
   }
 })
-window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()))
-window.addEventListener('blur', () => held.clear())
+window.addEventListener('keyup', (e) => {
+  held.delete(keyName(e))
+  if (e.metaKey) clearHeld()
+})
+// 창/탭을 벗어나거나 포커스가 바뀌면 눌린 키를 모두 놓은 것으로 본다
+window.addEventListener('blur', clearHeld)
+document.addEventListener('visibilitychange', clearHeld)
+document.addEventListener('focusout', clearHeld)
+window.addEventListener('contextmenu', clearHeld)
 canvas.addEventListener('pointerdown', (e) => {
   unlockSfx()
   const r = canvas.getBoundingClientRect()
@@ -1122,10 +1150,6 @@ function loop(t) {
   render()
   requestAnimationFrame(loop)
 }
-// Esc: 메뉴 닫기 (위 keydown 핸들러의 조건식 정리)
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && ui.menu && !lockInput) { ui.menu = null; e.preventDefault() }
-})
 
 showTitle()
 requestAnimationFrame(loop)
