@@ -8,6 +8,7 @@ function getCtx() {
 
 export function unlockAudio() {
   getCtx()
+  ensureMusic()
 }
 
 function tone({ freq, duration, type = 'square', volume = 0.15, freqEnd, delay = 0 }) {
@@ -128,20 +129,60 @@ const TRACKS = {
 }
 
 let currentTrack = 'town'
-let musicEnabled = false
+const MUSIC_PREF_KEY = 'dungeon-rpg-music'
+// 음악 켬/끔은 기억해 둔다. 처음 방문 때는 켜져 있다 (브라우저가 소리를 막는 동안은 첫 키 입력 때 시작).
+function readMusicPref() {
+  try {
+    const v = localStorage.getItem(MUSIC_PREF_KEY)
+    return v === null ? true : v === '1'
+  } catch {
+    return true
+  }
+}
+function writeMusicPref(on) {
+  try {
+    localStorage.setItem(MUSIC_PREF_KEY, on ? '1' : '0')
+  } catch {
+    // 저장소를 못 쓰면 이번 방문 동안만 유지
+  }
+}
+let musicEnabled = readMusicPref()
 let musicTimeoutId = null
 
 function scheduleMusic(index) {
   if (!musicEnabled) return
-  const track = TRACKS[currentTrack]
+  // 브라우저가 소리를 아직 막고 있으면(첫 키 입력 전) 음을 쌓아 두지 않고 기다린다
+  if (!ctx || ctx.state !== 'running') {
+    try {
+      if (ctx) ctx.resume()
+    } catch {
+      // 재생 허용 전
+    }
+    musicTimeoutId = setTimeout(() => scheduleMusic(index), 300)
+    return
+  }
+  const track = TRACKS[currentTrack] || TRACKS.town
   const step = track.melody[index % track.melody.length]
-  tone({ freq: step.freq, duration: step.dur * 0.9, type: track.lead, volume: track.leadVolume })
-  tone({ freq: step.bass, duration: step.dur * 0.9, type: 'sine', volume: track.bassVolume })
+  // 한 음에서 오류가 나더라도 음악 흐름이 끊기지 않게 한다
+  try {
+    tone({ freq: step.freq, duration: step.dur * 0.9, type: track.lead, volume: track.leadVolume })
+    tone({ freq: step.bass, duration: step.dur * 0.9, type: 'sine', volume: track.bassVolume })
+  } catch {
+    // 오디오를 아직 쓸 수 없음
+  }
   musicTimeoutId = setTimeout(() => scheduleMusic(index + 1), step.dur * 1000)
 }
 
+// 음악이 켜져 있는데 흐름이 멈춰 있으면 (장면 전환·첫 입력 직후 등) 다시 시작한다
+export function ensureMusic() {
+  if (musicEnabled && !musicTimeoutId) scheduleMusic(0)
+}
+
 export function setMusicTrack(name) {
-  if (currentTrack === name) return
+  if (currentTrack === name) {
+    ensureMusic()
+    return
+  }
   currentTrack = name
   if (musicEnabled) {
     clearTimeout(musicTimeoutId)
@@ -160,6 +201,7 @@ export function setMusicEnabled(enabled) {
 
 export function toggleMusic() {
   setMusicEnabled(!musicEnabled)
+  writeMusicPref(musicEnabled)
   return musicEnabled
 }
 

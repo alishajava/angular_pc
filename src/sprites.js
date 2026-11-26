@@ -487,3 +487,277 @@ export function drawFireball(ctx, x, y) {
   ctx.fill()
   ctx.restore()
 }
+
+// ------------------------------------------------------- forest monsters ----
+// 숲길의 몬스터들: 슬라임·늑대·박쥐·독버섯. 던전의 고블린과 확실히 다른 실루엣으로 그린다.
+// dir: -1이면 왼쪽을, 1이면 오른쪽을 본다. t: 애니메이션용 시간(초).
+
+function monsterShadow(ctx, rx = 10) {
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'
+  ctx.beginPath()
+  ctx.ellipse(0, 12, rx, 3, 0, 0, Math.PI * 2)
+  ctx.fill()
+}
+
+function drawSlime(ctx, t) {
+  const squish = Math.sin(t * 4) * 0.08
+  monsterShadow(ctx, 12)
+  ctx.save()
+  ctx.translate(0, 11)
+  ctx.scale(1 + squish, 1 - squish)
+  const g = ctx.createLinearGradient(0, -22, 0, 0)
+  g.addColorStop(0, '#8fd8ff')
+  g.addColorStop(1, '#2f8ad0')
+  ctx.fillStyle = g
+  ctx.strokeStyle = '#1f5a90'
+  ctx.lineWidth = 1.6
+  ctx.beginPath()
+  ctx.moveTo(-13, 0)
+  ctx.bezierCurveTo(-15, -14, -8, -22, 0, -22)
+  ctx.bezierCurveTo(8, -22, 15, -14, 13, 0)
+  ctx.quadraticCurveTo(0, 3, -13, 0)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+  // 반짝이는 하이라이트
+  ctx.fillStyle = 'rgba(255,255,255,0.6)'
+  ctx.beginPath()
+  ctx.ellipse(-6, -15, 3.5, 2.2, -0.6, 0, Math.PI * 2)
+  ctx.fill()
+  // 눈과 입
+  ctx.fillStyle = '#fff'
+  for (const ex of [-5, 5]) {
+    ctx.beginPath()
+    ctx.ellipse(ex, -9, 3.2, 3.8, 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.fillStyle = '#12233a'
+  for (const ex of [-4.4, 5.6]) {
+    ctx.beginPath()
+    ctx.arc(ex, -8.4, 1.7, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.strokeStyle = '#12233a'
+  ctx.lineWidth = 1.3
+  ctx.beginPath()
+  ctx.arc(0, -3.5, 3, 0.2, Math.PI - 0.2)
+  ctx.stroke()
+  ctx.restore()
+}
+
+function drawWolf(ctx, t) {
+  monsterShadow(ctx, 15)
+  const run = Math.sin(t * 8)
+  // 꼬리
+  ctx.strokeStyle = '#5a4630'
+  ctx.lineWidth = 5
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  ctx.moveTo(13, 0)
+  ctx.quadraticCurveTo(22, -6 + run * 2, 20, -14)
+  ctx.stroke()
+  // 다리 네 개
+  ctx.fillStyle = '#6a5238'
+  for (const [lx, ph] of [[-11, 0], [-5, Math.PI], [6, Math.PI], [11, 0]]) {
+    const lift = Math.max(0, Math.sin(t * 8 + ph)) * 3
+    ctx.fillRect(lx - 1.6, 4, 3.4, 7 - lift)
+  }
+  // 몸통
+  const body = ctx.createLinearGradient(0, -12, 0, 8)
+  body.addColorStop(0, '#9a8a78')
+  body.addColorStop(1, '#6a5640')
+  ctx.fillStyle = body
+  ctx.strokeStyle = '#3a2c1c'
+  ctx.lineWidth = 1.4
+  ctx.beginPath()
+  ctx.ellipse(2, -2, 15, 9, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.stroke()
+  // 등 털
+  ctx.fillStyle = '#4a3a28'
+  ctx.beginPath()
+  ctx.moveTo(-8, -9)
+  for (let i = 0; i < 5; i++) ctx.lineTo(-6 + i * 4, i % 2 ? -10 : -13)
+  ctx.lineTo(12, -8)
+  ctx.closePath()
+  ctx.fill()
+  // 머리와 주둥이 (왼쪽을 본다)
+  ctx.fillStyle = '#8a7660'
+  ctx.beginPath()
+  ctx.ellipse(-15, -6, 8, 7, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(-20, -6)
+  ctx.lineTo(-29, -3)
+  ctx.lineTo(-20, 0)
+  ctx.closePath()
+  ctx.fillStyle = '#b8a48c'
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = '#1a1210'
+  ctx.beginPath()
+  ctx.arc(-29, -3.2, 1.8, 0, Math.PI * 2)
+  ctx.fill()
+  // 귀
+  ctx.fillStyle = '#5a4630'
+  for (const ex of [-17, -11]) {
+    ctx.beginPath()
+    ctx.moveTo(ex - 3, -11)
+    ctx.lineTo(ex, -19)
+    ctx.lineTo(ex + 3, -11)
+    ctx.closePath()
+    ctx.fill()
+  }
+  // 눈과 송곳니
+  ctx.fillStyle = '#ff3a2a'
+  ctx.beginPath()
+  ctx.ellipse(-17, -7, 2.2, 1.6, 0.3, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = '#fff'
+  for (const fx of [-25, -22]) {
+    ctx.beginPath()
+    ctx.moveTo(fx - 1.2, -1)
+    ctx.lineTo(fx, 3)
+    ctx.lineTo(fx + 1.2, -1)
+    ctx.closePath()
+    ctx.fill()
+  }
+}
+
+function drawBat(ctx, t) {
+  const flap = Math.sin(t * 14)
+  const hover = Math.sin(t * 3) * 3 - 6
+  ctx.fillStyle = 'rgba(0,0,0,0.2)'
+  ctx.beginPath()
+  ctx.ellipse(0, 14, 8, 2.5, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.save()
+  ctx.translate(0, hover)
+  // 날개
+  for (const s of [-1, 1]) {
+    ctx.fillStyle = '#4a3a6a'
+    ctx.strokeStyle = '#241a3a'
+    ctx.lineWidth = 1.3
+    ctx.beginPath()
+    ctx.moveTo(s * 4, -2)
+    ctx.lineTo(s * (22 + flap * 2), -12 - flap * 6)
+    ctx.quadraticCurveTo(s * 18, -3, s * 15, 2)
+    ctx.quadraticCurveTo(s * 11, -1, s * 8, 5)
+    ctx.quadraticCurveTo(s * 5, 2, s * 3, 6)
+    ctx.closePath()
+    ctx.fill()
+    ctx.stroke()
+  }
+  // 몸통과 머리
+  ctx.fillStyle = '#34284e'
+  ctx.strokeStyle = '#150e24'
+  ctx.beginPath()
+  ctx.ellipse(0, 1, 6, 8, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(-5, -6)
+  ctx.lineTo(-4, -14)
+  ctx.lineTo(-1, -8)
+  ctx.closePath()
+  ctx.moveTo(5, -6)
+  ctx.lineTo(4, -14)
+  ctx.lineTo(1, -8)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = '#ff4a5a'
+  for (const ex of [-2.6, 2.6]) {
+    ctx.beginPath()
+    ctx.arc(ex, -3, 1.7, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.fillStyle = '#fff'
+  for (const fx of [-1.6, 1.6]) {
+    ctx.beginPath()
+    ctx.moveTo(fx - 0.8, 2)
+    ctx.lineTo(fx, 5)
+    ctx.lineTo(fx + 0.8, 2)
+    ctx.closePath()
+    ctx.fill()
+  }
+  ctx.restore()
+}
+
+function drawMushroom(ctx, t) {
+  const sway = Math.sin(t * 5) * 1.4
+  monsterShadow(ctx, 11)
+  // 작은 발
+  ctx.fillStyle = '#d8c8a8'
+  for (const [fx, ph] of [[-5, 0], [5, Math.PI]]) {
+    ctx.beginPath()
+    ctx.ellipse(fx, 11, 3.6, 2.4 + Math.max(0, Math.sin(t * 7 + ph)), 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  // 몸통(대)
+  const stem = ctx.createLinearGradient(-8, 0, 8, 0)
+  stem.addColorStop(0, '#d9c9a4')
+  stem.addColorStop(1, '#f6ecd2')
+  ctx.fillStyle = stem
+  ctx.strokeStyle = '#8a7650'
+  ctx.lineWidth = 1.4
+  ctx.beginPath()
+  ctx.moveTo(-7, 10)
+  ctx.quadraticCurveTo(-9, -2, -6, -5)
+  ctx.lineTo(6, -5)
+  ctx.quadraticCurveTo(9, -2, 7, 10)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+  // 화난 얼굴
+  ctx.fillStyle = '#2a1a10'
+  for (const ex of [-3.2, 3.2]) {
+    ctx.beginPath()
+    ctx.ellipse(ex, 0, 1.6, 2.2, 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.strokeStyle = '#2a1a10'
+  ctx.lineWidth = 1.4
+  ctx.beginPath()
+  ctx.moveTo(-6, -3.5)
+  ctx.lineTo(-1.5, -1.8)
+  ctx.moveTo(6, -3.5)
+  ctx.lineTo(1.5, -1.8)
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.arc(0, 6, 2.4, Math.PI + 0.3, -0.3)
+  ctx.stroke()
+  // 갓 (빨간 바탕에 흰 점)
+  ctx.save()
+  ctx.translate(sway * 0.4, -5)
+  ctx.rotate(sway * 0.02)
+  ctx.fillStyle = '#d6322a'
+  ctx.strokeStyle = '#6a1410'
+  ctx.lineWidth = 1.6
+  ctx.beginPath()
+  ctx.moveTo(-17, 0)
+  ctx.bezierCurveTo(-17, -17, -8, -22, 0, -22)
+  ctx.bezierCurveTo(8, -22, 17, -17, 17, 0)
+  ctx.quadraticCurveTo(0, 5, -17, 0)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = '#fff6f0'
+  for (const [px, py, pr] of [[-9, -10, 3], [2, -16, 3.4], [10, -8, 2.6], [-2, -6, 2]]) {
+    ctx.beginPath()
+    ctx.arc(px, py, pr, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
+}
+
+export function drawForestMonster(ctx, x, y, kind, t = 0, dir = -1) {
+  ctx.save()
+  ctx.translate(x, y)
+  if (kind === 'wolf' || kind === 'bat') ctx.scale(-dir, 1) // 늑대 그림은 왼쪽을 보는 기준
+  if (kind === 'slime') drawSlime(ctx, t)
+  else if (kind === 'wolf') drawWolf(ctx, t)
+  else if (kind === 'bat') drawBat(ctx, t)
+  else drawMushroom(ctx, t)
+  ctx.restore()
+}

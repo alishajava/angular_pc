@@ -1,10 +1,10 @@
 <script setup>
 import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRpgStore, TILE, STAGE_WIDTH, STAGE_HEIGHT } from '../stores/rpg'
+import { useRpgStore, TILE, STAGE_WIDTH, STAGE_HEIGHT, KIND_NAMES } from '../stores/rpg'
 import { useTownStore } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
 import { unlockAudio, playAttackSwing, playFireball, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
-import { drawHero, drawHeroine, drawMonster, drawBoss, drawSlash, drawFireball, FACE_ANGLE } from '../sprites'
+import { drawHero, drawHeroine, drawMonster, drawBoss, drawSlash, drawFireball, drawForestMonster, FACE_ANGLE } from '../sprites'
 import { makeDungeonBackdrop, drawDungeonLife, drawDungeonDarkness, drawPotion, drawBattleBackdrop, makeForestBackdrop, drawForestLife } from '../scenery'
 import { canMoveTo } from '../mapUtils'
 
@@ -168,7 +168,7 @@ function drawPotions(ctx) {
 function drawMonsters(ctx) {
   for (const m of store.monsters) {
     if (m.isBoss) drawBoss(ctx, m.x, m.y)
-    else if (m.bodyColor) drawMonster(ctx, m.x, m.y, { bodyColor: m.bodyColor, bellyColor: m.bellyColor })
+    else if (m.kind) drawForestMonster(ctx, m.x, m.y, m.kind, animTime + m.x * 0.01, store.player.x < m.x ? -1 : 1)
     else drawMonster(ctx, m.x, m.y)
 
     const barW = m.isBoss ? 40 : 22
@@ -330,7 +330,7 @@ function drawBattle(ctx) {
   ctx.translate(mx, my)
   ctx.scale(m.isBoss ? 2.2 : 1.8, m.isBoss ? 2.2 : 1.8)
   if (m.isBoss) drawBoss(ctx, 0, 0)
-  else if (m.bodyColor) drawMonster(ctx, 0, 0, { bodyColor: m.bodyColor, bellyColor: m.bellyColor })
+  else if (m.kind) drawForestMonster(ctx, 0, 0, m.kind, animTime, -1)
   else drawMonster(ctx, 0, 0)
   ctx.restore()
 
@@ -348,7 +348,7 @@ function drawBattle(ctx) {
   ctx.textAlign = 'center'
   ctx.fillStyle = m.isBoss ? '#ffd700' : '#fff'
   ctx.font = 'bold 13px sans-serif'
-  ctx.fillText(m.isBoss ? 'BOSS' : m.kind === 'wolf' ? '늑대' : m.kind === 'slime' ? '슬라임' : '몬스터', mx, barY - 8)
+  ctx.fillText(m.isBoss ? 'BOSS' : KIND_NAMES[m.kind] || '몬스터', mx, barY - 8)
 
   // message log
   const logY = STAGE_HEIGHT * 0.58

@@ -42,13 +42,13 @@ function tileCenter(col, row) {
 // ---- 숲길: 마을과 마을 사이를 잇는 가로로 긴 길. 지그재그로 휘어지고, 몬스터가 돌아다닌다. ----
 const FOREST_SPAWNS = [
   [7, 3, 'slime'],
-  [8, 7, 'wolf'],
+  [8, 7, 'mushroom'],
   [13, 7, 'slime'],
-  [14, 2, 'wolf'],
+  [14, 2, 'bat'],
   [19, 2, 'wolf'],
-  [20, 7, 'slime'],
+  [20, 7, 'mushroom'],
   [25, 8, 'wolf'],
-  [26, 2, 'slime'],
+  [26, 2, 'bat'],
   [31, 3, 'wolf'],
   [32, 7, 'slime'],
 ]
@@ -106,7 +106,10 @@ const FOREST_MAP = buildForestMap()
 const FOREST_KINDS = {
   slime: { bodyColor: '#4a8ac0', bellyColor: '#7fb4e0', hp: 12, damage: 5, coin: 4 },
   wolf: { bodyColor: '#8a6a4a', bellyColor: '#c0a07a', hp: 16, damage: 6, coin: 6 },
+  bat: { bodyColor: '#4a3a6a', bellyColor: '#6a5a8a', hp: 10, damage: 4, coin: 4 },
+  mushroom: { bodyColor: '#d6322a', bellyColor: '#f6ecd2', hp: 15, damage: 5, coin: 5 },
 }
+export const KIND_NAMES = { slime: '슬라임', wolf: '늑대', bat: '박쥐', mushroom: '독버섯' }
 
 export const LEVELS = {
   dungeon: { key: 'dungeon', title: 'DUNGEON', map: MAP, theme: 'dungeon' },
@@ -167,6 +170,12 @@ const POTION_SPAWNS = [
   [8, 24],
 ]
 const PLAYER_START = [1, 1]
+
+// 받침이 있으면 '이', 없으면 '가'
+function hasFinalConsonant(word) {
+  const code = word.charCodeAt(word.length - 1) - 0xac00
+  return code >= 0 && code % 28 !== 0
+}
 
 function rollDamage(base) {
   return Math.max(1, base + Math.floor(Math.random() * 5) - 2)
@@ -276,7 +285,8 @@ export const useRpgStore = defineStore('rpg', () => {
     battle.active = true
     battle.monsterIndex = index
     battle.turn = 'player'
-    battle.log = `${m.isBoss ? '보스' : m.kind === 'wolf' ? '늑대' : m.kind === 'slime' ? '슬라임' : '몬스터'}이(가) 나타났다!`
+    const name = m.isBoss ? '보스' : KIND_NAMES[m.kind] || '몬스터'
+    battle.log = `${name}${hasFinalConsonant(name) ? '이' : '가'} 나타났다!`
     battle.timer = 0
     battle.fireballReady = true
     battle.fireballCooldown = 0
