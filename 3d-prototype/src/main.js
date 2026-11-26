@@ -233,8 +233,6 @@ const LANDMARKS = [
   [-10, 1.5, -6],
   [14, 1, -12],
   [-6, 1, 12],
-  [0, 2, -20],
-  [20, 1, 6],
 ]
 const BOX_HALF_SIZE = 1 // landmark boxes are 2x2 in footprint
 const landmarkBoxes = []
@@ -707,8 +705,6 @@ const NPC_DEFS = [
   { id: 'arin', name: '아린', primitiveColor: 0xd1553f, pos: [4, -3], rotY: Math.PI * 0.6, variant: { hair: '#45324f', shirt: '#79b8da', shorts: '#314a79', shoes: '#202437', skin: '#f5c5a6', height: 1.85, look: { eye: '#7a5cc0', glasses: 0x2b2b3a } }, patrol: { axis: 'z', half: 2.5 } },
   { id: 'bomi', name: '보미', primitiveColor: 0x55b86a, pos: [-4, 9], rotY: -Math.PI * 0.3, variant: { hair: '#6b4226', shirt: '#55b86a', shorts: '#2f2f2f', shoes: '#3a2e20', skin: '#e8b48f', height: 1.78, look: { eye: '#3f9a5a', mouth: 'open', freckles: true } } },
   { id: 'chanho', name: '찬호', primitiveColor: 0x4477cc, pos: [10, 10], rotY: Math.PI * 0.9, variant: { hair: '#2b2320', shirt: '#4477cc', shorts: '#1f1f1f', shoes: '#c0392b', skin: '#f5c5a6', height: 1.93, look: { eye: '#4a3a2a', mouth: 'smirk', brow: 'strong' } } },
-  { id: 'dain', name: '다인', primitiveColor: 0xe0a93f, pos: [-6, -12], rotY: -Math.PI * 0.5, variant: { hair: '#9c3b2e', shirt: '#e0a93f', shorts: '#3a2e20', shoes: '#e8d9b5', skin: '#d99a76', height: 1.7, look: { eye: '#c07a2a', freckles: true } }, patrol: { axis: 'z', half: 2.5 } },
-  { id: 'eunho', name: '은호', primitiveColor: 0x9c6bd6, pos: [18, -2], rotY: Math.PI * 0.2, variant: { hair: '#1f3a52', shirt: '#9c6bd6', shorts: '#2f2f3a', shoes: '#4a7a4a', skin: '#c98a63', height: 1.88, look: { eye: '#2f6a9a', mouth: 'calm', glasses: 0xc0392b } } },
 ]
 
 // Text drawn to a canvas and shown as a camera-facing sprite. `worldHeight`
@@ -879,7 +875,7 @@ for (const [cx, cz, sizeX, sizeZ] of PATH_STRIPS) {
   scene.add(strip)
 }
 
-const LAMP_POSITIONS = [[-8, 3.7], [4.3, 3.7], [17, 0.3], [7.7, -15], [4.3, 11]]
+const LAMP_POSITIONS = [[-8, 3.7], [4.3, 3.7], [7.7, -15]]
 const lampPoleMat = new THREE.MeshStandardMaterial({ color: 0x2c2f36 })
 const lampBulbMat = new THREE.MeshStandardMaterial({ color: 0xfff3d0, emissive: 0xffd28a, emissiveIntensity: 0 })
 for (const [x, z] of LAMP_POSITIONS) {
@@ -933,8 +929,8 @@ function sceneryBlocked(x, z) {
 // line instead of an invisible wall. All of them share three InstancedMeshes
 // (trunk + two foliage tiers) - a couple hundred separate trees would be
 // several hundred draw calls, doubled again by the shadow pass.
-const INNER_TREE_COUNT = 30
-const BORDER_TREE_COUNT = 200
+const INNER_TREE_COUNT = 12
+const BORDER_TREE_COUNT = 70
 {
   const rnd = seededRandom(7)
   const trees = []
@@ -987,7 +983,7 @@ const BORDER_TREE_COUNT = 200
   }
 
   const rockMat = new THREE.MeshStandardMaterial({ color: 0x8b8f96, flatShading: true })
-  for (let placed = 0, tries = 0; placed < 12 && tries < 2000; tries++) {
+  for (let placed = 0, tries = 0; placed < 4 && tries < 2000; tries++) {
     const x = (rnd() * 2 - 1) * innerLimit
     const z = (rnd() * 2 - 1) * innerLimit
     if (sceneryBlocked(x, z) || crowded(x, z, 2.2)) continue
@@ -1009,7 +1005,7 @@ const BORDER_TREE_COUNT = 200
 const stars = (() => {
   const rnd = seededRandom(31)
   const positions = []
-  while (positions.length < 500 * 3) {
+  while (positions.length < 200 * 3) {
     const v = new THREE.Vector3(rnd() * 2 - 1, rnd(), rnd() * 2 - 1)
     if (v.lengthSq() > 1 || v.lengthSq() < 0.01) continue
     v.normalize().multiplyScalar(300)
@@ -1033,9 +1029,9 @@ const clouds = (() => {
   const rnd = seededRandom(53)
   const puffGeo = new THREE.SphereGeometry(1, 8, 6)
   const list = []
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 4; i++) {
     const group = new THREE.Group()
-    const puffs = 4 + Math.floor(rnd() * 3)
+    const puffs = 3 + Math.floor(rnd() * 2)
     for (let p = 0; p < puffs; p++) {
       const puff = new THREE.Mesh(puffGeo, cloudMat)
       puff.scale.set(6 + rnd() * 5, 2 + rnd() * 1.3, 4 + rnd() * 3)
