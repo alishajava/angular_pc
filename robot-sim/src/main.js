@@ -329,8 +329,8 @@ function makeBuilding(x, z, w, d, h, rotY = 0, kind = null) {
 
 // 아레나 안 장애물: 중층 빌딩 (충돌 반경은 기존과 같음)
 const obstacles = []
-for (let i = 0; i < 10; i++) {
-  const angle = (i / 10) * Math.PI * 2 + rand(-0.2, 0.2)
+for (let i = 0; i < 7; i++) {
+  const angle = (i / 7) * Math.PI * 2 + rand(-0.2, 0.2)
   const r = 16 + Math.random() * 30
   const x = Math.sin(angle) * r
   const z = Math.cos(angle) * r
@@ -342,9 +342,9 @@ for (let i = 0; i < 10; i++) {
 
 // 아레나 바깥: 도시 스카이라인 (방사형 도로 8개를 비워 두고 3겹으로 배치)
 for (const [r0, r1, hMin, hMax, count] of [
-  [64, 78, 7, 20, 52],
-  [88, 118, 14, 36, 56],
-  [128, 190, 22, 56, 60],
+  [64, 78, 7, 20, 20],
+  [88, 118, 14, 36, 20],
+  [128, 190, 22, 56, 22],
 ]) {
   for (let i = 0; i < count; i++) {
     const a = (i / count) * Math.PI * 2 + rand(-0.04, 0.04)
@@ -372,7 +372,7 @@ for (const [r0, r1, hMin, hMax, count] of [
     road.rotation.z = -a
     road.position.set(Math.sin(a) * 160, 0.016, Math.cos(a) * 160)
     scene.add(road)
-    for (let d = ARENA_RADIUS + 14; d < 250; d += 9) {
+    for (let d = ARENA_RADIUS + 14; d < 250; d += 16) {
       const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 4), lineMat)
       dash.rotation.x = -Math.PI / 2
       dash.rotation.z = -a
@@ -380,8 +380,8 @@ for (const [r0, r1, hMin, hMax, count] of [
       scene.add(dash)
     }
   }
-  for (let i = 0; i < 120; i++) {
-    const a = (i / 120) * Math.PI * 2
+  for (let i = 0; i < 60; i++) {
+    const a = (i / 60) * Math.PI * 2
     const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 2.4), lineMat)
     dash.rotation.x = -Math.PI / 2
     dash.rotation.z = -a - Math.PI / 2
@@ -391,8 +391,8 @@ for (const [r0, r1, hMin, hMax, count] of [
   // 가로등
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x20283a, roughness: 0.7 })
   const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffe2a0 })
-  for (let i = 0; i < 36; i++) {
-    const a = (i / 36) * Math.PI * 2 + 0.05
+  for (let i = 0; i < 18; i++) {
+    const a = (i / 18) * Math.PI * 2 + 0.05
     const px = Math.sin(a) * (ARENA_RADIUS + 12.5)
     const pz = Math.cos(a) * (ARENA_RADIUS + 12.5)
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 7, 6), poleMat)
