@@ -4,10 +4,10 @@ import * as THREE from 'three'
 // 여기서는 타일 상태를 읽어 3D로 보여 주기만 한다. 1타일 = 월드 1유닛 (x=열, z=행).
 export function createWorld3D({ canvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H, paintTile }) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
   renderer.setSize(VIEW_W, VIEW_H, false)
   renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  renderer.shadowMap.type = THREE.PCFShadowMap
   renderer.outputColorSpace = THREE.SRGBColorSpace
 
   const scene = new THREE.Scene()
@@ -30,7 +30,7 @@ export function createWorld3D({ canvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H,
   sun.position.set(COLS / 2 + 22, 32, ROWS / 2 - 14)
   sun.target.position.set(COLS / 2, 0, ROWS / 2)
   sun.castShadow = true
-  sun.shadow.mapSize.set(2048, 2048)
+  sun.shadow.mapSize.set(1536, 1536)
   const sc = sun.shadow.camera
   sc.left = -34; sc.right = 34; sc.top = 30; sc.bottom = -30; sc.near = 1; sc.far = 90
   sun.shadow.bias = -0.0004

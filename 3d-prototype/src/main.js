@@ -9,11 +9,11 @@ scene.fog = new THREE.Fog(SKY_COLOR, 30, 85)
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500)
 
-const renderer = new THREE.WebGLRenderer({ antialias: true })
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
 renderer.setSize(window.innerWidth, window.innerHeight)
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
 renderer.shadowMap.enabled = true
-renderer.shadowMap.type = THREE.PCFSoftShadowMap
+renderer.shadowMap.type = THREE.PCFShadowMap // PCFSoft보다 가볍다
 document.body.appendChild(renderer.domElement)
 
 const hemiLight = new THREE.HemisphereLight(0xffffff, 0x6b8caf, 1.4)
@@ -27,7 +27,7 @@ scene.add(sun)
 // shadow map too thin to read as anything but blur.
 const SHADOW_RANGE = 32
 sun.castShadow = true
-sun.shadow.mapSize.set(2048, 2048)
+sun.shadow.mapSize.set(1536, 1536)
 Object.assign(sun.shadow.camera, { left: -SHADOW_RANGE, right: SHADOW_RANGE, top: SHADOW_RANGE, bottom: -SHADOW_RANGE, near: 1, far: 160 })
 sun.shadow.camera.updateProjectionMatrix()
 sun.shadow.bias = -0.0004
@@ -1596,7 +1596,50 @@ function updateNpcHitAnimation(dt) {
 // files to generate or host) rather than a silent on-screen bubble.
 const subtitleEl = document.getElementById('subtitle')
 let subtitleTimer = 0
+// 음성 지연을 줄이기 위해: 한국어 음성을 미리 골라 두고(기기 내장 음성 우선),
+// 이전 낭독이 밀려 있으면 끊고, 첫 입력 때 음성 엔진을 미리 깨워 두며,
+// 낭독에는 이름표 없이 대사만 읽고, 대화 시작 즉시 짧은 효과음을 낸다.
+let koVoice = null
+function pickVoice() {
+  if (!window.speechSynthesis) return
+  const vs = window.speechSynthesis.getVoices().filter((v) => v.lang && v.lang.toLowerCase().startsWith('ko'))
+  vs.sort((a, b) => (b.localService ? 1 : 0) - (a.localService ? 1 : 0))
+  koVoice = vs[0] || null
+}
+if (window.speechSynthesis) {
+  pickVoice()
+  window.speechSynthesis.addEventListener('voiceschanged', pickVoice)
+  let warmed = false
+  const warm = () => {
+    if (warmed) return
+    warmed = true
+    const u = new SpeechSynthesisUtterance(' ')
+    u.volume = 0
+    window.speechSynthesis.speak(u)
+  }
+  window.addEventListener('keydown', warm, { once: true })
+  window.addEventListener('pointerdown', warm, { once: true })
+}
+function playBlip() {
+  if (!(window.AudioContext || window.webkitAudioContext)) return
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+  if (audioCtx.state === 'suspended') audioCtx.resume()
+  const now = audioCtx.currentTime
+  ;[660, 880].forEach((f, i) => {
+    const osc = audioCtx.createOscillator()
+    const g = audioCtx.createGain()
+    osc.type = 'triangle'
+    osc.frequency.value = f
+    g.gain.setValueAtTime(0.0001, now + i * 0.07)
+    g.gain.exponentialRampToValueAtTime(0.12, now + i * 0.07 + 0.01)
+    g.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.07 + 0.12)
+    osc.connect(g).connect(audioCtx.destination)
+    osc.start(now + i * 0.07)
+    osc.stop(now + i * 0.07 + 0.14)
+  })
+}
 function speak(text) {
+  playBlip()
   // Shown on screen as well: text-to-speech is silent on a muted tab and
   // missing outright in some browsers, and the quest lines matter.
   if (subtitleEl) {
@@ -1608,9 +1651,14 @@ function speak(text) {
     }, 4000)
   }
   if (!window.speechSynthesis) return
-  const utter = new SpeechSynthesisUtterance(text)
+  const idx = text.indexOf(': ')
+  const spoken = idx >= 0 ? text.slice(idx + 2) : text
+  const utter = new SpeechSynthesisUtterance(spoken)
   utter.lang = 'ko-KR'
+  if (koVoice) utter.voice = koVoice
   utter.pitch = 1.05
+  utter.rate = 1.1
+  if (window.speechSynthesis.speaking || window.speechSynthesis.pending) window.speechSynthesis.cancel()
   window.speechSynthesis.speak(utter)
 }
 
@@ -1681,7 +1729,7 @@ function setQuestBanner(text, autoHideMs) {
 // flips true the frame the player enters GREET_RADIUS and back to false
 // only once they leave it, so walking up to the same NPC again later
 // (rather than just lingering nearby) triggers a fresh greeting.
-const GREET_RADIUS = 3
+const GREET_RADIUS = 4.2 // 부딪히기 전에 미리 말을 걸어 음성이 늦지 않게 한다
 
 function updateNpcGreetings() {
   for (const npc of npcs) {
@@ -1917,9 +1965,37 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight)
 })
 
+// 자동 화질 조절: 프레임이 느리면 해상도 → 그림자 순으로 한 단계씩 낮춘다 (올리지는 않아 깜빡임이 없다)
+let qualityTier = 0
+const DPR_BY_TIER = [1.5, 1, 0.75]
+function applyQuality(tier) {
+  qualityTier = tier
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, DPR_BY_TIER[tier]))
+  renderer.setSize(window.innerWidth, window.innerHeight)
+  if (tier >= 1 && sun.shadow.mapSize.x > 1024) {
+    sun.shadow.mapSize.set(1024, 1024)
+    if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null }
+  }
+  if (tier >= 2) sun.castShadow = false
+}
+let perfFrames = 0
+let perfSum = 0
+function watchPerf(rawMs) {
+  if (rawMs > 250) return // 탭 전환 등으로 끊긴 프레임은 무시
+  perfFrames++
+  perfSum += rawMs
+  if (perfFrames >= 90) {
+    const avg = perfSum / perfFrames
+    perfFrames = 0
+    perfSum = 0
+    if (avg > 26 && qualityTier < 2) applyQuality(qualityTier + 1)
+  }
+}
+
 let lastTime = performance.now()
 function loop(time) {
   const dt = Math.min(0.05, (time - lastTime) / 1000)
+  watchPerf(time - lastTime)
   lastTime = time
 
   updateDayNight(dt)
