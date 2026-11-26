@@ -186,19 +186,127 @@ function startFromTitle() {
   return true
 }
 
+// ---------- 저장 / 불러오기 ----------
+const SAVE_KEY = 'sailing-sim-save-v1'
+// 저장하는 값: 배 위치, 진행 중인 레이스, 골드·선체·업그레이드·화물·시세·친밀도·의뢰, 태풍
+function snapshot() {
+  const s = state
+  return {
+    v: 1,
+    savedAt: Date.now(),
+    boat: { ...s.boat },
+    checkpointIndex: s.checkpointIndex,
+    elapsed: s.elapsed,
+    windTime: s.windTime,
+    gold: s.gold,
+    hull: s.hull,
+    upgrades: { ...s.upgrades },
+    hold: { ...s.hold },
+    market: JSON.parse(JSON.stringify(s.market)),
+    known: JSON.parse(JSON.stringify(s.known)),
+    rep: { ...s.rep },
+    offers: JSON.parse(JSON.stringify(s.offers)),
+    contract: s.contract ? { ...s.contract } : null,
+    typhoons: s.typhoons.map((t) => ({ ...t })),
+    nextTyphoonAt: s.nextTyphoonAt,
+  }
+}
+function readSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    const d = raw ? JSON.parse(raw) : null
+    return d && d.v === 1 && d.boat && Number.isFinite(d.boat.x) ? d : null
+  } catch {
+    return null
+  }
+}
+function hasSave() {
+  return !!readSave()
+}
+let lastSavedAt = 0
+function saveGame(manual = false) {
+  if (state.phase !== 'racing') return false
+  try {
+    const data = snapshot()
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data))
+    lastSavedAt = data.savedAt
+    if (manual) {
+      showToast('💾 저장했어요')
+      sfx.pickup()
+    }
+    return true
+  } catch {
+    if (manual) showToast('저장하지 못했어요 (브라우저 저장 공간을 쓸 수 없어요)')
+    return false
+  }
+}
+function loadGame() {
+  const d = readSave()
+  if (!d) return false
+  const fresh = makeInitialState()
+  state = {
+    ...fresh,
+    phase: 'racing',
+    boat: { ...fresh.boat, ...d.boat },
+    wake: [],
+    checkpointIndex: Math.min(d.checkpointIndex || 0, CHECKPOINTS.length - 1),
+    elapsed: d.elapsed || 0,
+    windTime: d.windTime || 0,
+    gold: Number.isFinite(d.gold) ? d.gold : fresh.gold,
+    hull: Number.isFinite(d.hull) ? d.hull : fresh.hull,
+    upgrades: { ...fresh.upgrades, ...(d.upgrades || {}) },
+    hold: d.hold || {},
+    market: d.market || fresh.market,
+    known: d.known || {},
+    rep: { ...fresh.rep, ...(d.rep || {}) },
+    offers: d.offers || {},
+    contract: d.contract || null,
+    typhoons: d.typhoons || [],
+    nextTyphoonAt: d.nextTyphoonAt ?? fresh.nextTyphoonAt,
+    dockedPortId: null,
+    ui: null,
+  }
+  heldKeys.clear()
+  lastSavedAt = d.savedAt
+  showToast('📂 불러왔어요')
+  sfx.good()
+  return true
+}
+function saveSummary(d) {
+  const t = new Date(d.savedAt)
+  return `${String(t.getMonth() + 1)}/${t.getDate()} ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')} 저장 · 골드 ${d.gold} · 체크포인트 ${Math.min(d.checkpointIndex + 1, CHECKPOINTS.length)}/${CHECKPOINTS.length}`
+}
+// 15초마다, 항구 메뉴를 닫을 때, 탭을 닫을 때 자동 저장한다 (레이스가 끝나면 저장은 지운다)
+setInterval(() => {
+  if (state.phase === 'racing' && !state.ui) saveGame(false)
+}, 15000)
+window.addEventListener('beforeunload', () => saveGame(false))
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) saveGame(false)
+})
+
 let lastResetPress = -9999
 const heldKeys = new Set()
 window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase()
   unlockSfx()
   if (state.phase === 'title') {
-    if (!e.repeat && key.length === 1 || key === 'enter' || key.startsWith('arrow')) startFromTitle()
+    if (e.repeat) return
+    if (key === 'l' && hasSave()) {
+      if (loadGame()) sfx.start()
+      return
+    }
+    if (key.length === 1 || key === 'enter' || key.startsWith('arrow')) startFromTitle()
     return
   }
   if (state.ui) { handleMenuKey(e, key); return }
   if (key === 'e' && !e.repeat && state.phase === 'racing' && state.dockedPortId) { openPort(state.dockedPortId); return }
   heldKeys.add(key)
   if (key === 'm' && !e.repeat) showToast(toggleMute() ? '소리 끔 (M으로 다시 켜기)' : '소리 켬')
+  if (key === 'p' && !e.repeat) saveGame(true)
+  if (key === 'l' && !e.repeat) {
+    if (!loadGame()) showToast('저장된 항해가 없어요')
+  }
   if (key === 'r' && !e.repeat) {
     // 진행 중에 실수로 눌러 기록이 날아가지 않도록 한 번 더 확인한다
     const now = performance.now()
@@ -212,8 +320,17 @@ window.addEventListener('keydown', (e) => {
   }
 })
 window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()))
+let titleContinueRect = null
 window.addEventListener('pointerdown', (e) => {
   unlockSfx()
+  if (state.phase === 'title' && hasSave() && titleContinueRect) {
+    const p = canvasPos(e)
+    const r = titleContinueRect
+    if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) {
+      if (loadGame()) sfx.start()
+      return
+    }
+  }
   if (startFromTitle()) return
   Object.assign(mouse, canvasPos(e))
   for (let i = hits.length - 1; i >= 0; i--) {
@@ -400,6 +517,7 @@ function updateRacing(dt) {
     sfx.pickup()
     if (state.checkpointIndex >= CHECKPOINTS.length) {
       state.phase = 'finished'
+      try { localStorage.removeItem(SAVE_KEY) } catch { /* noop */ }
       sfx.fanfare()
       state.finishTime = state.elapsed
       const best = readBestTime()
@@ -470,6 +588,7 @@ function openPort(portId) {
 function closePort() {
   state.ui = null
   sfx.click()
+  saveGame(false)
 }
 function setTab(tab) {
   const ui = state.ui
@@ -964,6 +1083,9 @@ function drawPortMenu() {
   })
   ctx.fillStyle = '#2f6f9f'
   ctx.fillRect(PX + 20, ty + 38, PW - 40, 3)
+  // 저장/불러오기 (탭 줄 오른쪽)
+  uiBtn(PX + PW - 232, ty + 3, 104, 32, '💾 저장하기', () => { state.phase === 'racing' && saveGame(true) }, { color: '#2f6f9f', font: 'bold 13px sans-serif' })
+  uiBtn(PX + PW - 120, ty + 3, 100, 32, '📂 불러오기', () => { if (!hasSave()) return fail('저장된 항해가 없어요'); loadGame() }, { enabled: hasSave(), color: '#5a4fb5', font: 'bold 13px sans-serif' })
 
   const cy = ty + 56
   if (ui.tab === 'market') drawMarketTab(port, ui, PX, cy, PW)
@@ -1575,11 +1697,29 @@ function drawTitleOverlay() {
   ctx.fillText('바람을 읽어 체크포인트를 돌고, 항구에서 사고팔고 · 대화하고 · 정비하세요', W / 2, H * 0.2 + 32)
   ctx.font = '14px sans-serif'
   ctx.fillStyle = 'rgba(255,255,255,0.85)'
-  ctx.fillText('A/D 또는 ←/→ 조타 · 항구에서 E 메뉴 · R 재시작 · M 소리 켜기/끄기', W / 2, H * 0.86)
+  ctx.fillText('A/D 또는 ←/→ 조타 · 항구에서 E 메뉴 · P 저장 · L 불러오기 · R 재시작 · M 소리', W / 2, H * 0.86)
   ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
   ctx.font = 'bold 18px sans-serif'
   ctx.fillStyle = '#fff'
-  ctx.fillText('아무 키나 누르거나 클릭해서 출항', W / 2, H * 0.93)
+  ctx.fillText(hasSave() ? '아무 키나 누르거나 클릭해서 새 항해' : '아무 키나 누르거나 클릭해서 출항', W / 2, H * 0.93)
+  titleContinueRect = null
+  if (hasSave()) {
+    const sv = readSave()
+    const bw = 460
+    const bx = W / 2 - bw / 2
+    const by = H * 0.69
+    titleContinueRect = { x: bx, y: by, w: bw, h: 56 }
+    ctx.globalAlpha = 1
+    ctx.fillStyle = 'rgba(255,210,63,0.95)'
+    ctx.beginPath()
+    ctx.roundRect(bx, by, bw, 56, 14)
+    ctx.fill()
+    ctx.fillStyle = '#3a2a08'
+    ctx.font = 'bold 18px sans-serif'
+    ctx.fillText('📂 이어하기 (L)', W / 2, by + 24)
+    ctx.font = '12px sans-serif'
+    ctx.fillText(saveSummary(sv), W / 2, by + 44)
+  }
   ctx.globalAlpha = 1
   ctx.textAlign = 'left'
   ctx.textBaseline = 'top'
