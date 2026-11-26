@@ -41,7 +41,7 @@ const ATTACKS = {
   // the grabbed enemy into its own little gravity arc (see the enemy
   // 'thrown' state in updateEnemies), so `knockback` here is unused but
   // kept for shape-consistency with the rest of this table.
-  throw: { startup: 0.17, active: 0.24, recovery: 0.3, range: 46, damage: 20, knockback: 0 },
+  throw: { startup: 0.2, active: 0.38, recovery: 0.34, range: 46, damage: 20, knockback: 0 },
 }
 
 // A quick burst forward on double-tapping a direction - classic fighting-
@@ -133,8 +133,8 @@ const curWaves = () => CHAPTERS[state.chapter].waves
 const GRENADE_MAX = 6
 const MG_AMMO = 48
 const MG_INTERVAL = 0.085
-const GL_AMMO = 8
-const GL_BLAST = { rx: 108, ry: 56, dmg: 52 }
+const GL_AMMO = 5
+const GL_BLAST = { rx: 150, ry: 78, dmg: 72 }
 const HAND_BLAST = { rx: 120, ry: 62, dmg: 55 }
 const ITEM_KINDS = [['grenade', 0.28], ['mg', 0.22], ['gl', 0.16], ['heal', 0.34]]
 
@@ -462,8 +462,18 @@ function resolvePlayerHit(type) {
 // a simple sideways knockback - see the 'thrown' state in updateEnemies for
 // the actual flight physics, and drawEnemySprite for how its height gets
 // rendered as lift, same trick as the player's own jump.
-const THROW_LAUNCH_VZ = 260
-const THROW_LAUNCH_VX = 220
+const THROW_LAUNCH_VZ = 250
+const THROW_LAUNCH_VX = 270
+const FLIP_END = Math.PI * 1.5 // 착지할 때의 몸 각도 (등으로 누운 자세)
+const easeIO = (k) => (k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2)
+const easeOut = (k) => 1 - Math.pow(1 - clamp(k, 0, 1), 3)
+// 잡은 적이 지나가는 길: 가슴 앞 → 머리 위로 번쩍 → 어깨 뒤로 젖힘(던지기 직전). k는 0..1.
+// rel은 플레이어가 보는 방향 기준 앞쪽 거리, z는 발 높이, rot은 몸의 기울기(라디안)
+function throwPath(k) {
+  const lift = easeIO(clamp(k / 0.55, 0, 1))
+  const back = k > 0.55 ? easeIO((k - 0.55) / 0.45) : 0
+  return { rel: 26 - 22 * lift - 14 * back, z: 20 + 52 * lift + 4 * back, rot: 1.57 * lift + 0.5 * back }
+}
 
 function resolvePlayerThrow() {
   const p = state.player
@@ -497,14 +507,17 @@ function resolvePlayerThrow() {
   }
   best.state = 'thrown'
   // 잡은 적을 머리 위로 들어 올렸다가(hold) 내던진다
-  best.thrown = { z: 0, vz: THROW_LAUNCH_VZ, vx: dir * THROW_LAUNCH_VX, hold: def.active, holdMax: def.active, dir, rot: 0 }
+  best.thrown = { z: 0, vz: THROW_LAUNCH_VZ, vx: dir * THROW_LAUNCH_VX, hold: def.active, holdMax: def.active, dir, rot: 0, hit: new Set(), trail: [], trailT: 0 }
   best.y = p.y
   state.fx.push({ kind: 'ring', x: p.x + p.facing * 14, y: p.y, t: 0, life: 0.3 })
 }
 
 function spawnLandFx(x, y) {
-  state.fx.push({ kind: 'dust', x, y, t: 0, life: 0.5 })
-  state.fx.push({ kind: 'ring', x, y, t: 0, life: 0.35 })
+  state.fx.push({ kind: 'dust', x, y, t: 0, life: 0.6 })
+  state.fx.push({ kind: 'ring', x, y, t: 0, life: 0.4 })
+  state.fx.push({ kind: 'ring', x, y, t: -0.06, life: 0.5 })
+  state.fx.push({ kind: 'spark', x, y: y - 8, t: 0, life: 0.25 })
+  state.shake = Math.max(state.shake, 0.28)
   sfx.heavy()
 }
 
@@ -533,7 +546,7 @@ function damageEnemy(en, dmg, knockbackDx) {
   en.x = clamp(en.x + knockbackDx, 40, WORLD_WIDTH - 40)
   if (en.hp <= 0) {
     killEnemy(en)
-  } else if (en.stunImmunity <= 0) {
+  } else if (en.stunImmunity <= 0 && !en.down) {
     en.state = 'hitstun'
     en.hitstunTimer = HITSTUN_DURATION
     en.t = 0
@@ -574,8 +587,10 @@ function updateEnemies(dt) {
 
     if (en.state === 'hitstun') {
       en.hitstunTimer -= dt
+      if (en.down) en.down.t += dt
       if (en.hitstunTimer <= 0) {
         en.state = 'approach'
+        en.down = null
         en.stunImmunity = STUN_IMMUNITY
       }
       continue
@@ -584,30 +599,58 @@ function updateEnemies(dt) {
     if (en.state === 'thrown') {
       const th = en.thrown
       if (th.hold > 0) {
-        // 들어 올려지는 중: 플레이어 머리 위에서 가로로 누운 채 흔들린다
+        // 들어 올려지는 중: 가슴 앞 → 머리 위 → 어깨 뒤로 젖힘. 플레이어 손이 같은 길을 따라간다
         th.hold -= dt
-        const k = 1 - Math.max(0, th.hold) / th.holdMax
-        const e = 1 - Math.pow(1 - Math.min(1, k * 1.6), 3)
-        en.x = clamp(p.x + p.facing * (10 + 12 * k), 40, WORLD_WIDTH - 40)
+        const k = clamp(1 - Math.max(0, th.hold) / th.holdMax, 0, 1)
+        const path = throwPath(k)
+        en.x = clamp(p.x + p.facing * path.rel, 40, WORLD_WIDTH - 40)
         en.y = p.y
-        th.z = 82 * e
-        th.rot = th.dir * (Math.PI / 2) * e + Math.sin(k * 30) * 0.06
+        th.z = path.z
+        th.rot = th.dir * (path.rot + Math.sin(k * 40) * 0.04)
+        en.facing = -th.dir
         if (th.hold <= 0) {
+          // 놓는 순간: 앞으로 휙 내던진다
+          th.rot0 = path.rot
+          th.flightT = (th.vz + Math.sqrt(th.vz * th.vz + 2 * GRAVITY * th.z)) / GRAVITY
+          th.fly = 0
           sfx.whoosh()
           state.fx.push({ kind: 'ring', x: en.x, y: en.y, t: 0, life: 0.25 })
         }
         continue
       }
-      th.rot += th.dir * 15 * dt
+      th.fly += dt
       th.vz -= GRAVITY * dt
       th.z += th.vz * dt
       en.x = clamp(en.x + th.vx * dt, 40, WORLD_WIDTH - 40)
-      if (th.z <= 0) {
+      // 앞으로 공중제비를 돌며 날아가 등으로 떨어진다
+      const prog = clamp(th.fly / th.flightT, 0, 1)
+      th.rot = th.dir * (th.rot0 + (FLIP_END - th.rot0) * easeIO(prog))
+      th.trailT -= dt
+      if (th.trailT <= 0) {
+        th.trailT = 0.04
+        th.trail.push({ x: en.x, z: Math.max(0, th.z), rot: th.rot })
+        if (th.trail.length > 6) th.trail.shift()
+      }
+      // 날아가는 동료에게 부딪힌 적은 같이 쓰러진다
+      for (const o of state.enemies) {
+        if (o === en || o.state === 'dead' || o.state === 'thrown' || th.hit.has(o)) continue
+        if (Math.abs(o.x - en.x) < 32 && Math.abs(o.y - en.y) < 26 && th.z < 80) {
+          th.hit.add(o)
+          damageEnemy(o, 14, Math.sign(th.vx) * 45)
+          state.fx.push({ kind: 'spark', x: o.x, y: o.y - 40, t: 0, life: 0.25 })
+        }
+      }
+      if (th.z <= 0 && th.vz < 0) {
         th.z = 0
         spawnLandFx(en.x, en.y)
+        en.hp -= 12 // 바닥에 내리꽂힌 충격
+        en.flashTimer = 0.15
+        const dir = th.dir
         en.thrown = null
+        if (en.hp <= 0) { killEnemy(en); continue }
         en.state = 'hitstun'
-        en.hitstunTimer = HITSTUN_DURATION * 1.5 // a beat longer than a normal hit - they just landed hard
+        en.hitstunTimer = 1.0 // 등으로 누웠다가 일어난다
+        en.down = { t: 0, dur: 1.0, dir }
         en.t = 0
       }
       continue
@@ -790,11 +833,13 @@ function fireMachineGun() {
 function fireLauncher() {
   const p = state.player
   if (state.phase !== 'playing' || !p.gun || p.gun.kind !== 'gl' || p.gun.ammo <= 0 || p.attack || p.hitstunTimer > 0 || p.dashing || p.glCd > 0) return
-  p.glCd = 0.55
+  p.glCd = 0.8
   p.gun.ammo -= 1
-  p.muzzle = 0.14
-  state.grenades.push({ x: p.x + p.facing * 46, y: p.y, z: 48 + p.z, vx: p.facing * 540, vz: 150, t: 0, fuse: 3, shell: true })
-  state.fx.push({ kind: 'dust', x: p.x + p.facing * 46, y: p.y, t: 0, life: 0.35 })
+  p.muzzle = 0.22
+  state.shake = Math.max(state.shake, 0.14)
+  // 어깨 위 발사관에서 로켓탄이 곧게 날아간다 (뒤로는 백블라스트)
+  state.grenades.push({ x: p.x + p.facing * 70, y: p.y, z: 60 + p.z, vx: p.facing * 660, vz: 0, t: 0, fuse: 1.25, shell: true, rocket: true, puff: 0 })
+  for (let i = 0; i < 4; i++) state.fx.push({ kind: 'smoke', x: p.x - p.facing * (24 + i * 14), y: p.y, h: 58 + p.z + i * 2, t: -i * 0.03, life: 0.7, r: 12 + i * 3 })
   sfx.launch()
   if (p.gun.ammo <= 0) p.gun = null
 }
@@ -855,11 +900,15 @@ function updateProjectiles(dt) {
   for (const g of state.grenades) {
     g.t += dt
     g.x += g.vx * dt
-    g.vz -= GRAVITY * dt
-    g.z += g.vz * dt
+    if (!g.rocket) {
+      g.vz -= GRAVITY * dt
+      g.z += g.vz * dt
+    }
     if (g.shell) {
-      // 유탄: 적에 닿거나 땅에 떨어지면 바로 폭발
-      const hit = g.z < 90 && state.enemies.some((en) => en.state !== 'dead' && Math.abs(en.x - g.x) < 26 && Math.abs(en.y - g.y) < 28)
+      // 로켓탄: 적에 닿거나 사거리 끝에서 폭발, 지나간 자리에 연기가 남는다
+      g.puff -= dt
+      if (g.puff <= 0) { g.puff = 0.035; state.fx.push({ kind: 'smoke', x: g.x - Math.sign(g.vx) * 22, y: g.y, h: g.z, t: 0, life: 0.5, r: 6 }) }
+      const hit = g.z < 100 && state.enemies.some((en) => en.state !== 'dead' && Math.abs(en.x - g.x) < 30 && Math.abs(en.y - g.y) < 30)
       if (hit || g.z <= 0 || g.t >= g.fuse) { explode(g.x, g.y, GL_BLAST); g.dead = true }
       continue
     }
@@ -1303,7 +1352,8 @@ function drawHumanoid(x, y, opts) {
   ctx.globalAlpha = opts.alpha ?? 1
   ctx.translate(worldToScreenX(x), y - (opts.lift || 0))
   if (opts.rot) {
-    ctx.translate(0, -30 * scale)
+    const sinkY = opts.sink ? 24 * scale * Math.abs(Math.sin(opts.rot)) : 0 // 누우면 몸통이 바닥에 닿게
+    ctx.translate(0, -30 * scale + sinkY)
     ctx.rotate(opts.rot)
     ctx.translate(0, 30 * scale)
   }
@@ -1312,7 +1362,10 @@ function drawHumanoid(x, y, opts) {
   const tPhase = opts.throwPhase
   const tp = opts.throwP || 0
   if (tPhase) {
-    const lean = tPhase === 'startup' ? 0.1 * tp : tPhase === 'active' ? 0.1 - 0.22 * Math.min(1, tp * 1.5) : -0.12 + 0.3 * Math.min(1, tp * 2.2) - 0.18 * Math.max(0, tp - 0.45)
+    // 준비: 몸을 숙이며 파고든다 → 들어올릴 때 뒤로 젖힌다(활처럼) → 놓는 순간 앞으로 확 꺾는다
+    const lean = tPhase === 'startup' ? 0.22 * easeOut(tp)
+      : tPhase === 'active' ? 0.22 - 0.6 * easeIO(tp) // +0.22 → -0.38
+        : -0.38 + 0.82 * easeOut(tp / 0.45) - 0.44 * easeIO(clamp((tp - 0.45) / 0.55, 0, 1)) // 앞으로 쭉(+0.44) → 제자리
     ctx.translate(0, -26)
     ctx.rotate(lean) // 윗몸 기울기(허리 기준)
     ctx.translate(0, 26)
@@ -1459,7 +1512,81 @@ function drawHumanoid(x, y, opts) {
     ctx.lineWidth = 1
     ctx.stroke()
   }
-  if (opts.gun) {
+  // 어깨→손을 2마디(윗팔+아랫팔)로 이어 팔꿈치가 자연스럽게 꺾이는 팔
+  const ik = (sx, sy, hx, hy) => {
+    const l1 = 17
+    const l2 = 17
+    let dx = hx - sx
+    let dy = hy - sy
+    let d = Math.hypot(dx, dy) || 0.01
+    const dd = Math.min(d, l1 + l2 - 0.5)
+    const ux = dx / d
+    const uy = dy / d
+    const a = (dd * dd + l1 * l1 - l2 * l2) / (2 * dd)
+    const h = Math.sqrt(Math.max(0, l1 * l1 - a * a))
+    let ex = sx + ux * a - uy * h
+    let ey = sy + uy * a + ux * h
+    const ex2 = sx + ux * a + uy * h
+    const ey2 = sy + uy * a - ux * h
+    if (ey2 > ey) { ex = ex2; ey = ey2 } // 팔꿈치는 아래쪽으로
+    const hx2 = sx + ux * dd
+    const hy2 = sy + uy * dd
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    for (const [w, col] of [[9.2, OUT], [7.2, bodyColor]]) {
+      ctx.strokeStyle = col
+      ctx.lineWidth = w
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.lineTo(hx2, hy2); ctx.stroke()
+    }
+    ctx.lineCap = 'butt'
+    ctx.lineJoin = 'miter'
+    fist(hx2, hy2)
+  }
+  if (opts.gun === 'gl') {
+    // 어깨에 멘 바주카/RPG 발사관: 뒤쪽 손은 손잡이, 앞쪽 손은 발사관 중간을 받친다
+    const kick = opts.muzzle ? -4 : 0
+    ik(-3, -51, 10 + kick, -47) // 뒤쪽 팔
+    ctx.save()
+    ctx.translate(kick, 0)
+    const ty = -64
+    if (opts.muzzle) {
+      // 백블라스트: 발사관 뒤로 뿜어 나오는 불꽃
+      const bl = ctx.createLinearGradient(-60, 0, -22, 0)
+      bl.addColorStop(0, 'rgba(255,120,30,0)'); bl.addColorStop(0.5, 'rgba(255,190,70,0.95)'); bl.addColorStop(1, 'rgba(255,255,220,1)')
+      ctx.fillStyle = bl
+      ctx.beginPath(); ctx.moveTo(-22, ty - 7); ctx.lineTo(-62 - Math.random() * 8, ty - 2); ctx.lineTo(-62 - Math.random() * 8, ty + 3); ctx.lineTo(-22, ty + 7); ctx.closePath(); ctx.fill()
+    }
+    // 뒤쪽 나팔(노즐)
+    ctx.fillStyle = '#2a2d26'
+    ctx.beginPath(); ctx.moveTo(-18, ty - 4); ctx.lineTo(-27, ty - 9); ctx.lineTo(-27, ty + 9); ctx.lineTo(-18, ty + 4); ctx.closePath(); ctx.fill()
+    ctx.strokeStyle = OUT; ctx.lineWidth = 1; ctx.stroke()
+    // 발사관 본체
+    ctx.fillStyle = '#5f6e3c'
+    hRound(-19, ty - 6, 66, 12, 3); ctx.fill(); ctx.stroke()
+    ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(-16, ty - 5, 60, 2)
+    ctx.fillStyle = '#3d4a28'
+    ctx.fillRect(-4, ty - 6, 4, 12); ctx.fillRect(26, ty - 6, 4, 12)
+    ctx.fillStyle = '#e8c040'; ctx.fillRect(4, ty - 6, 3, 12); ctx.fillRect(12, ty - 6, 3, 12) // 노란 띠
+    // 앞쪽 깔때기 + 장전된 로켓탄 머리
+    ctx.fillStyle = '#4a5630'
+    ctx.beginPath(); ctx.moveTo(46, ty - 6); ctx.lineTo(54, ty - 9); ctx.lineTo(54, ty + 9); ctx.lineTo(46, ty + 6); ctx.closePath(); ctx.fill(); ctx.stroke()
+    ctx.fillStyle = '#d6452e'
+    ctx.beginPath(); ctx.moveTo(52, ty - 6); ctx.quadraticCurveTo(64, ty - 4, 67, ty); ctx.quadraticCurveTo(64, ty + 4, 52, ty + 6); ctx.closePath(); ctx.fill(); ctx.stroke()
+    // 조준경 + 손잡이
+    ctx.fillStyle = '#23262e'
+    hRound(14, ty - 12, 14, 6, 2); ctx.fill(); ctx.stroke()
+    ctx.fillStyle = '#7ab0d8'; ctx.fillRect(25, ty - 11, 3, 4)
+    hRound(3, ty + 5, 6, 12, 2); ctx.fill(); ctx.stroke()
+    hRound(27, ty + 5, 5, 10, 2); ctx.fill(); ctx.stroke()
+    ctx.restore()
+    ik(8, -52, 29 + kick, -50) // 앞쪽 팔
+    if (opts.muzzle) {
+      ctx.fillStyle = '#ffe9a0'
+      ctx.beginPath()
+      for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; const r = i % 2 ? 6 : 16; ctx.lineTo(70 + kick + Math.cos(a) * r, ty + Math.sin(a) * r) }
+      ctx.closePath(); ctx.fill()
+    }
+  } else if (opts.gun) {
     // 총을 앞으로 겨눈 자세
     arm(8, -54, 20, 8); fist(30, -50)
     arm(-4, -49, 14, 8); fist(10, -46)
@@ -1473,13 +1600,6 @@ function drawHumanoid(x, y, opts) {
       ctx.fillStyle = '#3a3e48'; ctx.fillRect(26, -50, 7, 11)
       ctx.fillStyle = '#6a6e78'; ctx.fillRect(34, -60, 14, 2)
       mx = 54
-    } else if (opts.gun === 'gl') {
-      hRound(8, -62, 44, 13, 3); ctx.fill(); ctx.stroke() // 굵은 발사관
-      ctx.fillStyle = '#3a3e48'
-      hRound(46, -65, 9, 19, 2); ctx.fill(); ctx.stroke() // 넓은 포구
-      ctx.beginPath(); ctx.arc(24, -47, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke() // 탄창 드럼
-      ctx.fillStyle = '#6a6e78'; ctx.fillRect(14, -66, 18, 3)
-      mx = 58
     } else {
       hRound(24, -57, 18, 7, 2); ctx.fill(); ctx.stroke()
       ctx.fillRect(26, -51, 6, 9)
@@ -1498,34 +1618,27 @@ function drawHumanoid(x, y, opts) {
     arm(8, -50, 8, 16); fist(12, -33)
     arm(-16, -50, 8, 16); fist(-12, -33)
   } else if (throwing) {
-    // 어깨에서 손까지 이어지는 팔(굵은 선)로 포즈를 만든다
-    const limb = (x1, y1, x2, y2) => {
-      ctx.lineCap = 'round'
-      ctx.strokeStyle = OUT; ctx.lineWidth = 9.5
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
-      ctx.strokeStyle = bodyColor; ctx.lineWidth = 7.5
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
-      ctx.lineCap = 'butt'
-      fist(x2, y2)
-    }
+    // 두 손이 잡은 적을 따라간다: 준비(뻗어 움켜쥠) → 번쩍 들어올림/젖힘 → 던지는 휘두름
     const lerp = (a, b, k) => a + (b - a) * k
-    const ease = (k) => 1 - Math.pow(1 - Math.min(1, Math.max(0, k)), 3)
-    let hx1, hy1, hx2, hy2 // 앞팔 손 / 뒷팔 손
-    if (tPhase === 'startup') { // 두 팔을 앞으로 뻗어 상대를 움켜쥔다
-      const k = ease(tp)
-      hx1 = lerp(14, 32, k); hy1 = lerp(-34, -50, k)
-      hx2 = lerp(-12, 26, k); hy2 = lerp(-32, -42, k)
-    } else if (tPhase === 'active') { // 번쩍 머리 위로 들어올림
-      const k = ease(tp * 1.5)
-      hx1 = lerp(32, 16, k); hy1 = lerp(-50, -104, k)
-      hx2 = lerp(26, 4, k); hy2 = lerp(-42, -100, k)
-    } else { // 내던지며 앞으로 휘두름 → 팔 늘어뜨림
-      const k = ease(tp * 2)
-      hx1 = lerp(16, 38, k); hy1 = lerp(-104, -46, k)
-      hx2 = lerp(4, 30, k); hy2 = lerp(-100, -40, k)
+    let tx
+    let ty
+    if (tPhase === 'startup') {
+      const k = easeOut(tp)
+      tx = lerp(12, 32, k)
+      ty = lerp(-30, -44, k)
+    } else if (tPhase === 'active') {
+      // 같은 경로(throwPath)를 쓰므로 적의 몸에 손이 붙어 있는 것처럼 보인다
+      const path = throwPath(clamp(tp, 0, 1))
+      tx = path.rel
+      ty = -(path.z + 12) / scale
+    } else {
+      // 놓은 뒤 앞으로 휘두르며 팔이 내려온다
+      const k = easeOut(tp / 0.5)
+      tx = lerp(-6, 36, k)
+      ty = lerp(-124, -48, k)
     }
-    limb(-8, -52, hx2, hy2)
-    limb(8, -52, hx1, hy1)
+    ik(-5, -52, tx - 7, ty + 3) // 뒤쪽 팔
+    ik(7, -52, tx + 7, ty - 2) // 앞쪽 팔
   } else {
     const armSwing = opts.moving ? Math.sin(opts.walkPhase + Math.PI) * 6 : 0
     arm(10, -50 + armSwing * 0.3, 8, 18); fist(14, -30 + armSwing * 0.3)
@@ -1757,7 +1870,7 @@ function drawPlayerSprite() {
     attacking: !!p.attack && (p.attack.phase !== 'recovery' || p.attack.type === 'throw'),
     attackType: p.attack && p.attack.type,
     throwPhase: p.attack && p.attack.type === 'throw' ? p.attack.phase : p.nadeAnim > 0 && !p.attack ? 'recovery' : null,
-    throwP: p.attack && p.attack.type === 'throw' ? Math.min(1, p.attack.t / ATTACKS.throw[p.attack.phase]) : p.nadeAnim > 0 ? clamp(1 - p.nadeAnim / 0.3, 0, 1) * 0.45 : 0,
+    throwP: p.attack && p.attack.type === 'throw' ? Math.min(1, p.attack.t / ATTACKS.throw[p.attack.phase]) : p.nadeAnim > 0 ? clamp(1 - p.nadeAnim / 0.3, 0, 1) : 0,
     gun: p.gun && p.gun.ammo > 0 && !p.attack && p.nadeAnim <= 0 ? p.gun.kind : null,
     muzzle: p.muzzle > 0,
     flash: p.hitstunTimer > 0 && Math.floor(p.hitstunTimer * 20) % 2 === 0,
@@ -1780,7 +1893,16 @@ function drawEnemySprite(en) {
   const liftZ = en.thrown ? en.thrown.z : 0
   const shadowShrink = clamp(1 - liftZ / 160, 0.55, 1)
   drawShadow(en.x, en.y, depthScale(en.y) * shadowShrink)
-  drawHumanoid(en.x, en.y, {
+  // 회전: 던져지는 중이면 공중제비, 쓰러져 있으면 누운 자세에서 일어나는 동작
+  let rot = en.thrown ? en.thrown.rot : 0
+  let sink = false
+  if (!en.thrown && en.down) {
+    const d = en.down
+    const riseK = clamp((d.t - (d.dur - 0.38)) / 0.38, 0, 1)
+    rot = d.dir * (FLIP_END + (Math.PI * 2 - FLIP_END) * easeIO(riseK))
+    sink = true
+  }
+  const opts = {
     style: en.type,
     size: stats.size || 1,
     gun: stats.ranged ? 'pistol' : null,
@@ -1795,8 +1917,14 @@ function drawEnemySprite(en) {
     flash: en.flashTimer > 0,
     alpha,
     lift: liftZ,
-    rot: en.thrown ? en.thrown.rot : 0,
-  })
+    rot,
+    sink,
+  }
+  // 날아가는 동안의 잔상
+  if (en.thrown && en.thrown.trail) {
+    en.thrown.trail.forEach((g, i) => drawHumanoid(g.x, en.y, { ...opts, lift: g.z, rot: g.rot, hurt: true, alpha: 0.05 + i * 0.03 }))
+  }
+  drawHumanoid(en.x, en.y, opts)
   if (stats.bar && en.state !== 'dead') drawBossHealthBar(en)
 }
 
@@ -1821,12 +1949,14 @@ function drawItem(it) {
     ctx.strokeStyle = 'rgba(0,0,0,0.3)'
     ctx.beginPath(); ctx.moveTo(sx - 8, y + 2); ctx.lineTo(sx + 8, y + 2); ctx.moveTo(sx, y - 8); ctx.lineTo(sx, y + 12); ctx.stroke()
   } else if (it.kind === 'gl') {
-    ctx.fillStyle = '#23262e'
-    hRound(sx - 18, y - 8, 36, 11, 3); ctx.fill(); ctx.stroke()
-    ctx.fillStyle = '#3a3e48'
-    hRound(sx + 12, y - 11, 8, 17, 2); ctx.fill(); ctx.stroke()
-    ctx.beginPath(); ctx.arc(sx - 4, y + 6, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
-    ctx.fillStyle = '#ff8a3a'; ctx.fillRect(sx + 20, y - 4, 5, 5)
+    ctx.fillStyle = '#5f6e3c'
+    hRound(sx - 22, y - 5, 40, 10, 3); ctx.fill(); ctx.stroke()
+    ctx.fillStyle = '#2a2d26'
+    ctx.beginPath(); ctx.moveTo(sx - 22, y - 3); ctx.lineTo(sx - 29, y - 8); ctx.lineTo(sx - 29, y + 8); ctx.lineTo(sx - 22, y + 3); ctx.closePath(); ctx.fill(); ctx.stroke()
+    ctx.fillStyle = '#d6452e'
+    ctx.beginPath(); ctx.moveTo(sx + 16, y - 5); ctx.quadraticCurveTo(sx + 25, y - 3, sx + 27, y); ctx.quadraticCurveTo(sx + 25, y + 3, sx + 16, y + 5); ctx.closePath(); ctx.fill(); ctx.stroke()
+    ctx.fillStyle = '#e8c040'; ctx.fillRect(sx - 12, y - 5, 3, 10); ctx.fillRect(sx - 5, y - 5, 3, 10)
+    ctx.fillStyle = '#23262e'; ctx.fillRect(sx - 2, y + 4, 5, 8)
   } else if (it.kind === 'mg') {
     ctx.fillStyle = '#23262e'
     hRound(sx - 18, y - 6, 34, 8, 2); ctx.fill(); ctx.stroke()
@@ -1843,13 +1973,28 @@ function drawItem(it) {
 function drawGrenade(g) {
   const sx = worldToScreenX(g.x)
   if (g.shell) {
+    const d = Math.sign(g.vx) || 1
     ctx.fillStyle = 'rgba(0,0,0,0.3)'
-    ctx.beginPath(); ctx.ellipse(sx, g.y + 2, 7, 2.6, 0, 0, Math.PI * 2); ctx.fill()
-    ctx.strokeStyle = 'rgba(255,200,120,0.5)'; ctx.lineWidth = 3 // 꼬리 불꽃
-    ctx.beginPath(); ctx.moveTo(sx - Math.sign(g.vx) * 22, g.y - g.z + 2); ctx.lineTo(sx, g.y - g.z); ctx.stroke()
-    ctx.fillStyle = '#ff9a3a'
-    ctx.beginPath(); ctx.ellipse(sx, g.y - g.z, 8, 5, 0, 0, Math.PI * 2); ctx.fill()
-    ctx.strokeStyle = 'rgba(40,16,8,0.8)'; ctx.lineWidth = 1.2; ctx.stroke()
+    ctx.beginPath(); ctx.ellipse(sx, g.y + 2, 12, 3, 0, 0, Math.PI * 2); ctx.fill()
+    const y = g.y - g.z
+    ctx.save()
+    ctx.translate(sx, y)
+    ctx.scale(d, 1)
+    // 분사 화염
+    const fl = ctx.createLinearGradient(-34, 0, -8, 0)
+    fl.addColorStop(0, 'rgba(255,120,30,0)'); fl.addColorStop(0.6, 'rgba(255,170,50,0.9)'); fl.addColorStop(1, 'rgba(255,250,200,1)')
+    ctx.fillStyle = fl
+    ctx.beginPath(); ctx.moveTo(-8, -4); ctx.lineTo(-34 - Math.random() * 6, 0); ctx.lineTo(-8, 4); ctx.closePath(); ctx.fill()
+    // 몸체 + 탄두 + 꼬리날개
+    ctx.fillStyle = '#6a7a46'
+    hRound(-10, -4.5, 20, 9, 2); ctx.fill()
+    ctx.strokeStyle = 'rgba(20,12,8,0.85)'; ctx.lineWidth = 1.2; ctx.stroke()
+    ctx.fillStyle = '#d6452e'
+    ctx.beginPath(); ctx.moveTo(10, -5.5); ctx.quadraticCurveTo(22, -4, 24, 0); ctx.quadraticCurveTo(22, 4, 10, 5.5); ctx.closePath(); ctx.fill(); ctx.stroke()
+    ctx.fillStyle = '#3a4a2a'
+    ctx.beginPath(); ctx.moveTo(-10, -4); ctx.lineTo(-15, -9); ctx.lineTo(-6, -4); ctx.closePath(); ctx.fill()
+    ctx.beginPath(); ctx.moveTo(-10, 4); ctx.lineTo(-15, 9); ctx.lineTo(-6, 4); ctx.closePath(); ctx.fill()
+    ctx.restore()
     return
   }
   ctx.fillStyle = 'rgba(0,0,0,0.35)'
@@ -1912,6 +2057,11 @@ function drawFx() {
       ctx.strokeStyle = `rgba(255,230,180,${0.8 * (1 - k)})`
       ctx.lineWidth = 3
       ctx.beginPath(); ctx.ellipse(sx, f.y, r * 1.05, r * 0.4, 0, 0, Math.PI * 2); ctx.stroke()
+    } else if (f.kind === 'smoke') {
+      if (f.t < 0) { ctx.restore(); continue }
+      const rr = (f.r || 8) * (1 + k * 1.6)
+      ctx.fillStyle = `rgba(225,225,230,${0.55 * (1 - k)})`
+      ctx.beginPath(); ctx.arc(sx, f.y - f.h - k * 14, rr, 0, Math.PI * 2); ctx.fill()
     } else if (f.kind === 'spark') {
       ctx.fillStyle = `rgba(255,235,150,${1 - k})`
       ctx.beginPath()
@@ -2017,7 +2167,7 @@ function drawHud() {
     ctx.strokeStyle = '#fff'
     ctx.strokeRect(16, 122, 120, 12)
     ctx.fillStyle = '#fff'
-    ctx.fillText(p.gun.kind === 'gl' ? `유탄발사기 (F) ${p.gun.ammo}발` : `기관총 (F 누르고 있기) ${p.gun.ammo}`, 16, 138)
+    ctx.fillText(p.gun.kind === 'gl' ? `바주카 (F) ${p.gun.ammo}발` : `기관총 (F 누르고 있기) ${p.gun.ammo}`, 16, 138)
   }
 }
 
