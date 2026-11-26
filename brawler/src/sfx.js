@@ -151,6 +151,7 @@ function noise(dur, { vol = 0.12, freq = 1200, delay = 0 } = {}) {
 }
 
 export const sfx = {
+  launch: () => { noise(0.14, { vol: 0.2, freq: 900 }); tone(140, 0.18, { type: 'square', vol: 0.08, to: 50 }) },
   shot: () => { noise(0.05, { vol: 0.11, freq: 2600 }); tone(190, 0.05, { type: 'square', vol: 0.04, to: 90 }) },
   boom: () => { noise(0.5, { vol: 0.3, freq: 600 }); tone(80, 0.45, { type: 'sawtooth', vol: 0.14, to: 28 }) },
   click: () => tone(520, 0.06, { type: 'triangle', vol: 0.07 }),

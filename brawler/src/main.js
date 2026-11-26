@@ -76,7 +76,11 @@ const ENEMY_TYPES = {
   gunman: { hp: 22, speed: 70, damage: 9, attackRange: 360, keepDist: 250, ranged: true, telegraph: 0.55, active: 0.1, cooldown: 1.9, color: '#4a6a90' },
   boss: { hp: 170, speed: 58, damage: 16, attackRange: 58, telegraph: 0.42, active: 0.2, cooldown: 1.0, color: '#7b3fa0', size: 1.25, bar: true },
   // 챕터 2 보스: 멀리서 돌진해 들이받는다
-  captain: { hp: 270, speed: 68, damage: 18, attackRange: 62, telegraph: 0.38, active: 0.2, cooldown: 0.9, charge: true, color: '#2f6aa8', size: 1.28, bar: true },
+  captain: { hp: 270, speed: 68, damage: 18, attackRange: 62, telegraph: 0.38, active: 0.2, cooldown: 0.9, color: '#2f6aa8', size: 1.28, bar: true, chg: { min: 150, max: 480, tele: 0.65, speed: 520, dur: 0.5, extra: 10, cd: 1.2, chance: 1.6 } },
+  // 챕터 3: 날렵한 여성 자객. 발차기와 도약 돌진을 쓴다
+  vixen: { hp: 42, speed: 118, damage: 10, attackRange: 56, telegraph: 0.24, active: 0.14, cooldown: 0.7, color: '#c02a52', size: 0.98, chg: { min: 90, max: 280, tele: 0.3, speed: 440, dur: 0.28, extra: 6, cd: 0.5, chance: 2.2 } },
+  // 챕터 3 보스: 클럽의 마담. 돌진 + 3갈래 부채꼴 사격
+  madam: { hp: 340, speed: 92, damage: 16, attackRange: 60, telegraph: 0.3, active: 0.16, cooldown: 0.75, color: '#8a1f6a', size: 1.25, bar: true, fan: true, chg: { min: 120, max: 420, tele: 0.42, speed: 520, dur: 0.4, extra: 10, cd: 0.9, chance: 1.8 } },
 }
 
 // Classic beat-em-up pacing: crossing a trigger spawns that wave and locks
@@ -109,6 +113,18 @@ const CHAPTERS = [
       { triggerX: 2850, enemies: [E('captain', 0, 0), E('gunman', 50, -55), E('gunman', 80, 55)] },
     ],
   },
+  {
+    name: 'CHAPTER 3',
+    title: '네온 클럽가',
+    theme: 'neon',
+    waves: [
+      { triggerX: 450, enemies: [E('vixen', 0, -50), E('runner', 40, 50), E('runner', 70, 0)] },
+      { triggerX: 1000, enemies: [E('gunman', 0, -55), E('gunman', 30, 55), E('vixen', 80, 0)] },
+      { triggerX: 1600, enemies: [E('brute', 0, -30), E('brute', 40, 40), E('vixen', 90, 0)] },
+      { triggerX: 2200, enemies: [E('vixen', 0, -55), E('vixen', 40, 55), E('gunman', 80, 0), E('thug', 110, -30), E('runner', 130, 40)] },
+      { triggerX: 2800, enemies: [E('madam', 0, 0), E('vixen', 60, -55), E('gunman', 90, 55)] },
+    ],
+  },
 ]
 const curChapter = () => CHAPTERS[state.chapter]
 const curWaves = () => CHAPTERS[state.chapter].waves
@@ -117,7 +133,10 @@ const curWaves = () => CHAPTERS[state.chapter].waves
 const GRENADE_MAX = 6
 const MG_AMMO = 48
 const MG_INTERVAL = 0.085
-const ITEM_KINDS = [['grenade', 0.36], ['mg', 0.3], ['heal', 0.34]]
+const GL_AMMO = 8
+const GL_BLAST = { rx: 108, ry: 56, dmg: 52 }
+const HAND_BLAST = { rx: 120, ry: 62, dmg: 55 }
+const ITEM_KINDS = [['grenade', 0.28], ['mg', 0.22], ['gl', 0.16], ['heal', 0.34]]
 
 const HITSTUN_DURATION = 0.3
 // 경직이 풀린 직후 잠깐은 다시 경직되지 않는다 (약공격 연타로 보스까지 계속 묶어두는 것 방지)
@@ -145,7 +164,8 @@ function makePlayer() {
     dashTimer: 0,
     dashDir: 1,
     grenades: 1,
-    gun: null, // { ammo }
+    gun: null, // { kind: 'mg' | 'gl', ammo }
+    glCd: 0,
     firing: false,
     fireTimer: 0,
     muzzle: 0,
@@ -219,7 +239,7 @@ window.addEventListener('keydown', (e) => {
   if (state.phase === 'title') {
     if (!isRepeat && (key.length === 1 || key === 'enter' || key.startsWith('arrow') || e.code.startsWith('Key') || e.code.startsWith('Digit'))) {
       e.preventDefault()
-      const ch = e.code === 'Digit2' ? 1 : 0 // 2 키: 챕터 2부터
+      const ch = e.code === 'Digit3' ? 2 : e.code === 'Digit2' ? 1 : 0 // 2/3 키: 챕터 2/3부터
       state = makeInitialState(ch)
       sfx.start()
     }
@@ -267,6 +287,7 @@ window.addEventListener('keydown', (e) => {
     else if (canAct()) startAttack('kick')
   }
   if (e.code === 'KeyG' && !isRepeat) throwGrenade()
+  if (e.code === 'KeyF' && !isRepeat) fireLauncher()
   if (key === 'l' && canAct() && state.player.gauge >= GAUGE_MAX) {
     startAttack('ultimate')
   }
@@ -353,9 +374,10 @@ function updatePlayer(dt) {
   }
 
   if (p.muzzle > 0) p.muzzle -= dt
+  if (p.glCd > 0) p.glCd -= dt
   if (p.nadeAnim > 0) p.nadeAnim -= dt
   // 기관총: F를 누르고 있으면 연사 (이동은 절반 속도, 방향은 고정)
-  p.firing = !!(p.gun && p.gun.ammo > 0 && heldCodes.has('KeyF') && !p.attack && p.hitstunTimer <= 0)
+  p.firing = !!(p.gun && p.gun.kind === 'mg' && p.gun.ammo > 0 && heldCodes.has('KeyF') && !p.attack && p.hitstunTimer <= 0)
   if (p.firing) {
     p.fireTimer -= dt
     if (p.fireTimer <= 0) {
@@ -499,6 +521,7 @@ function killEnemy(en) {
   en.state = 'dead'
   en.deathTimer = DEATH_FADE
   en.charging = false
+  en.fanShot = false
   if (Math.random() < 0.22) spawnItem(en.x, en.y)
 }
 
@@ -515,6 +538,7 @@ function damageEnemy(en, dmg, knockbackDx) {
     en.hitstunTimer = HITSTUN_DURATION
     en.t = 0
     en.charging = false
+    en.fanShot = false
   }
 }
 
@@ -615,9 +639,13 @@ function updateEnemies(dt) {
       }
     } else if (en.state === 'approach') {
       if (dx !== 0) en.facing = Math.sign(dx)
-      if (stats.charge && en.cooldownTimer <= 0 && dist > 150 && dist < 480 && Math.abs(dy) < 30 && Math.random() < dt * 1.6) {
+      if (stats.chg && en.cooldownTimer <= 0 && dist > stats.chg.min && dist < stats.chg.max && Math.abs(dy) < 30 && Math.random() < dt * stats.chg.chance) {
         en.state = 'telegraph' // 돌진 준비
         en.charging = true
+        en.t = 0
+      } else if (stats.fan && en.cooldownTimer <= 0 && dist > 170 && dist < 440 && Math.random() < dt * 1.3) {
+        en.state = 'telegraph' // 부채꼴 사격 준비
+        en.fanShot = true
         en.t = 0
       } else if (dist <= stats.attackRange && en.cooldownTimer <= 0) {
         en.state = 'telegraph'
@@ -632,7 +660,7 @@ function updateEnemies(dt) {
     } else if (en.state === 'telegraph') {
       en.t += dt
       if (en.charging) en.facing = Math.sign(p.x - en.x) || en.facing
-      if (en.t >= (en.charging ? 0.65 : stats.telegraph)) {
+      if (en.t >= (en.charging ? stats.chg.tele : stats.telegraph)) {
         en.state = 'attack'
         en.t = 0
         en.resolved = false
@@ -641,21 +669,26 @@ function updateEnemies(dt) {
       en.t += dt
       if (en.charging) {
         // 돌진: 정면으로 달려가며 닿으면 큰 피해
-        en.x = clamp(en.x + en.facing * 520 * dt, 40, WORLD_WIDTH - 40)
+        en.x = clamp(en.x + en.facing * stats.chg.speed * dt, 40, WORLD_WIDTH - 40)
         if (!en.resolved && Math.hypot(p.x - en.x, p.y - en.y) <= 52) {
-          damagePlayer(stats.damage + 10, en.facing * 55)
+          damagePlayer(stats.damage + stats.chg.extra, en.facing * 55)
           en.resolved = true
         }
-        if (en.t >= 0.5) {
+        if (en.t >= stats.chg.dur) {
           en.state = 'approach'
           en.charging = false
           en.t = 0
-          en.cooldownTimer = stats.cooldown + 1.2
+          en.cooldownTimer = stats.cooldown + stats.chg.cd
         }
       } else {
         if (!en.resolved) {
           en.resolved = true
-          if (stats.ranged) {
+          if (en.fanShot) {
+            en.fanShot = false
+            for (const oy of [-38, 0, 38]) state.bullets.push({ x: en.x + en.facing * 40, y: clamp(en.y + oy, DEPTH_TOP - 10, DEPTH_BOTTOM + 10), vx: en.facing * 400, owner: 'e', dmg: stats.damage - 4, life: 1.8 })
+            state.fx.push({ kind: 'ring', x: en.x + en.facing * 40, y: en.y, t: 0, life: 0.2 })
+            sfx.shot()
+          } else if (stats.ranged) {
             state.bullets.push({ x: en.x + en.facing * 40, y: en.y, vx: en.facing * 430, owner: 'e', dmg: stats.damage, life: 1.6 })
             state.fx.push({ kind: 'ring', x: en.x + en.facing * 40, y: en.y, t: 0, life: 0.15 })
             sfx.hit()
@@ -754,6 +787,17 @@ function fireMachineGun() {
   sfx.shot()
   if (p.gun.ammo <= 0) p.gun = null
 }
+function fireLauncher() {
+  const p = state.player
+  if (state.phase !== 'playing' || !p.gun || p.gun.kind !== 'gl' || p.gun.ammo <= 0 || p.attack || p.hitstunTimer > 0 || p.dashing || p.glCd > 0) return
+  p.glCd = 0.55
+  p.gun.ammo -= 1
+  p.muzzle = 0.14
+  state.grenades.push({ x: p.x + p.facing * 46, y: p.y, z: 48 + p.z, vx: p.facing * 540, vz: 150, t: 0, fuse: 3, shell: true })
+  state.fx.push({ kind: 'dust', x: p.x + p.facing * 46, y: p.y, t: 0, life: 0.35 })
+  sfx.launch()
+  if (p.gun.ammo <= 0) p.gun = null
+}
 function throwGrenade() {
   const p = state.player
   if (p.grenades <= 0 || p.hitstunTimer > 0 || p.dashing || p.nadeAnim > 0) return
@@ -762,18 +806,18 @@ function throwGrenade() {
   state.grenades.push({ x: p.x + p.facing * 20, y: p.y, z: 52 + p.z, vx: p.facing * 250, vz: 240, t: 0, fuse: 1.0 })
   sfx.whoosh()
 }
-function explode(x, y) {
+function explode(x, y, cfg = HAND_BLAST) {
   state.shake = 0.35
   state.fx.push({ kind: 'blast', x, y, t: 0, life: 0.55 })
   state.fx.push({ kind: 'dust', x, y, t: 0, life: 0.6 })
   sfx.boom()
   for (const en of state.enemies) {
     if (en.state === 'dead') continue
-    const dx = (en.x - x) / 120
-    const dy = (en.y - y) / 62
+    const dx = (en.x - x) / cfg.rx
+    const dy = (en.y - y) / cfg.ry
     const d = Math.hypot(dx, dy)
     if (d >= 1) continue
-    const dmg = Math.round(55 * (1 - d * 0.5))
+    const dmg = Math.round(cfg.dmg * (1 - d * 0.5))
     damageEnemy(en, dmg, Math.sign(en.x - x || 1) * 60)
     if (en.state !== 'dead' && en.state !== 'thrown' && !ENEMY_TYPES[en.type].bar) {
       en.state = 'hitstun' // 폭발에는 (보스를 뺀) 모두가 나가떨어진다
@@ -813,6 +857,12 @@ function updateProjectiles(dt) {
     g.x += g.vx * dt
     g.vz -= GRAVITY * dt
     g.z += g.vz * dt
+    if (g.shell) {
+      // 유탄: 적에 닿거나 땅에 떨어지면 바로 폭발
+      const hit = g.z < 90 && state.enemies.some((en) => en.state !== 'dead' && Math.abs(en.x - g.x) < 26 && Math.abs(en.y - g.y) < 28)
+      if (hit || g.z <= 0 || g.t >= g.fuse) { explode(g.x, g.y, GL_BLAST); g.dead = true }
+      continue
+    }
     if (g.z <= 0) {
       g.z = 0
       if (Math.abs(g.vz) > 90) g.vz = -g.vz * 0.38
@@ -827,7 +877,8 @@ function updateProjectiles(dt) {
     if (Math.abs(p.x - it.x) < 30 && Math.abs(p.y - it.y) < 34 && p.z < 30) {
       it.taken = true
       if (it.kind === 'grenade') p.grenades = Math.min(GRENADE_MAX, p.grenades + 2)
-      else if (it.kind === 'mg') p.gun = { ammo: MG_AMMO }
+      else if (it.kind === 'mg') p.gun = { kind: 'mg', ammo: MG_AMMO }
+      else if (it.kind === 'gl') p.gun = { kind: 'gl', ammo: GL_AMMO }
       else p.hp = Math.min(PLAYER_MAX_HP, p.hp + 30)
       sfx.coin()
       state.fx.push({ kind: 'ring', x: it.x, y: it.y, t: 0, life: 0.3 })
@@ -881,10 +932,16 @@ const THEMES = {
     sky: ['#6a5cb8', '#b294de', '#f8c4d8'], far: '#6c5ca4', mid: '#8a6cb6', winFar: 'rgba(255,224,150,0.4)', winMid: 'rgba(255,224,150,0.65)',
     walk: '#b2b2c4', walkLine: 'rgba(0,0,0,0.16)', curb: '#d0d0de', road: '#86869a', lane: 'rgba(255,230,140,0.55)',
   },
+  neon: {
+    sky: ['#2c2a78', '#7a3fa0', '#ff82bc'], far: '#4a3f8c', mid: '#5f4aa0', winFar: 'rgba(120,230,255,0.5)', winMid: 'rgba(255,150,220,0.7)',
+    walk: '#a090c4', walkLine: 'rgba(30,10,60,0.2)', curb: '#ff7ac8', road: '#6a68a0', lane: 'rgba(120,255,255,0.65)',
+  },
   harbor: {
     sky: ['#3f64b0', '#f2967c', '#ffd8a2'], walk: '#a88c64', walkLine: 'rgba(60,35,10,0.35)', curb: '#6a4a30', road: '#8d877b', lane: 'rgba(255,255,255,0.55)',
   },
 }
+const NEON_COLORS = ['#ff4fa8', '#4fe8ff', '#ffe14f', '#b27bff']
+const neonSigns = Array.from({ length: 26 }, (_, i) => ({ x: (i / 26) * WORLD_WIDTH * 1.2 + bgHashEarly(i, 7) * 50, kind: i % 4, w: 44 + bgHashEarly(i, 8) * 40, h: 40 + bgHashEarly(i, 9) * 60, y: 70 + bgHashEarly(i, 10) * 90, c: i % 4 }))
 const WOOD_COLORS = ['#c0504a', '#4a7ac0', '#e0a030', '#4a9a6a']
 
 function worldToScreenX(x) { return x - state.cameraX }
@@ -927,6 +984,29 @@ function drawStreetProp(x, kind) {
   ctx.beginPath()
   ctx.ellipse(sx, y + 2, 20, 5, 0, 0, Math.PI * 2)
   ctx.fill()
+  if (curChapter().theme === 'neon') {
+    if (kind === 0) {
+      // 네온 입간판
+      ctx.fillStyle = '#1c1238'
+      ctx.beginPath(); ctx.moveTo(sx - 16, y); ctx.lineTo(sx - 12, y - 40); ctx.lineTo(sx + 12, y - 40); ctx.lineTo(sx + 16, y); ctx.closePath(); ctx.fill()
+      ctx.strokeStyle = NEON_COLORS[Math.floor(x / 70) % 4]; ctx.lineWidth = 2.5
+      ctx.strokeRect(sx - 10, y - 36, 20, 28)
+      ctx.beginPath(); ctx.moveTo(sx - 6, y - 26); ctx.lineTo(sx + 6, y - 26); ctx.moveTo(sx - 6, y - 18); ctx.lineTo(sx + 6, y - 18); ctx.stroke()
+    } else if (kind === 1) {
+      // 벨벳 로프 기둥
+      ctx.fillStyle = '#d8b84a'
+      for (const dx of [-22, 22]) { ctx.fillRect(sx + dx - 2, y - 28, 4, 28); ctx.beginPath(); ctx.arc(sx + dx, y - 30, 4, 0, Math.PI * 2); ctx.fill() }
+      ctx.strokeStyle = '#c0204a'; ctx.lineWidth = 3
+      ctx.beginPath(); ctx.moveTo(sx - 22, y - 28); ctx.quadraticCurveTo(sx, y - 14, sx + 22, y - 28); ctx.stroke()
+    } else {
+      // 화분
+      ctx.fillStyle = '#8a4a6a'
+      hRound(sx - 11, y - 14, 22, 14, 3); ctx.fill()
+      ctx.fillStyle = '#2f9a6a'
+      for (const [dx, dy, r] of [[-6, -22, 8], [6, -24, 9], [0, -30, 8]]) { ctx.beginPath(); ctx.arc(sx + dx, y + dy, r, 0, Math.PI * 2); ctx.fill() }
+    }
+    return
+  }
   if (curChapter().theme === 'harbor') {
     if (kind === 0) {
       // shipping container
@@ -1047,6 +1127,31 @@ function drawHarborMid(offset) {
   }
 }
 
+function drawNeonSigns(offset) {
+  for (const n of neonSigns) {
+    const sx = n.x - offset
+    if (sx < -n.w - 20 || sx > canvas.width + 20) continue
+    const col = NEON_COLORS[n.c]
+    const y = GROUND_TOP - n.y - n.h
+    ctx.fillStyle = 'rgba(14,8,34,0.78)'
+    ctx.fillRect(sx, y, n.w, n.h)
+    for (const [lw, al] of [[7, 0.18], [3, 0.95]]) {
+      ctx.strokeStyle = col
+      ctx.globalAlpha = al
+      ctx.lineWidth = lw
+      ctx.lineCap = 'round'
+      ctx.beginPath()
+      if (n.kind === 0) { ctx.rect(sx + 4, y + 4, n.w - 8, n.h - 8); ctx.moveTo(sx + 10, y + n.h / 2); ctx.lineTo(sx + n.w - 10, y + n.h / 2) }
+      else if (n.kind === 1) { ctx.arc(sx + n.w / 2, y + n.h / 2, Math.min(n.w, n.h) / 2 - 6, 0, Math.PI * 2); ctx.moveTo(sx + n.w / 2 - 6, y + n.h / 2); ctx.lineTo(sx + n.w / 2 + 6, y + n.h / 2) }
+      else if (n.kind === 2) { ctx.moveTo(sx + 8, y + n.h - 8); ctx.lineTo(sx + n.w / 3, y + 10); ctx.lineTo(sx + n.w * 0.6, y + n.h - 10); ctx.lineTo(sx + n.w - 8, y + 8) }
+      else { for (let k = 1; k <= 3; k++) { ctx.moveTo(sx + 8, y + (n.h * k) / 4); ctx.lineTo(sx + n.w - 8, y + (n.h * k) / 4) } }
+      ctx.stroke()
+      ctx.lineCap = 'butt'
+    }
+    ctx.globalAlpha = 1
+  }
+}
+
 function drawBackground() {
   const th = THEMES[curChapter().theme]
   const harbor = curChapter().theme === 'harbor'
@@ -1058,6 +1163,21 @@ function drawBackground() {
   ctx.fillRect(0, 0, canvas.width, GROUND_TOP)
 
   const t = performance.now() / 1000
+  const neon = curChapter().theme === 'neon'
+  if (neon) {
+    // 하늘을 가르는 서치라이트
+    for (let k = 0; k < 3; k++) {
+      const bx = 160 + k * 330 - state.cameraX * 0.03
+      const ang = Math.sin(t * 0.4 + k * 2) * 0.35
+      ctx.fillStyle = 'rgba(255,255,255,0.09)'
+      ctx.beginPath()
+      ctx.moveTo(bx - 14, GROUND_TOP - 40)
+      ctx.lineTo(bx + 14, GROUND_TOP - 40)
+      ctx.lineTo(bx + Math.sin(ang) * 260 + 60, 0)
+      ctx.lineTo(bx + Math.sin(ang) * 260 - 60, 0)
+      ctx.closePath(); ctx.fill()
+    }
+  }
   if (!harbor) {
     // 별과 달은 은은하게 (배경이 밝아진 만큼 별은 옅게)
     for (let i = 0; i < 40; i++) {
@@ -1078,6 +1198,7 @@ function drawBackground() {
     ctx.fill()
     drawParallaxLayer(buildingsFar, 0.25, th.far, th.winFar)
     drawParallaxLayer(buildingsMid, 0.5, th.mid, th.winMid)
+    if (neon) drawNeonSigns(state.cameraX * 0.5)
   } else {
     // 지는 해와 바다
     const sx0 = 640 - state.cameraX * 0.02
@@ -1164,7 +1285,10 @@ const LOOKS = {
   brute: { skin: '#d9a878', hair: '#2a1d1a', pants: '#4a3a2a', boots: '#1a1410', trim: '#5a3a1a', eye: '#2a1d1a' },
   gunman: { skin: '#e8c8a0', hair: '#1c1c24', pants: '#2a3040', boots: '#161820', trim: '#2a3a50', eye: '#2a1d1a' },
   captain: { skin: '#e0b890', hair: '#e8e8ea', pants: '#1c2a44', boots: '#101420', trim: '#e8c040', eye: '#ff6a3a' },
+  vixen: { skin: '#f4cfa8', hair: '#8a1230', pants: '#1a1620', boots: '#2a0f1c', trim: '#ff3b6a', eye: '#2a1d1a' },
+  madam: { skin: '#f4d6b8', hair: '#e8cc58', pants: '#2a1030', boots: '#3a1030', trim: '#ffd24a', eye: '#7a2a9a' },
 }
+const FEMALE = new Set(['vixen', 'madam'])
 
 function hRound(x, y, w, h, r) {
   ctx.beginPath()
@@ -1209,22 +1333,33 @@ function drawHumanoid(x, y, opts) {
   }
 
   // ---- legs ----
+  const female = FEMALE.has(opts.style)
+  const leg = (lx, ly) => {
+    if (!female) { ctx.fillStyle = look.pants; hRound(lx, ly, 7, 26, 2); ctx.fill(); return }
+    ctx.fillStyle = look.skin // 허벅지는 맨살, 무릎 아래는 롱부츠
+    hRound(lx, ly, 7, 15, 2); ctx.fill()
+    ctx.fillStyle = look.boots
+    hRound(lx - 0.5, ly + 11, 8, 15, 2); ctx.fill()
+    ctx.fillStyle = look.trim
+    ctx.fillRect(lx - 0.5, ly + 11, 8, 2)
+  }
   ctx.fillStyle = look.pants
   if (kicking) {
-    hRound(-10, -26, 7, 26, 2); ctx.fill()
+    leg(-10, -26)
     boot(-10, -6, 7)
+    ctx.fillStyle = female ? look.skin : look.pants
     hRound(8, -22, 24, 9, 3); ctx.fill()
     boot(28, -24, 6)
   } else if (throwing) {
     // 다리를 넓게 벌리고 무게중심을 낮춘 던지기 자세
     const wide = tPhase === 'startup' ? 3 + 4 * tp : 7
-    hRound(-12 - wide, -26, 7, 26, 2); ctx.fill()
-    hRound(5 + wide, -26, 7, 26, 2); ctx.fill()
+    leg(-12 - wide, -26)
+    leg(5 + wide, -26)
     boot(-12 - wide, -6, 7)
     boot(5 + wide, -6, 7)
   } else {
-    hRound(-10, -26 + legSwing * 0.2, 7, 26, 2); ctx.fill()
-    hRound(3, -26 - legSwing * 0.2, 7, 26, 2); ctx.fill()
+    leg(-10, -26 + legSwing * 0.2)
+    leg(3, -26 - legSwing * 0.2)
     boot(-10, -6 + legSwing * 0.2, 7)
     boot(3, -6 - legSwing * 0.2, 7)
   }
@@ -1271,6 +1406,28 @@ function drawHumanoid(x, y, opts) {
     hRound(2, -55, 9, 24, 2); ctx.fill()
     ctx.strokeStyle = '#d8a030'; ctx.lineWidth = 2
     ctx.beginPath(); ctx.moveTo(-11, -54); ctx.lineTo(11, -34); ctx.stroke()
+  } else if (opts.style === 'vixen') {
+    ctx.fillStyle = look.skin // 크롭 재킷: 허리가 드러난 실루엣
+    ctx.fillRect(-10, -41, 20, 9)
+    ctx.strokeStyle = 'rgba(120,60,40,0.4)'; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(0, -38); ctx.lineTo(0, -35); ctx.stroke()
+    ctx.fillStyle = look.pants // 핫팬츠와 벨트
+    hRound(-12, -33, 24, 9, 3); ctx.fill()
+    ctx.fillStyle = look.trim
+    ctx.fillRect(-12, -33, 24, 2)
+    ctx.strokeStyle = look.trim; ctx.lineWidth = 2 // 재킷 지퍼와 가슴선
+    ctx.beginPath(); ctx.moveTo(0, -55); ctx.lineTo(0, -42); ctx.stroke()
+    ctx.fillStyle = 'rgba(255,255,255,0.18)'
+    ctx.fillRect(-10, -54, 5, 11)
+  } else if (opts.style === 'madam') {
+    ctx.fillStyle = '#f6f2ec' // 퍼 칼라
+    ctx.beginPath(); ctx.ellipse(0, -55, 15, 5, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.strokeStyle = OUT; ctx.lineWidth = 1; ctx.stroke()
+    ctx.fillStyle = look.trim
+    ctx.fillRect(-12, -33, 24, 3)
+    for (const yy of [-48, -42, -36]) { ctx.beginPath(); ctx.arc(0, yy, 1.8, 0, Math.PI * 2); ctx.fill() }
+    ctx.fillStyle = 'rgba(255,215,90,0.55)'
+    ctx.fillRect(-12, -57, 3, 24); ctx.fillRect(9, -57, 3, 24)
   } else if (opts.style === 'captain') {
     ctx.fillStyle = look.trim // 견장과 금단추
     for (const s of [-1, 1]) hRound(s * 12 - 5, -58, 10, 6, 2), ctx.fill()
@@ -1316,6 +1473,13 @@ function drawHumanoid(x, y, opts) {
       ctx.fillStyle = '#3a3e48'; ctx.fillRect(26, -50, 7, 11)
       ctx.fillStyle = '#6a6e78'; ctx.fillRect(34, -60, 14, 2)
       mx = 54
+    } else if (opts.gun === 'gl') {
+      hRound(8, -62, 44, 13, 3); ctx.fill(); ctx.stroke() // 굵은 발사관
+      ctx.fillStyle = '#3a3e48'
+      hRound(46, -65, 9, 19, 2); ctx.fill(); ctx.stroke() // 넓은 포구
+      ctx.beginPath(); ctx.arc(24, -47, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke() // 탄창 드럼
+      ctx.fillStyle = '#6a6e78'; ctx.fillRect(14, -66, 18, 3)
+      mx = 58
     } else {
       hRound(24, -57, 18, 7, 2); ctx.fill(); ctx.stroke()
       ctx.fillRect(26, -51, 6, 9)
@@ -1425,6 +1589,31 @@ function drawHumanoid(x, y, opts) {
     ctx.fillRect(-14, hy - 5, 30, 3)
     ctx.fillStyle = '#c8a040'
     ctx.fillRect(-11, hy - 8, 22, 2)
+  } else if (opts.style === 'vixen') {
+    const sway = Math.sin(t * 6 + (opts.walkPhase || 0)) * 3
+    ctx.beginPath() // 길게 늘어진 포니테일
+    ctx.moveTo(-8, hy - 6)
+    ctx.bezierCurveTo(-26, hy - 8 + sway, -30, hy + 14 + sway, -22 + sway, hy + 26)
+    ctx.bezierCurveTo(-18, hy + 14, -12, hy + 4, -6, hy - 1)
+    ctx.closePath(); ctx.fill()
+    ctx.strokeStyle = OUT; ctx.lineWidth = 1; ctx.stroke()
+    ctx.fillStyle = look.hair
+    ctx.beginPath(); ctx.arc(hx - 1, hy - 3, 11.8, Math.PI * 1.02, Math.PI * 1.98)
+    ctx.lineTo(11, hy - 1); ctx.quadraticCurveTo(5, hy - 8, -1, hy - 4); ctx.lineTo(-10, hy - 2); ctx.closePath(); ctx.fill()
+    ctx.fillStyle = look.trim
+    ctx.beginPath(); ctx.arc(-9, hy - 6, 3, 0, Math.PI * 2); ctx.fill()
+  } else if (opts.style === 'madam') {
+    ctx.beginPath() // 풍성한 금발 웨이브 (얼굴은 가리지 않게 뒤쪽으로)
+    ctx.moveTo(-6, hy - 8)
+    ctx.bezierCurveTo(-24, hy - 6, -26, hy + 14, -16, hy + 26)
+    ctx.bezierCurveTo(-12, hy + 20, -8, hy + 10, -4, hy + 2)
+    ctx.closePath(); ctx.fill()
+    ctx.strokeStyle = OUT; ctx.lineWidth = 1; ctx.stroke()
+    ctx.fillStyle = look.hair
+    ctx.beginPath(); ctx.arc(hx - 1, hy - 4, 12.5, Math.PI * 1.0, Math.PI * 2.0)
+    ctx.lineTo(11, hy - 1); ctx.quadraticCurveTo(4, hy - 9, -3, hy - 3); ctx.closePath(); ctx.fill()
+    ctx.fillStyle = look.trim // 티아라
+    ctx.beginPath(); ctx.moveTo(-8, hy - 12); ctx.lineTo(-5, hy - 19); ctx.lineTo(-2, hy - 13); ctx.lineTo(1, hy - 21); ctx.lineTo(4, hy - 13); ctx.lineTo(7, hy - 18); ctx.lineTo(9, hy - 11); ctx.closePath(); ctx.fill()
   } else if (opts.style === 'captain') {
     ctx.fillStyle = '#f0f0f4' // 선장 모자
     ctx.beginPath(); ctx.arc(hx, hy - 4, 12, Math.PI, 0); ctx.fill()
@@ -1507,6 +1696,15 @@ function drawHumanoid(x, y, opts) {
     ctx.strokeStyle = 'rgba(255,255,255,0.7)'
     ctx.lineWidth = 0.7
     for (const k of [0.3, 0.6]) { ctx.beginPath(); ctx.moveTo(-1 + 6 * k - 1.5, hy + 2 + 8 * k); ctx.lineTo(-1 + 6 * k + 1.5, hy + 2 + 8 * k); ctx.stroke() }
+  } else if (opts.style === 'vixen' || opts.style === 'madam') {
+    ctx.strokeStyle = '#120d12'; ctx.lineWidth = 1.3 // 속눈썹
+    for (const [ex, er] of eyeSpec) { ctx.beginPath(); ctx.moveTo(ex + er * 0.6, hy - 3); ctx.lineTo(ex + er + 2.2, hy - 5.4); ctx.stroke() }
+    ctx.fillStyle = look.trim // 붉은 입술
+    ctx.beginPath(); ctx.ellipse(6.5, hy + 6.8, 3.6, 2, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#ffd24a' // 귀걸이
+    ctx.beginPath(); ctx.arc(-9, hy + 4, 1.8, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = 'rgba(255,110,130,0.35)'
+    ctx.beginPath(); ctx.ellipse(10, hy + 4, 3, 1.6, 0, 0, Math.PI * 2); ctx.fill()
   } else if (opts.style === 'gunman') {
     ctx.fillStyle = '#0e0e14' // 선글라스
     hRound(0.5, hy - 5, 14, 6.5, 2); ctx.fill()
@@ -1560,7 +1758,7 @@ function drawPlayerSprite() {
     attackType: p.attack && p.attack.type,
     throwPhase: p.attack && p.attack.type === 'throw' ? p.attack.phase : p.nadeAnim > 0 && !p.attack ? 'recovery' : null,
     throwP: p.attack && p.attack.type === 'throw' ? Math.min(1, p.attack.t / ATTACKS.throw[p.attack.phase]) : p.nadeAnim > 0 ? clamp(1 - p.nadeAnim / 0.3, 0, 1) * 0.45 : 0,
-    gun: p.gun && p.gun.ammo > 0 && !p.attack && p.nadeAnim <= 0 ? 'mg' : null,
+    gun: p.gun && p.gun.ammo > 0 && !p.attack && p.nadeAnim <= 0 ? p.gun.kind : null,
     muzzle: p.muzzle > 0,
     flash: p.hitstunTimer > 0 && Math.floor(p.hitstunTimer * 20) % 2 === 0,
     lift: p.z,
@@ -1593,6 +1791,7 @@ function drawEnemySprite(en) {
     walkPhase: en.walkPhase,
     moving: en.state === 'approach',
     attacking: en.state === 'attack',
+    attackType: FEMALE.has(en.type) ? 'kick' : null,
     flash: en.flashTimer > 0,
     alpha,
     lift: liftZ,
@@ -1621,6 +1820,13 @@ function drawItem(it) {
     ctx.strokeStyle = '#c8c8d0'; ctx.beginPath(); ctx.arc(sx + 7, y - 11, 4, 0, Math.PI * 2); ctx.stroke()
     ctx.strokeStyle = 'rgba(0,0,0,0.3)'
     ctx.beginPath(); ctx.moveTo(sx - 8, y + 2); ctx.lineTo(sx + 8, y + 2); ctx.moveTo(sx, y - 8); ctx.lineTo(sx, y + 12); ctx.stroke()
+  } else if (it.kind === 'gl') {
+    ctx.fillStyle = '#23262e'
+    hRound(sx - 18, y - 8, 36, 11, 3); ctx.fill(); ctx.stroke()
+    ctx.fillStyle = '#3a3e48'
+    hRound(sx + 12, y - 11, 8, 17, 2); ctx.fill(); ctx.stroke()
+    ctx.beginPath(); ctx.arc(sx - 4, y + 6, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
+    ctx.fillStyle = '#ff8a3a'; ctx.fillRect(sx + 20, y - 4, 5, 5)
   } else if (it.kind === 'mg') {
     ctx.fillStyle = '#23262e'
     hRound(sx - 18, y - 6, 34, 8, 2); ctx.fill(); ctx.stroke()
@@ -1636,6 +1842,16 @@ function drawItem(it) {
 }
 function drawGrenade(g) {
   const sx = worldToScreenX(g.x)
+  if (g.shell) {
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'
+    ctx.beginPath(); ctx.ellipse(sx, g.y + 2, 7, 2.6, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.strokeStyle = 'rgba(255,200,120,0.5)'; ctx.lineWidth = 3 // 꼬리 불꽃
+    ctx.beginPath(); ctx.moveTo(sx - Math.sign(g.vx) * 22, g.y - g.z + 2); ctx.lineTo(sx, g.y - g.z); ctx.stroke()
+    ctx.fillStyle = '#ff9a3a'
+    ctx.beginPath(); ctx.ellipse(sx, g.y - g.z, 8, 5, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.strokeStyle = 'rgba(40,16,8,0.8)'; ctx.lineWidth = 1.2; ctx.stroke()
+    return
+  }
   ctx.fillStyle = 'rgba(0,0,0,0.35)'
   ctx.beginPath(); ctx.ellipse(sx, g.y + 2, 8, 3, 0, 0, Math.PI * 2); ctx.fill()
   ctx.fillStyle = '#4a6a3a'
@@ -1797,11 +2013,11 @@ function drawHud() {
     ctx.fillStyle = 'rgba(0,0,0,0.5)'
     ctx.fillRect(16, 122, 120, 12)
     ctx.fillStyle = '#ffd24a'
-    ctx.fillRect(18, 124, 116 * (p.gun.ammo / MG_AMMO), 8)
+    ctx.fillRect(18, 124, 116 * (p.gun.ammo / (p.gun.kind === 'gl' ? GL_AMMO : MG_AMMO)), 8)
     ctx.strokeStyle = '#fff'
     ctx.strokeRect(16, 122, 120, 12)
     ctx.fillStyle = '#fff'
-    ctx.fillText(`기관총 (F 누르고 있기) ${p.gun.ammo}`, 16, 138)
+    ctx.fillText(p.gun.kind === 'gl' ? `유탄발사기 (F) ${p.gun.ammo}발` : `기관총 (F 누르고 있기) ${p.gun.ammo}`, 16, 138)
   }
 }
 
@@ -1888,7 +2104,7 @@ function drawTitleScreen() {
   ctx.font = '14px sans-serif'
   ctx.fillStyle = 'rgba(255,255,255,0.9)'
   ctx.fillText('A/D 이동 · W/S 앞뒤 · 스페이스 점프 · J 펀치 · K 킥 · J+K 던지기 · L 필살기 · M 소리', W / 2, H - 82)
-  ctx.fillText('G 수류탄 · F 기관총(누르고 있기) — 적이 떨어뜨리는 아이템을 주우세요 · 2 키: 챕터 2부터', W / 2, H - 60)
+  ctx.fillText('G 수류탄 · F 총/유탄발사기 — 아이템을 주우세요 · 2/3 키: 챕터 2/3부터', W / 2, H - 60)
   ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
   ctx.font = 'bold 20px sans-serif'
   ctx.fillStyle = '#ffe066'
