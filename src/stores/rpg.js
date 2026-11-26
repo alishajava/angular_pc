@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { reactive, ref } from 'vue'
+import { reactive, ref, shallowRef } from 'vue'
 import { parseGrid, canMoveTo as canMoveToTile, tileCenter as tileCenterOf } from '../mapUtils'
 import { useTownStore } from './town'
 
@@ -30,16 +30,94 @@ const MAP = [
 ]
 
 export const TILE = 52
-export const COLS = MAP[0].length
-export const ROWS = MAP.length
 const VIEWPORT_ROWS = 10
-export const STAGE_WIDTH = COLS * TILE
+// 화면(뷰포트) 크기는 던전·숲 모두 같다. 숲은 가로로 길어서 카메라가 가로로 따라간다.
+export const STAGE_WIDTH = MAP[0].length * TILE
 export const STAGE_HEIGHT = VIEWPORT_ROWS * TILE
-export const WORLD_HEIGHT = ROWS * TILE
 
-const grid = parseGrid(MAP)
 function tileCenter(col, row) {
   return tileCenterOf(col, row, TILE)
+}
+
+// ---- 숲길: 마을과 마을 사이를 잇는 가로로 긴 길. 지그재그로 휘어지고, 몬스터가 돌아다닌다. ----
+const FOREST_SPAWNS = [
+  [7, 3, 'slime'],
+  [8, 7, 'wolf'],
+  [13, 7, 'slime'],
+  [14, 2, 'wolf'],
+  [19, 2, 'wolf'],
+  [20, 7, 'slime'],
+  [25, 8, 'wolf'],
+  [26, 2, 'slime'],
+  [31, 3, 'wolf'],
+  [32, 7, 'slime'],
+]
+const FOREST_POTIONS = [
+  [6, 8],
+  [13, 2],
+  [19, 8],
+  [25, 2],
+  [31, 8],
+]
+function buildForestMap() {
+  const C = 36
+  const R = 10
+  const rows = Array.from({ length: R }, (_, r) => Array.from({ length: C }, (_, c) => (r === 0 || r === R - 1 || c === 0 || c === C - 1 ? '#' : '.')))
+  const h = (a, b) => {
+    const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453
+    return x - Math.floor(x)
+  }
+  // 숲을 가로지르는 나무 담장: 번갈아 아래/위에 틈을 남겨 길이 구불구불하게 이어진다
+  const barriers = [[10, 'low'], [16, 'high'], [22, 'low'], [28, 'high']]
+  for (const [c, gap] of barriers) {
+    for (let r = 1; r < R - 1; r++) rows[r][c] = (gap === 'low' ? r >= 7 : r <= 2) ? '.' : '#'
+  }
+  rows[5][0] = 'W' // 서쪽 출구 (처음 마을)
+  rows[5][C - 1] = 'E' // 동쪽 출구 (단풍마을)
+  // 지나가야 하는 지점들: 입구, 출구, 몬스터·약초 자리
+  const must = [[1, 5], [C - 2, 5], ...FOREST_SPAWNS.map(([c, r]) => [c, r]), ...FOREST_POTIONS]
+  for (const [c, r] of must) rows[r][c] = '.'
+  const connected = () => {
+    const seen = new Set(['1,5'])
+    const q = [[1, 5]]
+    while (q.length) {
+      const [c, r] = q.pop()
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nc = c + dc
+        const nr = r + dr
+        if (nc < 0 || nr < 0 || nc >= C || nr >= R || rows[nr][nc] === '#' || seen.has(`${nc},${nr}`)) continue
+        seen.add(`${nc},${nr}`)
+        q.push([nc, nr])
+      }
+    }
+    return must.every(([c, r]) => seen.has(`${c},${r}`)) && seen.has(`${C - 1},5`)
+  }
+  // 군데군데 나무 덤불 — 길이 막히지 않을 때만 심는다
+  for (let r = 1; r < R - 1; r++) {
+    for (let c = 3; c < C - 3; c++) {
+      if (rows[r][c] !== '.' || h(c, r) < 0.78) continue
+      rows[r][c] = '#'
+      if (!connected()) rows[r][c] = '.'
+    }
+  }
+  return rows.map((row) => row.join(''))
+}
+const FOREST_MAP = buildForestMap()
+const FOREST_KINDS = {
+  slime: { bodyColor: '#4a8ac0', bellyColor: '#7fb4e0', hp: 12, damage: 5, coin: 4 },
+  wolf: { bodyColor: '#8a6a4a', bellyColor: '#c0a07a', hp: 16, damage: 6, coin: 6 },
+}
+
+export const LEVELS = {
+  dungeon: { key: 'dungeon', title: 'DUNGEON', map: MAP, theme: 'dungeon' },
+  forest: { key: 'forest', title: '숲길', map: FOREST_MAP, theme: 'forest' },
+}
+for (const lv of Object.values(LEVELS)) {
+  lv.cols = lv.map[0].length
+  lv.rows = lv.map.length
+  lv.grid = parseGrid(lv.map)
+  lv.worldW = lv.cols * TILE
+  lv.worldH = lv.rows * TILE
 }
 
 const PLAYER_HALF = 12
@@ -104,6 +182,11 @@ export const useRpgStore = defineStore('rpg', () => {
     attack: PLAYER_BASE_ATTACK,
     moving: false,
   })
+  const levelKey = ref('dungeon')
+  const level = shallowRef(LEVELS.dungeon)
+  const grid = shallowRef(LEVELS.dungeon.grid)
+  const exitTo = ref('') // 'west' | 'east' : 숲길 끝에 닿으면 마을로 나간다
+  const entrySide = ref('west')
   const monsters = reactive([])
   const potions = reactive([])
   const companion = reactive({ active: false })
@@ -130,9 +213,14 @@ export const useRpgStore = defineStore('rpg', () => {
     actionId: 0,
   })
 
-  function startGame() {
+  function startGame(key = 'dungeon', entry = 'west') {
     const town = useTownStore()
-    const start = tileCenter(...PLAYER_START)
+    levelKey.value = key
+    level.value = LEVELS[key]
+    grid.value = LEVELS[key].grid
+    exitTo.value = ''
+    entrySide.value = entry
+    const start = key === 'forest' ? tileCenter(entry === 'east' ? level.value.cols - 2 : 1, 5) : tileCenter(...PLAYER_START)
     player.x = start.x
     player.y = start.y
     player.facing = 'down'
@@ -142,8 +230,14 @@ export const useRpgStore = defineStore('rpg', () => {
     companion.active = town.companionJoined
 
     monsters.length = 0
-    for (const [col, row, kind] of MONSTER_SPAWNS) {
+    const spawns = key === 'forest' ? FOREST_SPAWNS : MONSTER_SPAWNS
+    for (const [col, row, kind] of spawns) {
       const pos = tileCenter(col, row)
+      if (key === 'forest') {
+        const k = FOREST_KINDS[kind]
+        monsters.push({ ...pos, hp: k.hp, maxHp: k.hp, damage: k.damage, coinReward: k.coin, isBoss: false, contactCooldown: 0, bodyColor: k.bodyColor, bellyColor: k.bellyColor, kind })
+        continue
+      }
       const isBoss = kind === 'boss'
       const hp = isBoss ? BOSS_MAX_HP : MONSTER_MAX_HP
       monsters.push({
@@ -157,12 +251,12 @@ export const useRpgStore = defineStore('rpg', () => {
       })
     }
     potions.length = 0
-    for (const [col, row] of POTION_SPAWNS) {
+    for (const [col, row] of key === 'forest' ? FOREST_POTIONS : POTION_SPAWNS) {
       potions.push(tileCenter(col, row))
     }
 
     kills.value = 0
-    message.value = 'DUNGEON'
+    message.value = LEVELS[key].title
     ending.value = ''
     phase.value = 'ready'
     phaseTimer.value = 1.0
@@ -170,7 +264,7 @@ export const useRpgStore = defineStore('rpg', () => {
   }
 
   function canMoveTo(x, y, half) {
-    return canMoveToTile(grid, COLS, ROWS, TILE, x, y, half)
+    return canMoveToTile(grid.value, level.value.cols, level.value.rows, TILE, x, y, half)
   }
 
   function blockedByMonster(x, y, half) {
@@ -182,7 +276,7 @@ export const useRpgStore = defineStore('rpg', () => {
     battle.active = true
     battle.monsterIndex = index
     battle.turn = 'player'
-    battle.log = `${m.isBoss ? '보스' : '몬스터'}이(가) 나타났다!`
+    battle.log = `${m.isBoss ? '보스' : m.kind === 'wolf' ? '늑대' : m.kind === 'slime' ? '슬라임' : '몬스터'}이(가) 나타났다!`
     battle.timer = 0
     battle.fireballReady = true
     battle.fireballCooldown = 0
@@ -287,6 +381,7 @@ export const useRpgStore = defineStore('rpg', () => {
     const m = monsters[battle.monsterIndex]
     kills.value++
     useTownStore().addCoins(m.coinReward)
+    if (levelKey.value === 'forest') useTownStore().addForestKill()
     if (kills.value % 3 === 0) {
       player.attack += 1
       toast.value = 'ATTACK UP!'
@@ -294,7 +389,7 @@ export const useRpgStore = defineStore('rpg', () => {
     }
     monsters.splice(battle.monsterIndex, 1)
     battle.active = false
-    if (monsters.length === 0) {
+    if (levelKey.value === 'dungeon' && monsters.length === 0) {
       phase.value = 'cleared'
       message.value = 'DUNGEON CLEARED!'
       ending.value = '던전의 몬스터를 모두 물리쳤다. 마을에 다시 평화가 찾아왔다.'
@@ -306,7 +401,7 @@ export const useRpgStore = defineStore('rpg', () => {
     battle.active = false
     phase.value = 'gameOver'
     message.value = 'GAME OVER'
-    ending.value = '용사는 쓰러졌다... 던전의 어둠은 계속된다.'
+    ending.value = levelKey.value === 'forest' ? '용사는 숲길에서 쓰러졌다... 다시 마을에서 정비하자.' : '용사는 쓰러졌다... 던전의 어둠은 계속된다.'
   }
 
   function finishFlee() {
@@ -383,6 +478,14 @@ export const useRpgStore = defineStore('rpg', () => {
       }
     }
 
+    // 숲길 양끝 출구: 길 끝에 닿으면 그쪽 마을로 나간다
+    if (levelKey.value === 'forest') {
+      const c = Math.floor(player.x / TILE)
+      const ch = level.value.map[Math.floor(player.y / TILE)][c]
+      if (ch === 'W') exitTo.value = 'west'
+      else if (ch === 'E') exitTo.value = 'east'
+    }
+
     for (let i = potions.length - 1; i >= 0; i--) {
       const p = potions[i]
       if (Math.abs(player.x - p.x) < PLAYER_HALF + 8 && Math.abs(player.y - p.y) < PLAYER_HALF + 8) {
@@ -394,6 +497,10 @@ export const useRpgStore = defineStore('rpg', () => {
 
   return {
     grid,
+    level,
+    levelKey,
+    exitTo,
+    entrySide,
     player,
     monsters,
     potions,

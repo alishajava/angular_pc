@@ -109,7 +109,20 @@ const MUSIC_DUNGEON = [
   { freq: 261.63, bass: 130.81, dur: 0.7 },
 ]
 
+const MUSIC_FOREST = [
+  { freq: 329.63, bass: 164.81, dur: 0.5 },
+  { freq: 392, bass: 164.81, dur: 0.5 },
+  { freq: 440, bass: 196, dur: 0.5 },
+  { freq: 392, bass: 196, dur: 0.5 },
+  { freq: 329.63, bass: 130.81, dur: 1.0 },
+  { freq: 293.66, bass: 146.83, dur: 0.5 },
+  { freq: 329.63, bass: 146.83, dur: 0.5 },
+  { freq: 392, bass: 174.61, dur: 0.5 },
+  { freq: 329.63, bass: 130.81, dur: 1.0 },
+]
+
 const TRACKS = {
+  forest: { melody: MUSIC_FOREST, lead: 'triangle', leadVolume: 0.045, bassVolume: 0.04 },
   town: { melody: MUSIC_TOWN, lead: 'triangle', leadVolume: 0.05, bassVolume: 0.04 },
   dungeon: { melody: MUSIC_DUNGEON, lead: 'sawtooth', leadVolume: 0.045, bassVolume: 0.05 },
 }

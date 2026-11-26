@@ -322,7 +322,7 @@ export function makeTownBackdrop({ grid, cols, rows, tile: T, scenery }) {
   // 5) forest border: top row first so nearer rows overlap farther ones
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      if (!isBorder(c, r)) continue
+      if (!isBorder(c, r) || grid[r][c] !== 1) continue
       const s = 1.05 + rnd(c, r, 3) * 0.3
       drawTree(ctx, c * T + T / 2 + (rnd(c, r, 4) - 0.5) * 12, r * T + T * 0.86, s, Math.floor(rnd(c, r, 5) * 4))
     }
@@ -583,7 +583,8 @@ export function drawDungeonDarkness(ctx, px, py, w, h) {
 
 // Backdrop for the turn-based battle screen: a torch-lit chamber with a
 // brick back wall and a flagstone floor receding toward it.
-export function drawBattleBackdrop(ctx, w, h, t) {
+export function drawBattleBackdrop(ctx, w, h, t, theme = 'dungeon') {
+  if (theme === 'forest') return drawForestBattleBackdrop(ctx, w, h, t)
   const horizon = h * 0.42
   ctx.fillStyle = '#231d36'
   ctx.fillRect(0, 0, w, horizon)
@@ -854,4 +855,220 @@ export function drawTavernLife(ctx, t, { tile: T }) {
   }
   ctx.fillStyle = '#3a2616'
   ctx.fillRect(fx - 12, fy - 2, 24, 5)
+}
+
+
+// -------------------------------------------------------------- forest ----
+
+// 숲길: 가로로 긴 숲. '#'는 빽빽한 나무, 'W'/'E'는 양쪽 마을로 나가는 출구.
+export function makeForestBackdrop({ grid, cols, rows, tile: T }) {
+  const canvas = makeCanvas(cols * T, rows * T)
+  const ctx = canvas.getContext('2d')
+  // 길: 서쪽 입구에서 동쪽 출구까지의 최단 경로를 따라 흙길을 깐다
+  const pathSet = new Set()
+  {
+    const start = [1, 5]
+    const prev = new Map([[`${start[0]},${start[1]}`, null]])
+    const q = [start]
+    while (q.length) {
+      const [c, r] = q.shift()
+      for (const [dc, dr] of [[1, 0], [0, 1], [0, -1], [-1, 0]]) {
+        const nc = c + dc
+        const nr = r + dr
+        const k = `${nc},${nr}`
+        if (nc < 0 || nr < 0 || nc >= cols || nr >= rows || grid[nr][nc] === 1 || prev.has(k)) continue
+        prev.set(k, `${c},${r}`)
+        q.push([nc, nr])
+      }
+    }
+    let cur = `${cols - 1},5`
+    while (cur) {
+      pathSet.add(cur)
+      cur = prev.get(cur)
+    }
+    pathSet.add('0,5')
+  }
+  const isPath = (c, r) => pathSet.has(`${c},${r}`)
+
+  // 1) 이끼 낀 풀밭
+  const greens = ['#3f7a3c', '#447f40', '#3b7438', '#48843f']
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      ctx.fillStyle = greens[Math.floor(rnd(c, r) * greens.length)]
+      ctx.fillRect(c * T, r * T, T, T)
+      for (let i = 0; i < 6; i++) {
+        const gx = c * T + rnd(c, r, i + 1) * T
+        const gy = r * T + rnd(c, r, i + 9) * T
+        ctx.strokeStyle = i % 2 ? 'rgba(20,70,30,0.5)' : 'rgba(140,200,110,0.4)'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(gx - 2, gy)
+        ctx.lineTo(gx - 1, gy - 5)
+        ctx.moveTo(gx + 1, gy)
+        ctx.lineTo(gx + 2, gy - 5)
+        ctx.stroke()
+      }
+    }
+  }
+  // 2) 흙길 (이어지는 타일끼리 붙도록)
+  for (const pass of [0, 1]) {
+    for (const k of pathSet) {
+      const [c, r] = k.split(',').map(Number)
+      ctx.fillStyle = pass === 0 ? '#8c6e44' : '#c4a26c'
+      const inset = pass === 0 ? 2 : 6
+      const x0 = c * T + (isPath(c - 1, r) ? -1 : inset)
+      const y0 = r * T + (isPath(c, r - 1) ? -1 : inset)
+      const x1 = c * T + T - (isPath(c + 1, r) ? -1 : inset)
+      const y1 = r * T + T - (isPath(c, r + 1) ? -1 : inset)
+      ctx.beginPath()
+      ctx.roundRect(x0, y0, x1 - x0, y1 - y0, 14)
+      ctx.fill()
+    }
+  }
+  for (const k of pathSet) {
+    const [c, r] = k.split(',').map(Number)
+    for (let i = 0; i < 4; i++) ell(ctx, c * T + 8 + rnd(c, r, i + 20) * (T - 16), r * T + 8 + rnd(c, r, i + 30) * (T - 16), 2.4, 1.6, i % 2 ? 'rgba(110,85,55,0.6)' : 'rgba(235,215,170,0.7)')
+  }
+  // 3) 들꽃·버섯·바위·쓰러진 통나무
+  const petals = ['#ffffff', '#ffd6e8', '#fff3a0', '#d8c8ff', '#ff9aa8']
+  for (let r = 1; r < rows - 1; r++) {
+    for (let c = 1; c < cols - 1; c++) {
+      if (grid[r][c] === 1 || isPath(c, r)) continue
+      const v = rnd(c, r, 40)
+      if (v < 0.3) {
+        for (let i = 0; i < 2 + Math.floor(rnd(c, r, 41) * 3); i++) drawFlower(ctx, c * T + 8 + rnd(c, r, 50 + i) * (T - 16), r * T + 10 + rnd(c, r, 60 + i) * (T - 20), petals[Math.floor(rnd(c, r, 70 + i) * petals.length)])
+      } else if (v < 0.36) {
+        const x = c * T + T / 2 + (rnd(c, r, 5) - 0.5) * 16
+        const y = r * T + T * 0.7
+        ctx.fillStyle = '#f0e6d0'
+        ctx.fillRect(x - 2, y - 7, 4, 8)
+        ctx.fillStyle = rnd(c, r, 6) > 0.5 ? '#e8452e' : '#d58cff'
+        ctx.beginPath()
+        ctx.ellipse(x, y - 8, 7, 5, 0, Math.PI, 0)
+        ctx.fill()
+      } else if (v < 0.4) {
+        const x = c * T + T / 2
+        const y = r * T + T * 0.72
+        ell(ctx, x + 2, y + 3, 14, 5, 'rgba(0,0,0,0.25)')
+        ctx.fillStyle = '#8f949e'
+        ctx.beginPath()
+        ctx.moveTo(x - 13, y + 2)
+        ctx.quadraticCurveTo(x - 14, y - 11, x - 3, y - 14)
+        ctx.quadraticCurveTo(x + 10, y - 14, x + 13, y - 2)
+        ctx.lineTo(x + 11, y + 3)
+        ctx.closePath()
+        ctx.fill()
+      }
+    }
+  }
+  // 4) 나무: 위쪽 행부터 그려서 아래 행이 위를 덮게
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (grid[r][c] !== 1) continue
+      const s = 1.05 + rnd(c, r, 3) * 0.35
+      drawTree(ctx, c * T + T / 2 + (rnd(c, r, 4) - 0.5) * 12, r * T + T * 0.86, s, Math.floor(rnd(c, r, 5) * 4))
+    }
+  }
+  // 5) 양쪽 출구 표지판
+  for (const [c, text, dir] of [[0, '← 시작의 마을', -1], [cols - 1, '단풍마을 →', 1]]) {
+    const x = c * T + T / 2
+    const y = 5 * T + T * 0.8
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'
+    ctx.beginPath()
+    ctx.ellipse(x, y + 3, 16, 5, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#6b4a2a'
+    ctx.fillRect(x - 3, y - 30, 6, 32)
+    ctx.fillStyle = '#c9a06a'
+    ctx.strokeStyle = '#5a3e1b'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.roundRect(x - 44 + dir * 14, y - 54, 88, 22, 4)
+    ctx.fill()
+    ctx.stroke()
+    ctx.fillStyle = '#3a2410'
+    ctx.font = 'bold 11px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(text, x + dir * 14, y - 39)
+  }
+  return canvas
+}
+
+// 숲의 움직이는 것들: 햇살 얼룩, 떠다니는 반딧불·나뭇잎
+export function drawForestLife(ctx, t, { cols, rows, tile: T }) {
+  for (let i = 0; i < 26; i++) {
+    const bx = ((i * 137.5 + t * (6 + (i % 5) * 2)) % (cols * T))
+    const by = (rnd(i, 2) * (rows - 1) + 0.5) * T + Math.sin(t * 0.9 + i) * 14
+    ctx.globalAlpha = 0.35 + 0.35 * Math.abs(Math.sin(t * 1.6 + i))
+    ctx.fillStyle = i % 3 === 0 ? '#fff6a0' : '#c8f0a0'
+    ctx.beginPath()
+    ctx.arc(bx, by, 1.8 + (i % 3) * 0.5, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.globalAlpha = 1
+}
+
+function drawForestBattleBackdrop(ctx, w, h, t) {
+  const horizon = h * 0.46
+  const sky = ctx.createLinearGradient(0, 0, 0, horizon)
+  sky.addColorStop(0, '#9fd8f0')
+  sky.addColorStop(1, '#dff3d8')
+  ctx.fillStyle = sky
+  ctx.fillRect(0, 0, w, horizon)
+  // 먼 나무 실루엣 두 겹
+  for (const [layer, color, base, size] of [[0, '#6aa070', horizon - 4, 70], [1, '#3f7a4a', horizon + 6, 100]]) {
+    for (let x = -20; x < w + 60; x += size * 0.7) {
+      const hh = size * (0.8 + 0.5 * rnd(layer * 40 + Math.floor(x / 10), 1))
+      ctx.fillStyle = color
+      ctx.beginPath()
+      ctx.ellipse(x, base - hh * 0.5, size * 0.42, hh * 0.55, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#4a3420'
+      ctx.fillRect(x - 4, base - hh * 0.1, 8, hh * 0.25)
+    }
+  }
+  // 풀밭 바닥
+  const ground = ctx.createLinearGradient(0, horizon, 0, h)
+  ground.addColorStop(0, '#5a9a4a')
+  ground.addColorStop(1, '#3f7a38')
+  ctx.fillStyle = ground
+  ctx.fillRect(0, horizon, w, h - horizon)
+  ctx.strokeStyle = 'rgba(20,70,30,0.35)'
+  ctx.lineWidth = 1.2
+  for (let i = 0; i < 90; i++) {
+    const gx = rnd(i, 7) * w
+    const gy = horizon + 8 + rnd(i, 8) * (h - horizon - 12)
+    ctx.beginPath()
+    ctx.moveTo(gx, gy)
+    ctx.lineTo(gx - 2, gy - 6)
+    ctx.moveTo(gx + 2, gy)
+    ctx.lineTo(gx + 4, gy - 6)
+    ctx.stroke()
+  }
+  // 흙길
+  ctx.fillStyle = 'rgba(196,162,108,0.8)'
+  ctx.beginPath()
+  ctx.moveTo(w * 0.36, horizon)
+  ctx.lineTo(w * 0.64, horizon)
+  ctx.lineTo(w * 0.95, h)
+  ctx.lineTo(w * 0.05, h)
+  ctx.closePath()
+  ctx.fill()
+  // 햇살 줄기
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  for (let i = 0; i < 4; i++) {
+    const x = w * (0.15 + i * 0.23) + Math.sin(t * 0.4 + i) * 10
+    const g = ctx.createLinearGradient(x, 0, x - 60, h)
+    g.addColorStop(0, 'rgba(255,245,180,0.28)')
+    g.addColorStop(1, 'rgba(255,245,180,0)')
+    ctx.fillStyle = g
+    ctx.beginPath()
+    ctx.moveTo(x - 18, 0)
+    ctx.lineTo(x + 22, 0)
+    ctx.lineTo(x - 40, h)
+    ctx.lineTo(x - 100, h)
+    ctx.fill()
+  }
+  ctx.restore()
 }

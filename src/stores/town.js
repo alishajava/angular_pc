@@ -48,7 +48,7 @@ export const SCENERY = {
     // main street to the dungeon gate
     ...[6, 7, 8, 9, 10].map((r) => [7, r]),
     // cross street (heroine <-> villager)
-    ...[1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12].map((c) => [c, 6]),
+    ...[1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15].map((c) => [c, 6]),
     // lanes to the villager and the elder
     ...[7, 8, 9].map((r) => [1, r]),
     ...[8, 9, 10, 11, 12].map((c) => [c, 9]),
@@ -83,7 +83,7 @@ const BASE_MAP = [
   floorRow(),
   floorRow({ 7: 'T' }),
   floorRow(),
-  floorRow({ 3: 'R', 12: 'n' }),
+  floorRow({ 3: 'R', 12: 'n', 15: 'F' }), // F: 동쪽 숲길로 나가는 길
   floorRow(),
   floorRow(),
   floorRow({ 1: 'n', 12: 'e' }),
@@ -140,12 +140,13 @@ const SPAWN_TYPES = {
   e: 'elder',
   D: 'gate',
   R: 'heroine',
+  F: 'forestGate',
 }
 
 // Landmarks the player navigates to (the dungeon gate, the tavern's
 // building/entrance) stay put; everyone else wanders a little around
 // their home spot so the town doesn't feel frozen.
-const STATIC_TYPES = new Set(['gate', 'tavern'])
+const STATIC_TYPES = new Set(['gate', 'tavern', 'forestGate'])
 const WANDER_RADIUS = 22
 const WANDER_SPEED = 0.5
 
@@ -193,6 +194,11 @@ export const useTownStore = defineStore('town', () => {
   const bonusAttack = ref(0)
   const bonusMaxHp = ref(0)
   const companionJoined = ref(false)
+  // 숲길·단풍마을 진행
+  const forestKills = ref(0)
+  const bought2 = ref({ sword: false, elixir: false })
+  const village2Quest = ref('none') // none | active | rewarded
+  const village2QuestBase = ref(0) // 임무를 받을 때까지의 숲 처치 수
 
   const dialogueSpeaker = ref('')
   const dialogueText = ref('')
@@ -209,6 +215,22 @@ export const useTownStore = defineStore('town', () => {
     dialogueTimer.value = 0
     pendingPurchase.value = null
     for (const it of interactables) it.touching = false
+  }
+
+  // 숲길에서 돌아올 때: 동쪽 길목 앞에 선다
+  function enterTownFromForest() {
+    phase.value = 'town'
+    const start = tileCenter(14, 6, TILE)
+    player.x = start.x
+    player.y = start.y
+    player.facing = 'left'
+    dialogueTimer.value = 0
+    pendingPurchase.value = null
+    for (const it of interactables) it.touching = true
+  }
+
+  function addForestKill() {
+    forestKills.value += 1
   }
 
   function beginAdventure() {
@@ -230,6 +252,10 @@ export const useTownStore = defineStore('town', () => {
       questDone: questDone.value,
       questRewarded: questRewarded.value,
       companionJoined: companionJoined.value,
+      forestKills: forestKills.value,
+      bought2: bought2.value,
+      village2Quest: village2Quest.value,
+      village2QuestBase: village2QuestBase.value,
       visitedTypes,
     })
     dialogueSpeaker.value = '시스템'
@@ -252,6 +278,10 @@ export const useTownStore = defineStore('town', () => {
     questDone.value = !!data.questDone
     questRewarded.value = !!data.questRewarded
     companionJoined.value = !!data.companionJoined
+    forestKills.value = data.forestKills ?? 0
+    bought2.value = data.bought2 ?? { sword: false, elixir: false }
+    village2Quest.value = data.village2Quest ?? 'none'
+    village2QuestBase.value = data.village2QuestBase ?? 0
     for (const it of interactables) {
       it.visited = (data.visitedTypes || []).includes(it.type)
     }
@@ -291,6 +321,7 @@ export const useTownStore = defineStore('town', () => {
   function triggerInteraction(item) {
     if (item.type === 'gate') return 'enterDungeon'
     if (item.type === 'tavern') return 'enterTavern'
+    if (item.type === 'forestGate') return 'enterForest'
 
     if (item.type === 'elder') {
       if (questDone.value && !questRewarded.value) {
@@ -388,7 +419,7 @@ export const useTownStore = defineStore('town', () => {
       if (overlapping && !item.touching) {
         item.touching = true
         const result = triggerInteraction(item)
-        if (result === 'enterDungeon' || result === 'enterTavern') return result
+        if (result === 'enterDungeon' || result === 'enterTavern' || result === 'enterForest') return result
       } else if (!overlapping) {
         item.touching = false
       }
@@ -411,6 +442,12 @@ export const useTownStore = defineStore('town', () => {
     dialogueText,
     dialogueTimer,
     pendingPurchase,
+    forestKills,
+    bought2,
+    village2Quest,
+    village2QuestBase,
+    addForestKill,
+    enterTownFromForest,
     beginAdventure,
     enterTown,
     addCoins,

@@ -76,6 +76,7 @@ function loop(time) {
   const result = store.update(dt, buildInput())
   if (result === 'enterDungeon') flow.goToDungeon()
   else if (result === 'enterTavern') flow.goToTavern()
+  else if (result === 'enterForest') flow.goToForest('west')
   render()
 
   rafId = requestAnimationFrame(loop)
@@ -89,6 +90,7 @@ const TYPE_INFO = {
   villager2: { label: '마을 사람', outfit: '#b08968', hair: '#1c1c1c' },
   elder: { label: '촌장' },
   gate: { label: '던전 입구' },
+  forestGate: { label: '숲길 →' },
   heroine: { label: '히로인' },
 }
 
@@ -137,6 +139,25 @@ function drawInteractables(ctx) {
       ctx.scale(1.5, 1.5)
       drawGate(ctx, 0, 0)
       ctx.restore()
+    } else if (item.type === 'forestGate') {
+      // 마을 동쪽 끝의 나무 아치와 이정표
+      ctx.fillStyle = 'rgba(0,0,0,0.25)'
+      ctx.beginPath()
+      ctx.ellipse(item.x - 6, item.y + 22, 20, 6, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#6b4a2a'
+      ctx.fillRect(item.x - 22, item.y - 34, 6, 56)
+      ctx.fillStyle = '#c9a06a'
+      ctx.strokeStyle = '#5a3e1b'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.roundRect(item.x - 34, item.y - 46, 54, 20, 4)
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = '#3a2410'
+      ctx.font = 'bold 11px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('단풍마을 →', item.x - 7, item.y - 32)
     } else if (item.type === 'tavern') {
       // the building itself is part of the backdrop; this tile is its doorway
     } else if (item.type === 'elder') drawElder(ctx, item.x, item.y, swing, facing)
@@ -397,7 +418,7 @@ onUnmounted(() => {
   <div class="town-scene">
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
     <div class="controls">
-      WASD/방향키 이동 · 상점 주인·마을 사람·촌장에게 부딪히면 대화 · 선술집은 안으로 입장 · 던전 입구로 가면 입장 · I 스탯 보기 · M 음악 켜기/끄기 · P 저장 · L 불러오기
+      WASD/방향키 이동 · 상점 주인·마을 사람·촌장에게 부딪히면 대화 · 선술집은 안으로 입장 · 던전 입구로 가면 입장 · 동쪽 길로 나가면 숲길을 지나 다른 마을로 · I 스탯 보기 · M 음악 켜기/끄기 · P 저장 · L 불러오기
     </div>
   </div>
 </template>

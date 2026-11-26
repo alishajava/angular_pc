@@ -1,13 +1,15 @@
 <script setup>
 import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRpgStore, TILE, COLS, ROWS, STAGE_WIDTH, STAGE_HEIGHT, WORLD_HEIGHT } from '../stores/rpg'
+import { useRpgStore, TILE, STAGE_WIDTH, STAGE_HEIGHT } from '../stores/rpg'
 import { useTownStore } from '../stores/town'
 import { useFlowStore } from '../stores/flow'
 import { unlockAudio, playAttackSwing, playFireball, playMonsterDown, playPlayerHit, playPickup, playLevelUp, playGameOver, toggleMusic, isMusicEnabled, setMusicTrack } from '../audio'
 import { drawHero, drawHeroine, drawMonster, drawBoss, drawSlash, drawFireball, FACE_ANGLE } from '../sprites'
-import { makeDungeonBackdrop, drawDungeonLife, drawDungeonDarkness, drawPotion, drawBattleBackdrop } from '../scenery'
+import { makeDungeonBackdrop, drawDungeonLife, drawDungeonDarkness, drawPotion, drawBattleBackdrop, makeForestBackdrop, drawForestLife } from '../scenery'
 import { canMoveTo } from '../mapUtils'
 
+// level: 'dungeon' | 'forest' / entry: 숲길에 들어온 쪽 ('west' | 'east')
+const props = defineProps({ level: { type: String, default: 'dungeon' }, entry: { type: String, default: 'west' } })
 const store = useRpgStore()
 const town = useTownStore()
 const flow = useFlowStore()
@@ -35,14 +37,12 @@ function onKeyDown(e) {
   if (key === 'i') showStats.value = !showStats.value
   if (key === 'm') toggleMusic()
   if (store.phase === 'gameOver' || store.phase === 'cleared') {
-    town.enterTown()
-    flow.goToTown()
+    leaveToTown()
     return
   }
   if (key === 'escape') {
     if (store.battle.active) return // 전투 중에는 마을로 도망칠 수 없다 (R로 도망)
-    town.enterTown()
-    flow.goToTown()
+    leaveToTown()
     return
   }
   if (store.battle.active && store.battle.turn === 'player') {
@@ -50,6 +50,16 @@ function onKeyDown(e) {
     else if (FIREBALL_KEYS.includes(key)) store.battleFireball()
     else if (FLEE_KEYS.includes(key)) store.battleFlee()
   }
+}
+
+// 마을로 돌아가기: 던전·숲 어디서든 (숲에서는 들어온 쪽 마을로)
+function leaveToTown() {
+  if (props.level === 'forest' && props.entry === 'east') {
+    flow.goToVillage2('west')
+    return
+  }
+  town.enterTown()
+  flow.goToTown()
 }
 
 function onKeyUp(e) {
@@ -118,6 +128,16 @@ function loop(time) {
   animTime += dt
 
   store.update(dt, buildInput())
+  if (store.exitTo) {
+    // 숲길 끝에 닿았다: 서쪽 = 처음 마을, 동쪽 = 단풍마을
+    const to = store.exitTo
+    store.exitTo = ''
+    if (to === 'west') {
+      town.enterTownFromForest()
+      flow.goToTown()
+    } else flow.goToVillage2('west')
+    return
+  }
   if (store.companion.active && !store.battle.active) updateFollower(dt)
   render()
 
@@ -129,7 +149,14 @@ function loop(time) {
 let backdrop = null
 
 function drawMap(ctx) {
-  if (!backdrop) backdrop = makeDungeonBackdrop({ grid: store.grid, cols: COLS, rows: ROWS, tile: TILE })
+  const lv = store.level
+  if (lv.theme === 'forest') {
+    if (!backdrop) backdrop = { canvas: makeForestBackdrop({ grid: store.grid, cols: lv.cols, rows: lv.rows, tile: TILE }) }
+    ctx.drawImage(backdrop.canvas, 0, 0)
+    drawForestLife(ctx, animTime, { cols: lv.cols, rows: lv.rows, tile: TILE })
+    return
+  }
+  if (!backdrop) backdrop = makeDungeonBackdrop({ grid: store.grid, cols: lv.cols, rows: lv.rows, tile: TILE })
   ctx.drawImage(backdrop.canvas, 0, 0)
   drawDungeonLife(ctx, animTime, backdrop.torches)
 }
@@ -141,6 +168,7 @@ function drawPotions(ctx) {
 function drawMonsters(ctx) {
   for (const m of store.monsters) {
     if (m.isBoss) drawBoss(ctx, m.x, m.y)
+    else if (m.bodyColor) drawMonster(ctx, m.x, m.y, { bodyColor: m.bodyColor, bellyColor: m.bellyColor })
     else drawMonster(ctx, m.x, m.y)
 
     const barW = m.isBoss ? 40 : 22
@@ -186,8 +214,8 @@ function updateFollower(dt) {
   const sx = (dx / dist) * step
   const sy = (dy / dist) * step
   // slide along walls rather than cutting through corners
-  if (canMoveTo(store.grid, COLS, ROWS, TILE, follower.x + sx, follower.y, FOLLOWER_HALF)) follower.x += sx
-  if (canMoveTo(store.grid, COLS, ROWS, TILE, follower.x, follower.y + sy, FOLLOWER_HALF)) follower.y += sy
+  if (canMoveTo(store.grid, store.level.cols, store.level.rows, TILE, follower.x + sx, follower.y, FOLLOWER_HALF)) follower.x += sx
+  if (canMoveTo(store.grid, store.level.cols, store.level.rows, TILE, follower.x, follower.y + sy, FOLLOWER_HALF)) follower.y += sy
   follower.moving = step > 0.3
   if (Math.abs(dx) > 6) follower.facing = dx > 0 ? 'right' : 'left'
 }
@@ -250,6 +278,17 @@ function drawHud(ctx) {
     ctx.fillText(store.toast, STAGE_WIDTH / 2, 50)
   }
 
+  if (store.level.theme === 'forest' && !store.battle.active) {
+    const pct = Math.max(0, Math.min(1, store.player.x / store.level.worldW))
+    ctx.textAlign = 'center'
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'
+    ctx.beginPath()
+    ctx.roundRect(STAGE_WIDTH / 2 - 120, 8, 240, 20, 10)
+    ctx.fill()
+    ctx.fillStyle = '#ffe9a8'
+    ctx.font = 'bold 11px sans-serif'
+    ctx.fillText(`숲길  시작의 마을  ${'─'.repeat(Math.round(pct * 12))}●${'─'.repeat(12 - Math.round(pct * 12))}  단풍마을`, STAGE_WIDTH / 2, 22)
+  }
   ctx.textAlign = 'right'
   ctx.fillStyle = '#aaa'
   ctx.font = '11px sans-serif'
@@ -266,7 +305,7 @@ function drawBattle(ctx) {
   if (!m) return
   const p = store.player
 
-  drawBattleBackdrop(ctx, STAGE_WIDTH, STAGE_HEIGHT, animTime)
+  drawBattleBackdrop(ctx, STAGE_WIDTH, STAGE_HEIGHT, animTime, store.level.theme)
 
   // the party stands to the left, facing the monster
   const idle = Math.sin(animTime * 2.4) * 2
@@ -291,6 +330,7 @@ function drawBattle(ctx) {
   ctx.translate(mx, my)
   ctx.scale(m.isBoss ? 2.2 : 1.8, m.isBoss ? 2.2 : 1.8)
   if (m.isBoss) drawBoss(ctx, 0, 0)
+  else if (m.bodyColor) drawMonster(ctx, 0, 0, { bodyColor: m.bodyColor, bellyColor: m.bellyColor })
   else drawMonster(ctx, 0, 0)
   ctx.restore()
 
@@ -308,7 +348,7 @@ function drawBattle(ctx) {
   ctx.textAlign = 'center'
   ctx.fillStyle = m.isBoss ? '#ffd700' : '#fff'
   ctx.font = 'bold 13px sans-serif'
-  ctx.fillText(m.isBoss ? 'BOSS' : '몬스터', mx, barY - 8)
+  ctx.fillText(m.isBoss ? 'BOSS' : m.kind === 'wolf' ? '늑대' : m.kind === 'slime' ? '슬라임' : '몬스터', mx, barY - 8)
 
   // message log
   const logY = STAGE_HEIGHT * 0.58
@@ -404,15 +444,17 @@ function render() {
   if (store.battle.active) {
     drawBattle(ctx)
   } else {
-    const cameraY = Math.max(0, Math.min(store.player.y - STAGE_HEIGHT / 2, WORLD_HEIGHT - STAGE_HEIGHT))
+    const lv = store.level
+    const cameraX = Math.max(0, Math.min(store.player.x - STAGE_WIDTH / 2, lv.worldW - STAGE_WIDTH))
+    const cameraY = Math.max(0, Math.min(store.player.y - STAGE_HEIGHT / 2, lv.worldH - STAGE_HEIGHT))
     ctx.save()
-    ctx.translate(0, -cameraY)
+    ctx.translate(-cameraX, -cameraY)
     drawMap(ctx)
     drawPotions(ctx)
     drawMonsters(ctx)
     drawPlayer(ctx)
     ctx.restore()
-    drawDungeonDarkness(ctx, store.player.x, store.player.y - cameraY, STAGE_WIDTH, STAGE_HEIGHT)
+    if (lv.theme === 'dungeon') drawDungeonDarkness(ctx, store.player.x - cameraX, store.player.y - cameraY, STAGE_WIDTH, STAGE_HEIGHT)
   }
 
   drawHud(ctx)
@@ -439,8 +481,9 @@ function render() {
 }
 
 onMounted(() => {
-  store.startGame()
-  setMusicTrack('dungeon')
+  backdrop = null
+  store.startGame(props.level, props.entry)
+  setMusicTrack(props.level === 'forest' ? 'forest' : 'dungeon')
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   rafId = requestAnimationFrame(loop)
@@ -457,7 +500,7 @@ onUnmounted(() => {
   <div class="rpg-game">
     <canvas ref="canvasRef" :width="STAGE_WIDTH" :height="STAGE_HEIGHT"></canvas>
     <div class="controls">
-      WASD/방향키 이동 · 몬스터와 부딪히면 전투 시작 · 전투 중 Space 공격 · K 파이어볼 · R 도망 · I 스탯 보기 · M 음악 켜기/끄기 · Esc 마을로 돌아가기
+      WASD/방향키 이동 · 숲길 양 끝으로 나가면 다른 마을로 · 몬스터와 부딪히면 전투 시작 · 전투 중 Space 공격 · K 파이어볼 · R 도망 · I 스탯 보기 · M 음악 켜기/끄기 · Esc 마을로 돌아가기
     </div>
   </div>
 </template>
