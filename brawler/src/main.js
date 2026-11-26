@@ -41,7 +41,7 @@ const ATTACKS = {
   // the grabbed enemy into its own little gravity arc (see the enemy
   // 'thrown' state in updateEnemies), so `knockback` here is unused but
   // kept for shape-consistency with the rest of this table.
-  throw: { startup: 0.12, active: 0.1, recovery: 0.35, range: 46, damage: 20, knockback: 0 },
+  throw: { startup: 0.17, active: 0.24, recovery: 0.3, range: 46, damage: 20, knockback: 0 },
 }
 
 // A quick burst forward on double-tapping a direction - classic fighting-
@@ -139,6 +139,7 @@ function makeInitialState() {
     cameraX: 0,
     gateX: null,
     waveIndex: 0,
+    fx: [],
   }
 }
 let state = makeInitialState()
@@ -405,7 +406,16 @@ function resolvePlayerThrow() {
     return
   }
   best.state = 'thrown'
-  best.thrown = { z: 0, vz: THROW_LAUNCH_VZ, vx: dir * THROW_LAUNCH_VX }
+  // 잡은 적을 머리 위로 들어 올렸다가(hold) 내던진다
+  best.thrown = { z: 0, vz: THROW_LAUNCH_VZ, vx: dir * THROW_LAUNCH_VX, hold: def.active, holdMax: def.active, dir, rot: 0 }
+  best.y = p.y
+  state.fx.push({ kind: 'ring', x: p.x + p.facing * 14, y: p.y, t: 0, life: 0.3 })
+}
+
+function spawnLandFx(x, y) {
+  state.fx.push({ kind: 'dust', x, y, t: 0, life: 0.5 })
+  state.fx.push({ kind: 'ring', x, y, t: 0, life: 0.35 })
+  sfx.heavy()
 }
 
 function damageEnemy(en, dmg, knockbackDx) {
@@ -465,11 +475,28 @@ function updateEnemies(dt) {
 
     if (en.state === 'thrown') {
       const th = en.thrown
+      if (th.hold > 0) {
+        // 들어 올려지는 중: 플레이어 머리 위에서 가로로 누운 채 흔들린다
+        th.hold -= dt
+        const k = 1 - Math.max(0, th.hold) / th.holdMax
+        const e = 1 - Math.pow(1 - Math.min(1, k * 1.6), 3)
+        en.x = clamp(p.x + p.facing * (10 + 12 * k), 40, WORLD_WIDTH - 40)
+        en.y = p.y
+        th.z = 82 * e
+        th.rot = th.dir * (Math.PI / 2) * e + Math.sin(k * 30) * 0.06
+        if (th.hold <= 0) {
+          sfx.whoosh()
+          state.fx.push({ kind: 'ring', x: en.x, y: en.y, t: 0, life: 0.25 })
+        }
+        continue
+      }
+      th.rot += th.dir * 15 * dt
       th.vz -= GRAVITY * dt
       th.z += th.vz * dt
       en.x = clamp(en.x + th.vx * dt, 40, WORLD_WIDTH - 40)
       if (th.z <= 0) {
         th.z = 0
+        spawnLandFx(en.x, en.y)
         en.thrown = null
         en.state = 'hitstun'
         en.hitstunTimer = HITSTUN_DURATION * 1.5 // a beat longer than a normal hit - they just landed hard
@@ -582,6 +609,8 @@ function updateCamera() {
 
 function update(dt) {
   if (state.phase !== 'playing') return
+  for (const f of state.fx) f.t += dt
+  state.fx = state.fx.filter((f) => f.t < f.life)
   updatePlayer(dt)
   updateEnemies(dt)
   checkWaveTriggers()
@@ -695,9 +724,9 @@ function drawStreetLamp(x) {
 
 function drawBackground() {
   const grad = ctx.createLinearGradient(0, 0, 0, GROUND_TOP)
-  grad.addColorStop(0, '#241a44')
-  grad.addColorStop(0.7, '#5d4a8a')
-  grad.addColorStop(1, '#8a6aa0')
+  grad.addColorStop(0, '#3b3074')
+  grad.addColorStop(0.7, '#8470b8')
+  grad.addColorStop(1, '#c892c4')
   ctx.fillStyle = grad
   ctx.fillRect(0, 0, canvas.width, GROUND_TOP)
 
@@ -720,12 +749,12 @@ function drawBackground() {
   ctx.arc(mx, 70, 22, 0, Math.PI * 2)
   ctx.fill()
 
-  drawParallaxLayer(buildingsFar, 0.25, '#20163a', 'rgba(255,214,120,0.35)')
-  drawParallaxLayer(buildingsMid, 0.5, '#2e2050', 'rgba(255,214,120,0.6)')
+  drawParallaxLayer(buildingsFar, 0.25, '#3c2f68', 'rgba(255,214,120,0.35)')
+  drawParallaxLayer(buildingsMid, 0.5, '#52408a', 'rgba(255,214,120,0.6)')
 
   // sidewalk strip, curb, then asphalt with lane dashes
   const walk = 40
-  ctx.fillStyle = '#5a5a66'
+  ctx.fillStyle = '#7c7c8c'
   ctx.fillRect(0, GROUND_TOP, canvas.width, walk)
   ctx.strokeStyle = 'rgba(0,0,0,0.25)'
   ctx.lineWidth = 1.5
@@ -736,9 +765,9 @@ function drawBackground() {
     ctx.lineTo(sx, GROUND_TOP + walk)
     ctx.stroke()
   }
-  ctx.fillStyle = '#7a7a88'
+  ctx.fillStyle = '#a0a0b0'
   ctx.fillRect(0, GROUND_TOP + walk - 4, canvas.width, 4)
-  ctx.fillStyle = '#34343c'
+  ctx.fillStyle = '#505060'
   ctx.fillRect(0, GROUND_TOP + walk, canvas.width, canvas.height - GROUND_TOP - walk)
   const laneY = GROUND_TOP + walk + (canvas.height - GROUND_TOP - walk) * 0.5
   ctx.fillStyle = 'rgba(255,224,120,0.5)'
@@ -787,12 +816,26 @@ function drawHumanoid(x, y, opts) {
   ctx.save()
   ctx.globalAlpha = opts.alpha ?? 1
   ctx.translate(worldToScreenX(x), y - (opts.lift || 0))
+  if (opts.rot) {
+    ctx.translate(0, -30 * scale)
+    ctx.rotate(opts.rot)
+    ctx.translate(0, 30 * scale)
+  }
   ctx.scale(scale * opts.facing, scale)
+  // 던지기 자세: 준비(잡기) → 들어올리기 → 내던지기. tp = 단계 진행도 0..1
+  const tPhase = opts.throwPhase
+  const tp = opts.throwP || 0
+  if (tPhase) {
+    const lean = tPhase === 'startup' ? 0.1 * tp : tPhase === 'active' ? 0.1 - 0.22 * Math.min(1, tp * 1.5) : -0.12 + 0.3 * Math.min(1, tp * 2.2) - 0.18 * Math.max(0, tp - 0.45)
+    ctx.translate(0, -26)
+    ctx.rotate(lean) // 윗몸 기울기(허리 기준)
+    ctx.translate(0, 26)
+  }
 
   const bodyColor = opts.flash ? '#ffffff' : opts.color
   const legSwing = opts.moving ? Math.sin(opts.walkPhase) * 10 : 0
   const kicking = opts.attacking && opts.attackType === 'kick'
-  const throwing = opts.attacking && opts.attackType === 'throw'
+  const throwing = !!tPhase || (opts.attacking && opts.attackType === 'throw')
   const punching = opts.attacking && !kicking && !throwing
   const OUT = 'rgba(15,10,20,0.75)'
   const boot = (bx, by, bw) => {
@@ -811,10 +854,12 @@ function drawHumanoid(x, y, opts) {
     hRound(8, -22, 24, 9, 3); ctx.fill()
     boot(28, -24, 6)
   } else if (throwing) {
-    hRound(-9, -26, 7, 26, 2); ctx.fill()
-    hRound(6, -26, 7, 26, 2); ctx.fill()
-    boot(-9, -6, 7)
-    boot(6, -6, 7)
+    // 다리를 넓게 벌리고 무게중심을 낮춘 던지기 자세
+    const wide = tPhase === 'startup' ? 3 + 4 * tp : 7
+    hRound(-12 - wide, -26, 7, 26, 2); ctx.fill()
+    hRound(5 + wide, -26, 7, 26, 2); ctx.fill()
+    boot(-12 - wide, -6, 7)
+    boot(5 + wide, -6, 7)
   } else {
     hRound(-10, -26 + legSwing * 0.2, 7, 26, 2); ctx.fill()
     hRound(3, -26 - legSwing * 0.2, 7, 26, 2); ctx.fill()
@@ -880,8 +925,34 @@ function drawHumanoid(x, y, opts) {
     arm(8, -50, 8, 16); fist(12, -33)
     arm(-16, -50, 8, 16); fist(-12, -33)
   } else if (throwing) {
-    arm(8, -58, 22, 10); fist(33, -53)
-    arm(-16, -50, 10, 18); fist(-11, -30)
+    // 어깨에서 손까지 이어지는 팔(굵은 선)로 포즈를 만든다
+    const limb = (x1, y1, x2, y2) => {
+      ctx.lineCap = 'round'
+      ctx.strokeStyle = OUT; ctx.lineWidth = 9.5
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
+      ctx.strokeStyle = bodyColor; ctx.lineWidth = 7.5
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
+      ctx.lineCap = 'butt'
+      fist(x2, y2)
+    }
+    const lerp = (a, b, k) => a + (b - a) * k
+    const ease = (k) => 1 - Math.pow(1 - Math.min(1, Math.max(0, k)), 3)
+    let hx1, hy1, hx2, hy2 // 앞팔 손 / 뒷팔 손
+    if (tPhase === 'startup') { // 두 팔을 앞으로 뻗어 상대를 움켜쥔다
+      const k = ease(tp)
+      hx1 = lerp(14, 32, k); hy1 = lerp(-34, -50, k)
+      hx2 = lerp(-12, 26, k); hy2 = lerp(-32, -42, k)
+    } else if (tPhase === 'active') { // 번쩍 머리 위로 들어올림
+      const k = ease(tp * 1.5)
+      hx1 = lerp(32, 16, k); hy1 = lerp(-50, -104, k)
+      hx2 = lerp(26, 4, k); hy2 = lerp(-42, -100, k)
+    } else { // 내던지며 앞으로 휘두름 → 팔 늘어뜨림
+      const k = ease(tp * 2)
+      hx1 = lerp(16, 38, k); hy1 = lerp(-104, -46, k)
+      hx2 = lerp(4, 30, k); hy2 = lerp(-100, -40, k)
+    }
+    limb(-8, -52, hx2, hy2)
+    limb(8, -52, hx1, hy1)
   } else {
     const armSwing = opts.moving ? Math.sin(opts.walkPhase + Math.PI) * 6 : 0
     arm(10, -50 + armSwing * 0.3, 8, 18); fist(14, -30 + armSwing * 0.3)
@@ -1035,8 +1106,10 @@ function drawPlayerSprite() {
     facing: p.facing,
     walkPhase: p.walkPhase,
     moving: p.moving,
-    attacking: !!p.attack && p.attack.phase !== 'recovery',
+    attacking: !!p.attack && (p.attack.phase !== 'recovery' || p.attack.type === 'throw'),
     attackType: p.attack && p.attack.type,
+    throwPhase: p.attack && p.attack.type === 'throw' ? p.attack.phase : null,
+    throwP: p.attack && p.attack.type === 'throw' ? Math.min(1, p.attack.t / ATTACKS.throw[p.attack.phase]) : 0,
     flash: p.hitstunTimer > 0 && Math.floor(p.hitstunTimer * 20) % 2 === 0,
     lift: p.z,
   })
@@ -1069,6 +1142,7 @@ function drawEnemySprite(en) {
     flash: en.flashTimer > 0,
     alpha,
     lift: liftZ,
+    rot: en.thrown ? en.thrown.rot : 0,
   })
   if (en.type === 'boss' && en.state !== 'dead') drawBossHealthBar(en)
 }
@@ -1079,7 +1153,33 @@ function drawWorld() {
   for (const en of state.enemies) drawables.push({ y: en.y, draw: () => drawEnemySprite(en) })
   drawables.sort((a, b) => a.y - b.y)
   for (const d of drawables) d.draw()
+  drawFx()
   drawUltimateEffect()
+}
+
+function drawFx() {
+  for (const f of state.fx) {
+    const k = f.t / f.life
+    const sx = worldToScreenX(f.x)
+    ctx.save()
+    if (f.kind === 'ring') {
+      ctx.strokeStyle = `rgba(255,255,255,${0.8 * (1 - k)})`
+      ctx.lineWidth = 3 * (1 - k) + 1
+      ctx.beginPath()
+      ctx.ellipse(sx, f.y, 14 + 44 * k, (14 + 44 * k) * 0.35, 0, 0, Math.PI * 2)
+      ctx.stroke()
+    } else {
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2
+        const r = 10 + 46 * k
+        ctx.fillStyle = `rgba(220,210,190,${0.55 * (1 - k)})`
+        ctx.beginPath()
+        ctx.arc(sx + Math.cos(a) * r, f.y - 4 + Math.sin(a) * r * 0.3 - 18 * k * (i % 2), 5 + 5 * k, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+    ctx.restore()
+  }
 }
 
 function drawUltimateEffect() {
@@ -1202,7 +1302,7 @@ function drawTitleScreen() {
   ctx.textAlign = 'center'
   ctx.font = '14px sans-serif'
   ctx.fillStyle = 'rgba(255,255,255,0.9)'
-  ctx.fillText('A/D 이동 · W/S 앞뒤 · 스페이스 점프 · J 펀치 · K 킥 · J+K 던지기 · L 필살기 · M 소리', W / 2, H - 62)
+  ctx.fillText('A/D 이동 · W/S 앞뒤 · 스페이스 점프 · J 펀치 · K 킥 · J+K 던지기(잡아서 번쩍!) · L 필살기 · M 소리', W / 2, H - 62)
   ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
   ctx.font = 'bold 20px sans-serif'
   ctx.fillStyle = '#ffe066'
