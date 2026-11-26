@@ -57,6 +57,9 @@ function noise(dur, { vol = 0.12, freq = 1200, delay = 0 } = {}) {
 }
 
 export const sfx = {
+  blip: (f = 420) => tone(f, 0.035, { type: 'square', vol: 0.025 }),
+  door: () => { noise(0.1, { vol: 0.1, freq: 600 }); tone(180, 0.12, { type: 'square', vol: 0.04, to: 120 }) },
+  unlock: () => { tone(900, 0.05, { type: 'square', vol: 0.05 }); tone(1200, 0.08, { type: 'square', vol: 0.05, delay: 0.07 }); noise(0.08, { vol: 0.08, freq: 3000, delay: 0.12 }) },
   click: () => tone(520, 0.06, { type: 'triangle', vol: 0.07 }),
   start: () => { tone(392, 0.1, { type: 'triangle' }); tone(523, 0.1, { type: 'triangle', delay: 0.09 }); tone(784, 0.18, { type: 'triangle', delay: 0.18 }) },
   pickup: () => { tone(660, 0.07, { type: 'square', vol: 0.05 }); tone(990, 0.1, { type: 'square', vol: 0.05, delay: 0.06 }) },
