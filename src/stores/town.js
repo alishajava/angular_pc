@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { reactive, ref } from 'vue'
 import { parseGrid, canMoveTo, tileCenter } from '../mapUtils'
-import { writeSave, readSave } from '../save'
+import { writeSave, readSave, hasSave } from '../save'
 
 // Fixed town layout. '#' = wall, everything else is walkable floor.
 // Letters mark where an interactable stands (the tile itself is still floor).
@@ -242,7 +242,11 @@ export const useTownStore = defineStore('town', () => {
     coins.value += amount
   }
 
-  function saveProgress() {
+  // 자동 저장은 '이번 접속에서 직접 저장/불러오기를 했거나, 기존 저장이 없을 때'만 허용한다
+  // (새로 시작한 상태가 예전 저장을 덮어쓰지 않도록)
+  const autosaveLinked = ref(!hasSave())
+
+  function saveProgress({ silent = false } = {}) {
     const visitedTypes = interactables.filter((it) => it.visited).map((it) => it.type)
     const ok = writeSave({
       coins: coins.value,
@@ -258,9 +262,18 @@ export const useTownStore = defineStore('town', () => {
       village2QuestBase: village2QuestBase.value,
       visitedTypes,
     })
-    dialogueSpeaker.value = '시스템'
-    dialogueText.value = ok ? '진행 상태를 저장했습니다.' : '저장에 실패했습니다.'
-    dialogueTimer.value = DIALOGUE_DURATION
+    if (ok && !silent) autosaveLinked.value = true
+    if (!silent) {
+      dialogueSpeaker.value = '시스템'
+      dialogueText.value = ok ? '진행 상태를 저장했습니다.' : '저장에 실패했습니다.'
+      dialogueTimer.value = DIALOGUE_DURATION
+    }
+    return ok
+  }
+
+  function autosave() {
+    if (!autosaveLinked.value) return false
+    return saveProgress({ silent: true })
   }
 
   function loadProgress() {
@@ -286,6 +299,7 @@ export const useTownStore = defineStore('town', () => {
       it.visited = (data.visitedTypes || []).includes(it.type)
     }
     if (phase.value === 'intro') beginAdventure()
+    autosaveLinked.value = true
     dialogueSpeaker.value = '시스템'
     dialogueText.value = '진행 상태를 불러왔습니다.'
     dialogueTimer.value = DIALOGUE_DURATION
@@ -455,6 +469,7 @@ export const useTownStore = defineStore('town', () => {
     confirmPurchase,
     saveProgress,
     loadProgress,
+    autosave,
     update,
   }
 })
