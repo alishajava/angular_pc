@@ -116,7 +116,7 @@ export const ACTIVITIES = [
 
 // --- Random events ----------------------------------------------------------
 export const EVENTS = [
-  { text: '거리 공연을 보고 감탄했다.', run: (s) => { s.stats.art = clamp(s.stats.art + 5) } },
+  { cg: 'street_show', text: '거리 공연을 보고 감탄했다.', run: (s) => { s.stats.art = clamp(s.stats.art + 5) } },
   { text: '친구와 사소한 일로 다투었다.', run: (s) => { s.stress = clamp(s.stress + 8); s.stats.charm = clamp(s.stats.charm - 2) } },
   { text: '길에서 용돈을 주웠다.', run: (s) => { s.money += 12 } },
   {
@@ -124,14 +124,14 @@ export const EVENTS = [
     condition: (s) => s.money >= 10,
     run: (s) => { s.money = Math.max(0, s.money - 12) },
   },
-  { text: '선생님께 칭찬을 들었다.', run: (s) => { s.stats.int = clamp(s.stats.int + 5); s.stress = clamp(s.stress - 4) } },
-  { text: '오래된 책을 발견해 밤새 읽었다.', run: (s) => { s.stats.int = clamp(s.stats.int + 6); s.stress = clamp(s.stress + 5) } },
-  { text: '동네 축제에 놀러 갔다.', run: (s) => { s.stats.charm = clamp(s.stats.charm + 5); s.stress = clamp(s.stress - 8) } },
-  { text: '강아지 한 마리를 주워와 돌보기 시작했다.', run: (s) => { s.stats.faith = clamp(s.stats.faith + 4); s.stats.charm = clamp(s.stats.charm + 4); s.stress = clamp(s.stress - 6) } },
-  { text: '무대에서 노래를 불러 박수를 받았다.', run: (s) => { s.stats.art = clamp(s.stats.art + 6); s.stats.charm = clamp(s.stats.charm + 6) } },
-  { text: '동네 대회에서 우승했다.', run: (s) => { s.stats.str = clamp(s.stats.str + 6); s.money += 10 } },
-  { text: '명상을 통해 마음의 평화를 얻었다.', run: (s) => { s.stats.faith = clamp(s.stats.faith + 5); s.stress = clamp(s.stress - 10) } },
-  { text: '오랜만에 늦잠을 잤다.', run: (s) => { s.stress = clamp(s.stress - 10) } },
+  { cg: 'praise', text: '선생님께 칭찬을 들었다.', run: (s) => { s.stats.int = clamp(s.stats.int + 5); s.stress = clamp(s.stress - 4) } },
+  { cg: 'night_book', text: '오래된 책을 발견해 밤새 읽었다.', run: (s) => { s.stats.int = clamp(s.stats.int + 6); s.stress = clamp(s.stress + 5) } },
+  { cg: 'festival', text: '동네 축제에 놀러 갔다.', run: (s) => { s.stats.charm = clamp(s.stats.charm + 5); s.stress = clamp(s.stress - 8) } },
+  { cg: 'puppy', text: '강아지 한 마리를 주워와 돌보기 시작했다.', run: (s) => { s.stats.faith = clamp(s.stats.faith + 4); s.stats.charm = clamp(s.stats.charm + 4); s.stress = clamp(s.stress - 6) } },
+  { cg: 'stage_song', text: '무대에서 노래를 불러 박수를 받았다.', run: (s) => { s.stats.art = clamp(s.stats.art + 6); s.stats.charm = clamp(s.stats.charm + 6) } },
+  { cg: 'champion', text: '동네 대회에서 우승했다.', run: (s) => { s.stats.str = clamp(s.stats.str + 6); s.money += 10 } },
+  { cg: 'meditation', text: '명상을 통해 마음의 평화를 얻었다.', run: (s) => { s.stats.faith = clamp(s.stats.faith + 5); s.stress = clamp(s.stress - 10) } },
+  { cg: 'sleep_in', text: '오랜만에 늦잠을 잤다.', run: (s) => { s.stress = clamp(s.stress - 10) } },
   {
     text: '시장에서 바가지를 썼다.',
     condition: (s) => s.money >= 10,
@@ -139,7 +139,7 @@ export const EVENTS = [
   },
   { text: '몸살이 나서 하루 종일 앓았다.', run: (s) => { s.stress = clamp(s.stress + 14) } },
   { text: '이웃 어른께 좋은 말씀을 들었다.', run: (s) => { s.stats.faith = clamp(s.stats.faith + 4); s.stats.int = clamp(s.stats.int + 3) } },
-  { text: '새 옷을 지어 입고 한껏 멋을 냈다.', run: (s) => { s.stats.charm = clamp(s.stats.charm + 5); s.money = Math.max(0, s.money - 8) } },
+  { cg: 'new_clothes', text: '새 옷을 지어 입고 한껏 멋을 냈다.', run: (s) => { s.stats.charm = clamp(s.stats.charm + 5); s.money = Math.max(0, s.money - 8) } },
 ]
 
 // --- Endings ------------------------------------------------------------
@@ -213,6 +213,8 @@ export function seasonAt(turn) {
 // 한 계절을 보낸다. activity가 null이면 몸살로 앓아눕는 턴. 결과 문장을 돌려준다.
 export function resolveTurn(state, activity) {
   const lines = []
+  state.pendingCg = null
+  state.pendingCgText = ''
   if (state.sick) {
     state.stress = clamp(state.stress - rand(20, 28))
     lines.push(`${state.name}은(는) 몸살로 하루 종일 앓아누웠다.`)
@@ -224,6 +226,8 @@ export function resolveTurn(state, activity) {
       const ev = pick(candidates)
       ev.run(state)
       lines.push(ev.text)
+      state.pendingCg = ev.cg || null // 일러스트(CG)가 있는 이벤트면 화면에 보여 준다
+      state.pendingCgText = ev.text
     }
   }
   if (!state.sick && state.stress >= 92 && Math.random() < 0.35) {

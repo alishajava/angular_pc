@@ -2,6 +2,7 @@ import { sfx, unlockSfx, toggleMute } from './sfx.js'
 import { drawPerson, drawEmote } from './people.js'
 import { TILE, COLS, ROWS, W, H, MAP, PAL, buildGround, drawProp } from './world.js'
 import { drawPortrait } from './portrait.js'
+import { CG_LIST, drawCG } from './cg.js'
 import {
   TOTAL_TURNS, SEASON_NAMES, HAIR_COLORS, STAT_KEYS, STAT_LABELS, STAT_COLORS, ACTIVITIES,
   stageForAge, moodForStress, computeEnding, freshState, ageAt, resolveTurn, clamp, rand, pick,
@@ -166,19 +167,104 @@ function floatText(x, y, text, color = '#fff') {
 }
 
 // ================================================================== 딸 외형 ==
+function girlLookFor(stageKey, hairHex) {
+  const skirt = { child: '#ff9fb2', teen: '#e8606f', lady: '#4f6fc0' }[stageKey]
+  const top = { child: '#ffe27a', teen: '#fff0a8', lady: '#f5e6a8' }[stageKey]
+  return {
+    skin: '#f8d6b8', hair: hairHex, hairStyle: stageKey === 'child' ? 'bob' : 'long',
+    shirt: skirt, jeogori: top, outfit: 'dress', shoes: '#f0e4d0', eye: '#6a3f2a',
+    ribbon: stageKey === 'lady' ? '#e06ba6' : '#ff8fb0',
+  }
+}
 function girlInfo() {
   const age = ageAt(viewTurn)
   const stage = stageForAge(age)
-  const skirt = { child: '#ff9fb2', teen: '#e8606f', lady: '#4f6fc0' }[stage.key]
-  const top = { child: '#ffe27a', teen: '#fff0a8', lady: '#f5e6a8' }[stage.key]
-  return {
-    scale: { child: 0.8, teen: 0.9, lady: 1 }[stage.key],
-    look: {
-      skin: '#f8d6b8', hair: S.hairHex, hairStyle: stage.key === 'child' ? 'bob' : 'long',
-      shirt: skirt, jeogori: top, outfit: 'dress', shoes: '#f0e4d0', eye: '#6a3f2a',
-      ribbon: stage.key === 'lady' ? '#e06ba6' : '#ff8fb0',
-    },
+  return { scale: { child: 0.8, teen: 0.9, lady: 1 }[stage.key], look: girlLookFor(stage.key, S.hairHex) }
+}
+
+// ====================================================================== 이벤트 CG ==
+// 이벤트가 일어나면 일러스트(CG)가 전체 화면으로 나온다. 본 CG는 타이틀의 갤러리에서 다시 볼 수 있다.
+const CG_KEY = 'daughter-cg-unlocked-v1'
+function unlockedCgs() {
+  try {
+    const d = JSON.parse(localStorage.getItem(CG_KEY) || '[]')
+    return Array.isArray(d) ? d : []
+  } catch {
+    return []
   }
+}
+function unlockCg(id) {
+  const list = unlockedCgs()
+  if (list.includes(id)) return false
+  list.push(id)
+  try { localStorage.setItem(CG_KEY, JSON.stringify(list)) } catch { /* 저장 공간 없음 */ }
+  return true
+}
+let cgView = null // { id, t, caption, isNew, onClose }
+function showCG(id, caption, onClose) {
+  cgView = { id, t: 0, caption, isNew: unlockCg(id), onClose }
+  sfx.good()
+}
+function closeCG() {
+  if (!cgView || cgView.t < 0.7) return
+  const cb = cgView.onClose
+  cgView = null
+  sfx.click()
+  if (cb) cb()
+}
+function cgWho() {
+  return { look: girlInfo().look, hairHex: S.hairHex, name: S.name }
+}
+function wrapPlain(text, maxW) {
+  const lines = []
+  let line = ''
+  for (const ch of text) {
+    if (ctx.measureText(line + ch).width > maxW) { lines.push(line); line = ch === ' ' ? '' : ch } else line += ch
+  }
+  lines.push(line)
+  return lines
+}
+function drawCGOverlay() {
+  const v = cgView
+  const a = Math.min(1, v.t / 0.45)
+  ctx.save()
+  ctx.globalAlpha = a
+  drawCG(ctx, v.id, v.t + 1.2, W, H, cgWho())
+  const info = CG_LIST.find((c) => c.id === v.id)
+  ctx.fillStyle = 'rgba(30,18,12,0.7)'
+  ctx.beginPath(); ctx.roundRect(16, 16, 40 + (info ? info.title.length * 15 : 80) + (v.isNew ? 70 : 0), 32, 16); ctx.fill()
+  ctx.font = `bold 14px ${FONT}`
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = '#ffe9d4'
+  ctx.fillText(`EVENT CG · ${info ? info.title : ''}`, 30, 32)
+  if (v.isNew) {
+    const tw = ctx.measureText(`EVENT CG · ${info ? info.title : ''}`).width
+    ctx.fillStyle = '#ff5a7a'
+    ctx.beginPath(); ctx.roundRect(40 + tw, 22, 46, 20, 10); ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.font = `bold 11px ${FONT}`
+    ctx.fillText('NEW!', 49 + tw, 32)
+  }
+  // 자막
+  ctx.font = `bold 17px ${FONT}`
+  const lines = wrapPlain(v.caption.replace('딸', S.name), W - 80)
+  const h = 22 + lines.length * 26 + 22
+  const y = H - h - 18
+  ctx.fillStyle = 'rgba(30,18,12,0.78)'
+  ctx.beginPath(); ctx.roundRect(24, y, W - 48, h, 14); ctx.fill()
+  ctx.strokeStyle = 'rgba(255,205,160,0.5)'; ctx.lineWidth = 1.5; ctx.stroke()
+  ctx.fillStyle = '#fff'
+  ctx.textAlign = 'center'
+  lines.forEach((l, i) => ctx.fillText(l, W / 2, y + 28 + i * 26))
+  if (v.t > 0.7) {
+    ctx.font = `12px ${FONT}`
+    ctx.fillStyle = `rgba(255,224,170,${0.6 + Math.sin(elapsed * 5) * 0.3})`
+    ctx.fillText('Space · 클릭: 계속', W / 2, y + h - 14)
+  }
+  ctx.restore()
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'alphabetic'
 }
 const PLAYER_LOOK = { skin: '#f2c79b', hair: '#2b2320', hairStyle: 'short', shirt: '#5f7fa8', pants: '#3a4258', shoes: '#2a2224', eye: '#3a2a22', outfit: 'tee', hat: 'gat' }
 const LOOKS = {
@@ -301,6 +387,9 @@ function doActivity(act, st) {
   sfx.door()
   transition(() => {
     const text = resolveTurn(S, act)
+    const cg = S.pendingCg
+    const cgText = S.pendingCgText
+    S.pendingCg = null
     const door = MAP.doorSpawns[st.id]
     player.x = door.x
     player.y = door.y
@@ -310,7 +399,9 @@ function doActivity(act, st) {
     girl.emoteT = 3
     sparkle(girl.x, girl.y - 24, '#ffe066', 12)
     setTimeout(() => (S.sick ? sfx.bad() : sfx.good()), 150)
-    say('', `${text}\n\n▶ ${deltaText(before)}`, afterResult)
+    const showResult = () => say('', `${text}\n\n▶ ${deltaText(before)}`, afterResult)
+    if (cg) showCG(cg, cgText, showResult)
+    else showResult()
   })
 }
 function afterResult() {
@@ -403,6 +494,10 @@ window.addEventListener('keydown', (e) => {
   held.add(key)
   if (e.repeat) return
   if (key === 'm') return void toggleMute()
+  if (cgView) {
+    if (!fade.dir && (key === ' ' || key === 'enter' || key === 'e' || key === 'escape')) closeCG()
+    return
+  }
   if (lockInput) return
   if (dlg.active) {
     if (fade.dir) return
@@ -438,6 +533,7 @@ canvas.addEventListener('pointerdown', (e) => {
   const x = ((e.clientX - r.left) * W) / r.width
   const y = ((e.clientY - r.top) * H) / r.height
   if (lockInput || fade.dir) return
+  if (cgView) return closeCG()
   if (dlg.active) return advanceDialogue()
   for (const h of ui.hits) if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h.fn()
   if (ui.menu) ui.menu = null
@@ -454,7 +550,7 @@ document.addEventListener('click', (e) => {
 
 // ================================================================== 업데이트 ==
 function updatePlayer(dt) {
-  const locked = lockInput || dlg.active || fade.dir !== 0 || !!ui.menu
+  const locked = lockInput || dlg.active || fade.dir !== 0 || !!ui.menu || !!cgView
   let dx = 0
   let dy = 0
   if (!locked) {
@@ -541,6 +637,7 @@ function updateFx(dt) {
   for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 60 * dt; p.life -= dt }
   for (let i = particles.length - 1; i >= 0; i--) if (particles[i].life <= 0) particles.splice(i, 1)
   for (const f of floaters) f.t += dt
+  if (cgView) cgView.t += dt
   for (let i = floaters.length - 1; i >= 0; i--) if (floaters[i].t > 1.4) floaters.splice(i, 1)
   if (banner) { banner.t += dt; if (banner.t > 2.4) banner = null }
   if (dlg.active && dlg.shown < dlg.text.length) {
@@ -589,6 +686,7 @@ function render() {
   drawMenu()
   drawDialogue()
   drawBanner()
+  if (cgView) drawCGOverlay()
   if (fade.dir) { ctx.fillStyle = `rgba(0,0,0,${Math.min(1, fade.t)})`; ctx.fillRect(0, 0, W, H) }
 }
 function drawNpc(n) {
@@ -914,6 +1012,44 @@ function startGame(state) {
   sfx.start()
   banner = { t: 0, text: `${ageAt(viewTurn)}세 · ${SEASON_NAMES[season()]}` }
 }
+// ---- 이벤트 CG 갤러리 (타이틀에서 열기) ----
+function showGallery(onBack, hairKey) {
+  const hair = (HAIR_COLORS.find((x) => x.key === hairKey) || HAIR_COLORS[0]).hex
+  const who = { look: girlLookFor('teen', hair), hairHex: hair, name: '리안' }
+  const got = unlockedCgs()
+  showOverlay(`<div class="gallery">
+    <h2>이벤트 CG 갤러리 <small>${got.length}/${CG_LIST.length}</small></h2>
+    <div class="gallery-grid">${CG_LIST.map((c) => `<button class="cg-thumb ${got.includes(c.id) ? '' : 'locked'}" data-id="${c.id}" ${got.includes(c.id) ? '' : 'disabled'}><canvas width="240" height="173"></canvas><span>${got.includes(c.id) ? c.title : '???'}</span></button>`).join('')}</div>
+    <div class="hint">게임 중 이벤트가 일어나면 CG가 하나씩 열려요. 열린 CG를 누르면 크게 볼 수 있어요.</div>
+    <button class="mini-btn" id="gallery-back">← 돌아가기</button></div>`)
+  document.querySelectorAll('.cg-thumb').forEach((btn) => {
+    const g = btn.querySelector('canvas').getContext('2d')
+    if (btn.classList.contains('locked')) {
+      g.fillStyle = '#4a3a32'; g.fillRect(0, 0, 240, 173)
+      g.fillStyle = '#7a665a'; g.font = 'bold 54px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('?', 120, 88)
+    } else {
+      g.save(); g.scale(0.3, 0.3); drawCG(g, btn.dataset.id, 1.4, W, H, who); g.restore()
+      btn.onclick = () => openCgViewer(btn.dataset.id, who, () => showGallery(onBack, hairKey))
+    }
+  })
+  document.getElementById('gallery-back').onclick = onBack
+}
+function openCgViewer(id, who, onBack) {
+  const info = CG_LIST.find((c) => c.id === id)
+  showOverlay(`<div class="cg-viewer"><canvas id="cg-big" width="${W}" height="${H}"></canvas><div class="cg-title">${info.title}</div><button class="mini-btn" id="cg-close">닫기</button></div>`)
+  const cv = document.getElementById('cg-big')
+  const g = cv.getContext('2d')
+  const t0 = performance.now()
+  let alive = true
+  const loopCg = () => {
+    if (!alive || !document.body.contains(cv)) return
+    drawCG(g, id, (performance.now() - t0) / 1000 + 1.2, W, H, who)
+    requestAnimationFrame(loopCg)
+  }
+  loopCg()
+  document.getElementById('cg-close').onclick = () => { alive = false; onBack() }
+}
+
 function showTitle() {
   const save = readSave()
   let hairKey = (S && S.hairKey) || HAIR_COLORS[0].key
@@ -926,10 +1062,12 @@ function showTitle() {
       <div class="field-row"><label>딸의 이름</label><input id="name-input" type="text" maxlength="8" placeholder="예: 리안" value="${nameVal}" /></div>
       <div class="field-row"><label>머리색</label><div class="swatch-row">${HAIR_COLORS.map((h) => `<div class="swatch ${h.key === hairKey ? 'selected' : ''}" data-hair="${h.key}" style="background:${h.hex}" title="${h.label}"></div>`).join('')}</div></div>
       <button class="primary-btn" id="start-btn">키우기 시작</button>
+      <button class="mini-btn" id="gallery-btn">🖼 이벤트 CG 갤러리 (${unlockedCgs().length}/${CG_LIST.length})</button>
       ${save ? `<button class="mini-btn" id="cont-btn">이어하기 · ${save.name} ${ageAt(save.turn)}세 ${SEASON_NAMES[save.turn % 4]}</button>` : ''}
       <div class="hint">마을을 걸어 다니며 서당·연무장·화실·사찰·시장·집·나루터에서 딸과 함께 활동하세요. 한 계절에 한 번, 총 32계절. 무리하면 병이 나요. 길에 떨어진 엽전·약초·글귀도 주워 보세요. 18살이 되면 엔딩이 결정됩니다.</div>
       <div class="hint">조작: 방향키/WASD 이동 · E/Space 상호작용 · 숫자키/클릭 선택 · Esc 닫기 · M 소리</div></div>`)
     document.querySelectorAll('.swatch').forEach((el) => (el.onclick = () => { hairKey = el.dataset.hair; render() }))
+    document.getElementById('gallery-btn').onclick = () => showGallery(() => render(), hairKey)
     document.getElementById('start-btn').onclick = () => {
       const st = freshState()
       st.name = document.getElementById('name-input').value.trim() || '리안'

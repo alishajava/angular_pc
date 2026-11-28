@@ -83,6 +83,21 @@
         font-weight: bold; border: none; border-radius: 10px; font-size: 0.88rem; cursor: pointer;
       }
 
+      /* ---------- Event CG gallery ---------- */
+      .gallery { width: 100%; padding: 1rem 1.2rem; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 0.7rem; }
+      .gallery h2 { margin: 0; color: #c1502c; font-size: 1.25rem; }
+      .gallery h2 small { font-size: 0.8rem; opacity: 0.7; margin-left: 0.4rem; }
+      .gallery-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.5rem; width: 100%; max-width: 760px; }
+      @media (max-width: 640px) { .gallery-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+      .cg-thumb { font-family: inherit; padding: 0; border: 2px solid #e3b68f; border-radius: 10px; background: #fffaf3; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; color: var(--ink); }
+      .cg-thumb:hover:not(:disabled) { border-color: #c1502c; }
+      .cg-thumb:disabled { cursor: default; opacity: 0.85; }
+      .cg-thumb canvas { width: 100%; height: auto; display: block; }
+      .cg-thumb span { font-size: 0.72rem; padding: 0.25rem 0.2rem; }
+      .cg-viewer { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.5rem; box-sizing: border-box; }
+      .cg-viewer canvas { width: 100%; max-height: calc(100% - 70px); object-fit: contain; border-radius: 10px; box-shadow: 0 8px 24px rgba(80,40,20,0.35); }
+      .cg-title { font-weight: bold; color: #c1502c; }
+
       #mute-btn {
         position: fixed; top: 10px; right: 12px; background: rgba(0, 0, 0, 0.08); color: inherit;
         border: 1px solid rgba(0, 0, 0, 0.2); border-radius: 999px; padding: 0.3rem 0.7rem; font-size: 0.8rem; cursor: pointer;
