@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>딸 키우기</title>
+    <style>
+      :root {
+        --coral: #ff8f6b;
+        --cream: #fff6ec;
+        --ink: #4a3b32;
+        --soft: #f3dfc9;
+      }
+      html, body {
+        margin: 0;
+        width: 100%;
+        min-height: 100%;
+        background: linear-gradient(160deg, #ffe8d6 0%, #ffd6c2 45%, #ffc9b8 100%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+        color: var(--ink);
+        padding: 1rem;
+        box-sizing: border-box;
+      }
+      #app {
+        width: 100%;
+        max-width: 860px;
+        position: relative;
+        border-radius: 18px;
+        overflow: hidden;
+        box-shadow: 0 18px 48px rgba(120, 70, 40, 0.28);
+        background: #3a2a20;
+        aspect-ratio: 800 / 576;
+      }
+      #game { width: 100%; height: 100%; display: block; }
+      #overlay {
+        position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+        background: radial-gradient(circle at 50% 20%, #fff2e2 0%, #ffe3cf 60%, #ffd3bb 100%);
+        overflow-y: auto; padding: 0.6rem; box-sizing: border-box;
+      }
+      #overlay.on { display: flex; }
+
+      /* ---------- Title ---------- */
+      .title-wrap {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        text-align: center; width: 100%; padding: 1rem 1.5rem; box-sizing: border-box;
+      }
+      .title-wrap h1 { font-size: clamp(1.5rem, 5vw, 2.3rem); margin: 0 0 0.4rem; color: #c1502c; }
+      .title-wrap .subtitle { opacity: 0.75; font-size: clamp(0.8rem, 2vw, 0.95rem); margin-bottom: 1.4rem; }
+      .field-row { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1rem; width: 100%; max-width: 320px; }
+      .field-row label { font-size: 0.82rem; font-weight: bold; text-align: left; }
+      .field-row input {
+        font-family: inherit; font-size: 0.95rem; padding: 0.55rem 0.8rem; border-radius: 10px;
+        border: 1px solid #e3b68f; background: #fffaf3; color: var(--ink);
+      }
+      .swatch-row { display: flex; gap: 0.6rem; justify-content: center; margin-bottom: 0.8rem; }
+      .swatch { width: 38px; height: 38px; border-radius: 50%; cursor: pointer; border: 3px solid transparent; box-sizing: border-box; }
+      .swatch.selected { border-color: #c1502c; }
+      .primary-btn {
+        font-family: inherit; padding: 0.75rem 2.2rem; background: var(--coral); color: #fff; font-weight: bold;
+        border: none; border-radius: 12px; font-size: 1rem; cursor: pointer; box-shadow: 0 6px 16px rgba(255, 143, 107, 0.45);
+      }
+      .mini-btn {
+        font-family: inherit; font-size: 0.85rem; padding: 0.55rem 1.4rem; margin-top: 0.7rem; border-radius: 10px;
+        border: 1px solid #e3b68f; background: #fffaf3; cursor: pointer; color: var(--ink);
+      }
+      .hint { font-size: 0.72rem; opacity: 0.6; margin-top: 0.8rem; max-width: 440px; line-height: 1.5; }
+
+      /* ---------- Ending ---------- */
+      .ending-wrap {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        text-align: center; width: 100%; padding: 1rem 1.2rem; box-sizing: border-box;
+      }
+      .ending-wrap canvas { margin-bottom: 0.6rem; max-height: 200px; width: auto; }
+      .ending-title { font-size: clamp(1.3rem, 4vw, 1.8rem); color: #c1502c; margin: 0 0 0.5rem; }
+      .ending-text { font-size: 0.88rem; line-height: 1.7; max-width: 480px; margin-bottom: 0.8rem; white-space: pre-wrap; }
+      .ending-stats { font-size: 0.75rem; opacity: 0.7; margin-bottom: 1rem; }
+      .restart-btn {
+        font-family: inherit; padding: 0.6rem 1.6rem; background: var(--coral); color: #fff;
+        font-weight: bold; border: none; border-radius: 10px; font-size: 0.88rem; cursor: pointer;
+      }
+
+      /* ---------- Event CG gallery ---------- */
+      .gallery { width: 100%; padding: 1rem 1.2rem; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 0.7rem; }
+      .gallery h2 { margin: 0; color: #c1502c; font-size: 1.25rem; }
+      .gallery h2 small { font-size: 0.8rem; opacity: 0.7; margin-left: 0.4rem; }
+      .gallery-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.5rem; width: 100%; max-width: 760px; }
+      @media (max-width: 640px) { .gallery-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+      .cg-thumb { font-family: inherit; padding: 0; border: 2px solid #e3b68f; border-radius: 10px; background: #fffaf3; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; color: var(--ink); }
+      .cg-thumb:hover:not(:disabled) { border-color: #c1502c; }
+      .cg-thumb:disabled { cursor: default; opacity: 0.85; }
+      .cg-thumb canvas { width: 100%; height: auto; display: block; }
+      .cg-thumb span { font-size: 0.72rem; padding: 0.25rem 0.2rem; }
+      .cg-viewer { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.5rem; box-sizing: border-box; }
+      .cg-viewer canvas { width: 100%; max-height: calc(100% - 70px); object-fit: contain; border-radius: 10px; box-shadow: 0 8px 24px rgba(80,40,20,0.35); }
+      .cg-title { font-weight: bold; color: #c1502c; }
+
+      #mute-btn {
+        position: fixed; top: 10px; right: 12px; background: rgba(0, 0, 0, 0.08); color: inherit;
+        border: 1px solid rgba(0, 0, 0, 0.2); border-radius: 999px; padding: 0.3rem 0.7rem; font-size: 0.8rem; cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"><canvas id="game"></canvas><div id="overlay"></div></div>
+    <div style="font-size:.78rem;opacity:.65;margin-top:.6rem;text-align:center">방향키/WASD 이동 · E/Space 상호작용 · 숫자키/클릭 선택 · Esc 메뉴(저장) · M 소리</div>
+    <button id="mute-btn" type="button">소리 켬</button>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

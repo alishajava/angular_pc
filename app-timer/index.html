@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>집중 타이머</title>
+<style>
+  :root { --bg:#f3f1ec; --card:#fff; --ink:#23262b; --sub:#7b8088; --line:#e6e2d8; --accent:#e0584a; --accent2:#4a7cf0; --ring:#e6e2d8; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171c; --card:#1d2229; --ink:#eef1f6; --sub:#8e97a5; --line:#2c3440; --accent:#ff7a6b; --accent2:#6c97ff; --ring:#2c3440; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,'Noto Sans KR',sans-serif; min-height:100vh; }
+  .wrap { max-width:460px; margin:0 auto; padding:32px 16px 60px; text-align:center; }
+  h1 { margin:0 0 16px; font-size:1.6rem; letter-spacing:-.02em; }
+  button { font:inherit; cursor:pointer; }
+  .tabs { display:flex; background:var(--card); border:1px solid var(--line); border-radius:99px; padding:4px; margin-bottom:22px; }
+  .tabs button { flex:1; border:0; background:none; color:var(--sub); padding:9px 0; border-radius:99px; font-weight:600; }
+  .tabs button.on { background:var(--accent2); color:#fff; }
+  .panel { display:none; } .panel.on { display:block; }
+  .modes { display:flex; justify-content:center; gap:6px; margin-bottom:14px; }
+  .modes button { border:1px solid var(--line); background:var(--card); color:var(--ink); padding:6px 14px; border-radius:99px; font-size:.88rem; }
+  .modes button.on { background:var(--accent); border-color:transparent; color:#fff; font-weight:600; }
+  .ringwrap { position:relative; width:280px; height:280px; margin:6px auto 18px; }
+  svg { width:100%; height:100%; transform:rotate(-90deg); }
+  .track { fill:none; stroke:var(--ring); stroke-width:12; }
+  .prog { fill:none; stroke:var(--accent); stroke-width:12; stroke-linecap:round; transition:stroke-dashoffset .25s linear, stroke .3s; }
+  .center { position:absolute; inset:0; display:grid; place-content:center; }
+  .time { font-size:3.4rem; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+  .label { color:var(--sub); font-size:.9rem; }
+  .ctrl { display:flex; justify-content:center; gap:10px; margin-bottom:14px; }
+  .btn { padding:13px 30px; border:0; border-radius:99px; font-weight:700; font-size:1rem; background:var(--accent); color:#fff; min-width:120px; }
+  .btn.ghost { background:var(--card); color:var(--ink); border:1px solid var(--line); min-width:90px; }
+  .row { display:flex; justify-content:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .row button { border:1px solid var(--line); background:var(--card); color:var(--ink); padding:6px 14px; border-radius:99px; }
+  .set { display:flex; justify-content:center; align-items:center; gap:6px; margin-bottom:14px; color:var(--sub); font-size:.9rem; }
+  .set.cfg { flex-wrap:wrap; gap:8px 14px; }
+  .set label { white-space:nowrap; display:flex; align-items:center; gap:5px; }
+  .set input { width:64px; font:inherit; text-align:center; padding:6px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--ink); }
+  input.task { width:100%; font:inherit; padding:11px 14px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--ink); text-align:center; margin-bottom:14px; }
+  .stat { color:var(--sub); font-size:.9rem; }
+  .laps { margin-top:12px; text-align:left; max-height:220px; overflow:auto; }
+  .lap { display:flex; justify-content:space-between; padding:8px 4px; border-top:1px solid var(--line); font-variant-numeric:tabular-nums; }
+  .lap span:first-child { color:var(--sub); }
+  .sw .time { font-size:3rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⏱️ 집중 타이머</h1>
+  <div class="tabs" id="tabs"><button data-t="pomo" class="on">포모도로</button><button data-t="timer">타이머</button><button data-t="sw">스톱워치</button></div>
+
+  <section class="panel on" id="pomo">
+    <div class="modes" id="modes"><button data-m="focus" class="on">집중</button><button data-m="short">짧은 휴식</button><button data-m="long">긴 휴식</button></div>
+    <div class="ringwrap"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="52"/><circle class="prog" id="pProg" cx="60" cy="60" r="52"/></svg><div class="center"><div class="time" id="pTime">25:00</div><div class="label" id="pLabel">집중 시간</div></div></div>
+    <input class="task" id="task" placeholder="지금 집중할 일 (선택)" maxlength="40" />
+    <div class="ctrl"><button class="btn" id="pStart">시작</button><button class="btn ghost" id="pReset">리셋</button></div>
+    <div class="set cfg"><label>집중 <input type="number" id="setFocus" min="1" max="120" value="25" />분</label><label>짧은 휴식 <input type="number" id="setShort" min="1" max="60" value="5" />분</label><label>긴 휴식 <input type="number" id="setLong" min="1" max="60" value="15" />분</label></div>
+    <div class="stat" id="pStat"></div>
+  </section>
+
+  <section class="panel" id="timer">
+    <div class="ringwrap"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="52"/><circle class="prog" id="tProg" cx="60" cy="60" r="52" style="stroke:var(--accent2)"/></svg><div class="center"><div class="time" id="tTime">05:00</div><div class="label" id="tLabel">타이머</div></div></div>
+    <div class="row" id="presets"><button data-s="60">1분</button><button data-s="180">3분</button><button data-s="300">5분</button><button data-s="600">10분</button><button data-s="1800">30분</button></div>
+    <div class="set"><input type="number" id="tMin" min="0" max="999" value="5" />분 <input type="number" id="tSec" min="0" max="59" value="0" />초</div>
+    <div class="ctrl"><button class="btn" id="tStart" style="background:var(--accent2)">시작</button><button class="btn ghost" id="tReset">리셋</button></div>
+  </section>
+
+  <section class="panel sw" id="sw">
+    <div class="ringwrap" style="height:150px"><div class="center"><div class="time" id="sTime">00:00.00</div><div class="label">스톱워치</div></div></div>
+    <div class="ctrl"><button class="btn" id="sStart" style="background:var(--accent2)">시작</button><button class="btn ghost" id="sLap">랩</button><button class="btn ghost" id="sReset">리셋</button></div>
+    <div class="laps" id="laps"></div>
+  </section>
+</div>
+<script>
+const $ = (id) => document.getElementById(id)
+const C = 2 * Math.PI * 52
+for (const id of ['pProg', 'tProg']) { $(id).style.strokeDasharray = C; $(id).style.strokeDashoffset = 0 }
+const mmss = (s) => { s = Math.max(0, Math.ceil(s)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0') }
+
+// 소리 (파일 없이 WebAudio)
+let ac = null
+function beep(times = 3) {
+  try {
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)()
+    for (let i = 0; i < times; i++) {
+      const o = ac.createOscillator(), g = ac.createGain(), t0 = ac.currentTime + i * 0.28
+      o.type = 'sine'; o.frequency.value = i === times - 1 ? 1175 : 880
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.24)
+      o.connect(g).connect(ac.destination); o.start(t0); o.stop(t0 + 0.26)
+    }
+  } catch {}
+}
+document.addEventListener('pointerdown', () => { try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); ac.resume() } catch {} }, { once: true })
+
+// 탭
+document.querySelectorAll('#tabs button').forEach((b) => (b.onclick = () => {
+  document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('on', x === b))
+  document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('on', p.id === b.dataset.t))
+}))
+
+// 공용 카운트다운 (시각 기준이라 탭이 백그라운드여도 정확)
+function makeCountdown(onTick, onDone) {
+  let total = 0, endAt = 0, left = 0, running = false
+  const api = {
+    set(sec) { total = sec; left = sec; running = false; onTick(left, total) },
+    start() { if (running || left <= 0) return; endAt = performance.now() + left * 1000; running = true },
+    pause() { if (!running) return; left = Math.max(0, (endAt - performance.now()) / 1000); running = false },
+    get running() { return running }, get total() { return total }, get left() { return left },
+    update() {
+      if (!running) return
+      left = Math.max(0, (endAt - performance.now()) / 1000)
+      onTick(left, total)
+      if (left <= 0) { running = false; onDone() }
+    },
+  }
+  return api
+}
+
+// ── 포모도로 ──
+const MODES = { focus: ['집중 시간', 'setFocus', '#e0584a'], short: ['짧은 휴식', 'setShort', '#2f9e6e'], long: ['긴 휴식', 'setLong', '#3aa9a0'] }
+let mode = 'focus'
+const KEY = 'app-timer-v1'
+let store = {}
+try { store = JSON.parse(localStorage.getItem(KEY)) || {} } catch {}
+const dayKey = () => new Date().toISOString().slice(0, 10)
+if (store.day !== dayKey()) store = { day: dayKey(), done: 0, cfg: store.cfg }
+if (store.cfg) { $('setFocus').value = store.cfg[0]; $('setShort').value = store.cfg[1]; $('setLong').value = store.cfg[2] }
+const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(store)) } catch {} }
+let streak = 0
+const pomo = makeCountdown(
+  (left, total) => {
+    $('pTime').textContent = mmss(left)
+    $('pProg').style.strokeDashoffset = C * (1 - (total ? left / total : 0))
+    document.title = pomo.running ? `${mmss(left)} · ${MODES[mode][0]}` : '집중 타이머'
+  },
+  () => {
+    beep(3)
+    if (mode === 'focus') { store.done = (store.done || 0) + 1; streak++; persist(); setMode(streak % 4 === 0 ? 'long' : 'short', true) }
+    else setMode('focus', true)
+    updateStat()
+  },
+)
+function setMode(m, auto = false) {
+  mode = m
+  document.querySelectorAll('#modes button').forEach((b) => b.classList.toggle('on', b.dataset.m === m))
+  $('pLabel').textContent = MODES[m][0]
+  $('pProg').style.stroke = MODES[m][2]
+  pomo.set(Math.max(1, Number($(MODES[m][1]).value) || 1) * 60)
+  $('pStart').textContent = '시작'
+  if (auto) { pomo.start(); $('pStart').textContent = '일시정지' }
+}
+function updateStat() { $('pStat').textContent = `오늘 완료한 집중: ${store.done || 0}회 🍅` }
+document.querySelectorAll('#modes button').forEach((b) => (b.onclick = () => setMode(b.dataset.m)))
+$('pStart').onclick = () => { if (pomo.running) { pomo.pause(); $('pStart').textContent = '계속' } else { pomo.start(); $('pStart').textContent = '일시정지' } }
+$('pReset').onclick = () => setMode(mode)
+for (const id of ['setFocus', 'setShort', 'setLong']) $(id).onchange = () => { store.cfg = [$('setFocus').value, $('setShort').value, $('setLong').value]; persist(); if (!pomo.running) setMode(mode) }
+setMode('focus'); updateStat()
+
+// ── 타이머 ──
+const tmr = makeCountdown(
+  (left, total) => { $('tTime').textContent = mmss(left); $('tProg').style.strokeDashoffset = C * (1 - (total ? left / total : 0)); document.title = tmr.running ? mmss(left) + ' · 타이머' : '집중 타이머' },
+  () => { beep(4); $('tStart').textContent = '시작'; $('tLabel').textContent = '⏰ 시간 끝!' },
+)
+const readTimer = () => Math.min(999 * 60, (Number($('tMin').value) || 0) * 60 + (Number($('tSec').value) || 0))
+function resetTimer() { tmr.set(readTimer() || 1); $('tStart').textContent = '시작'; $('tLabel').textContent = '타이머' }
+$('tStart').onclick = () => { if (tmr.running) { tmr.pause(); $('tStart').textContent = '계속' } else { if (tmr.left <= 0) resetTimer(); tmr.start(); $('tStart').textContent = '일시정지'; $('tLabel').textContent = '카운트다운 중' } }
+$('tReset').onclick = resetTimer
+$('tMin').onchange = $('tSec').onchange = () => { if (!tmr.running) resetTimer() }
+document.querySelectorAll('#presets button').forEach((b) => (b.onclick = () => { const s = Number(b.dataset.s); $('tMin').value = Math.floor(s / 60); $('tSec').value = s % 60; tmr.pause(); resetTimer() }))
+resetTimer()
+
+// ── 스톱워치 ──
+let swRun = false, swStart = 0, swAcc = 0, lastLap = 0, laps = []
+const swNow = () => swAcc + (swRun ? performance.now() - swStart : 0)
+const fmt = (ms) => { const c = Math.floor(ms / 10) % 100, s = Math.floor(ms / 1000) % 60, m = Math.floor(ms / 60000); return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(c).padStart(2, '0')}` }
+$('sStart').onclick = () => { if (swRun) { swAcc = swNow(); swRun = false; $('sStart').textContent = '계속' } else { swStart = performance.now(); swRun = true; $('sStart').textContent = '정지' } }
+$('sLap').onclick = () => { if (!swRun) return; const t = swNow(); laps.unshift([t - lastLap, t]); lastLap = t; renderLaps() }
+$('sReset').onclick = () => { swRun = false; swAcc = 0; lastLap = 0; laps = []; $('sStart').textContent = '시작'; $('sTime').textContent = fmt(0); renderLaps() }
+function renderLaps() { $('laps').innerHTML = laps.map((l, i) => `<div class="lap"><span>랩 ${laps.length - i}</span><span>${fmt(l[0])}</span><span>${fmt(l[1])}</span></div>`).join('') }
+
+function loop() { pomo.update(); tmr.update(); if (swRun) $('sTime').textContent = fmt(swNow()); requestAnimationFrame(loop) }
+requestAnimationFrame(loop)
+setInterval(() => { pomo.update(); tmr.update() }, 500) // 백그라운드 탭에서도 종료 감지
+</script>
+</body>
+</html>

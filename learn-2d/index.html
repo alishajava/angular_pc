@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>게임 개발 2단계: 타이틀 화면</title>
+    <style>
+      /* 화면 전체를 어두운 색으로 채우고, 캔버스를 가운데 놓는다 */
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(circle at 50% 0%, #34404a, #1a1f24 70%);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        align-items: center;
+        justify-content: center;
+        font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+        color: #dfe6ea;
+      }
+      canvas {
+        background: #8fbc5a; /* 맵(잔디) 배경색 */
+        border: 4px solid #3a444c;
+        border-radius: 10px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        max-width: 100%;
+      }
+      .hint { font-size: 14px; opacity: 0.8; }
+      .hint b { color: #ffd76a; }
+    </style>
+  </head>
+  <body>
+    <!-- 게임이 그려질 캔버스. 가로 640, 세로 480 크기의 "맵" -->
+    <canvas id="game" width="640" height="480"></canvas>
+    <div class="hint">타이틀: <b>↑↓</b> 고르기 · <b>Enter</b> 결정 · 게임 중: <b>WASD/방향키</b> 이동 · <b>Esc</b> 타이틀로(자동 저장)</div>
+
+    <script>
+      // ----------------------------------------------------------------
+      // 1. 캔버스 준비
+      // ----------------------------------------------------------------
+      const canvas = document.getElementById('game')
+      const ctx = canvas.getContext('2d')
+
+      // ----------------------------------------------------------------
+      // 2. 게임 상태(어느 화면인가) — 2단계에서 새로 생긴 개념!
+      // ----------------------------------------------------------------
+      // 게임에는 "화면"이 여러 개 있다: 타이틀 화면, 플레이 화면, (나중에) 게임오버...
+      // 지금 어느 화면인지를 문자열 하나로 기억해 두고, 그 값에 따라
+      // 업데이트와 그리기를 다르게 하면 된다. 이런 방식을 "상태(State) 관리"라고 부른다.
+      //   'title'   : 타이틀 화면 (메뉴에서 고르는 중)
+      //   'playing' : 캐릭터를 움직이는 중
+      let scene = 'title'
+
+      // ----------------------------------------------------------------
+      // 3. 캐릭터 상태(데이터)
+      // ----------------------------------------------------------------
+      // "새로 시작"을 누를 때마다 처음 상태로 되돌려야 하므로,
+      // 캐릭터를 만드는 코드를 함수로 묶어 두었다. (호출할 때마다 새 객체가 나온다)
+      function createPlayer() {
+        return {
+          x: 320,
+          y: 240,
+          size: 32,
+          speed: 4,
+          color: '#2b6cff',
+          facing: { x: 0, y: 1 }, // 마지막으로 바라본 방향 (눈 위치를 정할 때 쓴다)
+        }
+      }
+      let player = createPlayer()
+
+      // ----------------------------------------------------------------
+      // 4. 저장 / 불러오기 (localStorage)
+      // ----------------------------------------------------------------
+      // localStorage는 브라우저가 제공하는 "작은 저장 공간"이다.
+      // 문자열만 저장할 수 있어서, 객체는 JSON.stringify로 글자로 바꿔 넣고
+      // 꺼낼 때 JSON.parse로 다시 객체로 되돌린다.
+      // 사용자가 저장을 막아 둔 경우 등에 에러가 날 수 있어서 try/catch로 감싼다.
+      const SAVE_KEY = 'learn2d-save-v1' // 저장 칸의 이름표. 게임마다 다르게 짓는다.
+
+      function hasSave() {
+        try {
+          return localStorage.getItem(SAVE_KEY) !== null
+        } catch {
+          return false
+        }
+      }
+
+      function saveGame() {
+        try {
+          const data = { x: player.x, y: player.y, facing: player.facing }
+          localStorage.setItem(SAVE_KEY, JSON.stringify(data))
+        } catch {
+          // 저장에 실패해도 게임은 계속 되도록 아무것도 하지 않는다.
+        }
+      }
+
+      function loadSave() {
+        try {
+          const raw = localStorage.getItem(SAVE_KEY)
+          return raw ? JSON.parse(raw) : null
+        } catch {
+          return null
+        }
+      }
+
+      // ----------------------------------------------------------------
+      // 5. 타이틀 메뉴
+      // ----------------------------------------------------------------
+      // 메뉴 버튼의 크기와 위치. 그리기와 마우스 클릭 판정이 같은 값을 쓰도록 한곳에 모았다.
+      const BTN = { w: 260, h: 48, gap: 16, top: 276 }
+
+      let menuItems = [] // 타이틀로 들어올 때마다 새로 만든다
+      let selected = 0 // 지금 고른 항목 번호 (0부터 시작)
+
+      // 타이틀 화면으로 들어가는 함수. 저장이 있는지 확인해서 메뉴를 새로 만든다.
+      function goTitle() {
+        scene = 'title'
+        menuItems = [
+          { id: 'new', label: '새로 시작', enabled: true },
+          // 저장된 게임이 없으면 "이어하기"는 눌러도 반응이 없게(enabled: false) 만든다.
+          { id: 'continue', label: '이어하기', enabled: hasSave() },
+        ]
+        // 저장이 있으면 "이어하기"에, 없으면 "새로 시작"에 처음부터 커서를 둔다.
+        selected = menuItems[1].enabled ? 1 : 0
+      }
+
+      // 선택한 항목을 실행한다.
+      function chooseItem(index) {
+        const item = menuItems[index]
+        if (!item || !item.enabled) return // 없거나 비활성이면 무시
+        if (item.id === 'new') {
+          player = createPlayer() // 처음 상태로 새로 만든다
+          scene = 'playing'
+        } else if (item.id === 'continue') {
+          const data = loadSave()
+          if (!data) return
+          player = createPlayer()
+          Object.assign(player, data) // 저장된 값(x, y, facing)을 덮어씌운다
+          scene = 'playing'
+        }
+        keysDown.clear() // 메뉴에서 누르던 키가 게임에서 "눌린 상태"로 남지 않게 비운다
+      }
+
+      // 커서를 위/아래로 옮긴다. 비활성 항목은 건너뛴다.
+      function moveSelection(step) {
+        for (let i = 1; i <= menuItems.length; i++) {
+          // % (나머지) 연산으로 맨 아래에서 다시 맨 위로 이어지게(순환) 한다.
+          const next = (selected + step * i + menuItems.length * 2) % menuItems.length
+          if (menuItems[next].enabled) {
+            selected = next
+            return
+          }
+        }
+      }
+
+      // ----------------------------------------------------------------
+      // 6. 키보드 입력 받기
+      // ----------------------------------------------------------------
+      // 지금 누르고 있는 키 목록 (게임 중 이동에 사용)
+      const keysDown = new Set()
+
+      window.addEventListener('keydown', (e) => {
+        const key = e.key.toLowerCase()
+        // 방향키/스페이스는 원래 웹페이지를 스크롤시키므로 막아 준다.
+        if (key.startsWith('arrow') || key === ' ') e.preventDefault()
+        keysDown.add(key)
+
+        // e.repeat: 키를 계속 누르고 있을 때 자동으로 반복되는 입력인지 여부.
+        // 메뉴는 "한 번 눌렀을 때 한 번만" 반응해야 하므로 반복 입력은 무시한다.
+        if (e.repeat) return
+
+        if (scene === 'title') {
+          if (key === 'arrowup' || key === 'w') moveSelection(-1)
+          else if (key === 'arrowdown' || key === 's') moveSelection(1)
+          else if (key === 'enter' || key === ' ') chooseItem(selected)
+        } else if (scene === 'playing') {
+          if (key === 'escape') {
+            saveGame() // 타이틀로 나가기 전에 저장
+            goTitle()
+          }
+        }
+      })
+      window.addEventListener('keyup', (e) => {
+        keysDown.delete(e.key.toLowerCase())
+      })
+      // 창을 닫거나 탭을 숨길 때도 게임 중이었다면 저장한다.
+      window.addEventListener('beforeunload', () => {
+        if (scene === 'playing') saveGame()
+      })
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden' && scene === 'playing') saveGame()
+      })
+
+      // 마우스: 화면의 어느 버튼 위에 있는지 계산한다.
+      // 캔버스는 CSS로 크기가 줄어들 수 있어서, 화면 좌표를 캔버스 좌표로 환산해야 한다.
+      function mouseToCanvas(e) {
+        const rect = canvas.getBoundingClientRect()
+        return {
+          x: ((e.clientX - rect.left) * canvas.width) / rect.width,
+          y: ((e.clientY - rect.top) * canvas.height) / rect.height,
+        }
+      }
+      // 버튼 i의 위치(사각형)를 돌려준다. 그릴 때도, 클릭 판정에도 이 함수를 쓴다.
+      function buttonRect(i) {
+        return { x: (canvas.width - BTN.w) / 2, y: BTN.top + i * (BTN.h + BTN.gap), w: BTN.w, h: BTN.h }
+      }
+      function buttonAt(pos) {
+        for (let i = 0; i < menuItems.length; i++) {
+          const r = buttonRect(i)
+          if (pos.x >= r.x && pos.x <= r.x + r.w && pos.y >= r.y && pos.y <= r.y + r.h) return i
+        }
+        return -1 // 어느 버튼 위도 아님
+      }
+      canvas.addEventListener('mousemove', (e) => {
+        if (scene !== 'title') return
+        const i = buttonAt(mouseToCanvas(e))
+        if (i >= 0 && menuItems[i].enabled) selected = i
+      })
+      canvas.addEventListener('click', (e) => {
+        if (scene !== 'title') return
+        const i = buttonAt(mouseToCanvas(e))
+        if (i >= 0) chooseItem(i)
+      })
+
+      // ----------------------------------------------------------------
+      // 7. 매 프레임 상태 업데이트 (이동 로직)
+      // ----------------------------------------------------------------
+      function update() {
+        // 타이틀 화면에서는 캐릭터가 움직이지 않는다. (메뉴는 키를 누를 때 바로 처리했다)
+        if (scene !== 'playing') return
+
+        let dx = 0
+        let dy = 0
+        if (keysDown.has('w') || keysDown.has('arrowup')) dy -= 1
+        if (keysDown.has('s') || keysDown.has('arrowdown')) dy += 1
+        if (keysDown.has('a') || keysDown.has('arrowleft')) dx -= 1
+        if (keysDown.has('d') || keysDown.has('arrowright')) dx += 1
+        player.x += dx * player.speed
+        player.y += dy * player.speed
+        if (dx !== 0 || dy !== 0) player.facing = { x: dx, y: dy }
+
+        // 캐릭터가 맵(캔버스) 밖으로 나가지 않도록 위치를 제한한다.
+        const half = player.size / 2
+        player.x = Math.max(half, Math.min(canvas.width - half, player.x))
+        player.y = Math.max(half, Math.min(canvas.height - half, player.y))
+      }
+
+      // ----------------------------------------------------------------
+      // 8. 그리기 — 작은 함수들로 쪼개서, 화면마다 필요한 것만 부른다
+      // ----------------------------------------------------------------
+      // 맵 격자
+      function drawGrid() {
+        ctx.strokeStyle = 'rgba(0,0,0,0.08)'
+        for (let x = 0; x < canvas.width; x += 32) {
+          ctx.beginPath()
+          ctx.moveTo(x, 0)
+          ctx.lineTo(x, canvas.height)
+          ctx.stroke()
+        }
+        for (let y = 0; y < canvas.height; y += 32) {
+          ctx.beginPath()
+          ctx.moveTo(0, y)
+          ctx.lineTo(canvas.width, y)
+          ctx.stroke()
+        }
+      }
+
+      // 캐릭터 한 명 그리기. 위치(px, py)를 인자로 받게 바꿔서
+      // 게임 화면과 타이틀 화면 양쪽에서 똑같이 쓸 수 있다.
+      function drawCharacter(px, py, size, color, facing) {
+        // 그림자
+        ctx.fillStyle = 'rgba(0,0,0,0.22)'
+        ctx.beginPath()
+        ctx.ellipse(px, py + size / 2, size * 0.5, size * 0.16, 0, 0, Math.PI * 2)
+        ctx.fill()
+
+        // 몸통
+        ctx.fillStyle = color
+        ctx.beginPath()
+        ctx.roundRect(px - size / 2, py - size / 2, size, size, 8)
+        ctx.fill()
+        ctx.lineWidth = 2
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)'
+        ctx.stroke()
+
+        // 눈 두 개: 바라보는 방향(facing)으로 살짝 치우쳐서 그린다.
+        const len = Math.hypot(facing.x, facing.y)
+        const fx = (facing.x / len) * 5
+        const fy = (facing.y / len) * 4
+        ctx.fillStyle = '#fff'
+        for (const ex of [-6, 6]) {
+          ctx.beginPath()
+          ctx.arc(px + ex + fx * 0.6, py - 2 + fy * 0.6, 4.2, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.fillStyle = '#111'
+          ctx.beginPath()
+          ctx.arc(px + ex + fx, py - 2 + fy, 2, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.fillStyle = '#fff'
+        }
+      }
+
+      // 게임(플레이) 화면
+      function drawPlaying() {
+        drawGrid()
+        drawCharacter(player.x, player.y, player.size, player.color, player.facing)
+        // 왼쪽 위 안내 문구
+        ctx.fillStyle = 'rgba(0,0,0,0.35)'
+        ctx.beginPath()
+        ctx.roundRect(10, 10, 168, 28, 8)
+        ctx.fill()
+        ctx.fillStyle = '#fff'
+        ctx.font = '13px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif'
+        ctx.textAlign = 'left'
+        ctx.textBaseline = 'middle'
+        ctx.fillText('Esc: 타이틀로 (자동 저장)', 20, 24)
+      }
+
+      // 타이틀 화면
+      function drawTitle() {
+        const t = performance.now() / 1000 // 시간(초). 움직이는 연출에 쓴다.
+        const cx = canvas.width / 2
+        const font = '"Apple SD Gothic Neo", "Malgun Gothic", sans-serif'
+
+        drawGrid()
+        // 배경을 살짝 어둡게 덮어서 글자가 잘 보이게 한다.
+        ctx.fillStyle = 'rgba(10, 30, 15, 0.35)'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+        // 제목 (글자 테두리를 먼저 그리고 그 위에 흰 글자를 덧그리면 또렷해진다)
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.font = `bold 46px ${font}`
+        ctx.lineWidth = 8
+        ctx.lineJoin = 'round'
+        ctx.strokeStyle = 'rgba(20, 50, 25, 0.85)'
+        ctx.strokeText('2D 어드벤처 연습', cx, 84)
+        ctx.fillStyle = '#fff'
+        ctx.fillText('2D 어드벤처 연습', cx, 84)
+
+        // 위아래로 통통 튀는 캐릭터. sin 함수는 -1~1을 반복하므로 시간에 따라 부드럽게 오르내린다.
+        const bob = Math.abs(Math.sin(t * 3)) * 14
+        drawCharacter(cx, 190 - bob, 48, '#2b6cff', { x: 0, y: 1 })
+
+        // 메뉴 버튼들
+        ctx.font = `bold 20px ${font}`
+        menuItems.forEach((item, i) => {
+          const r = buttonRect(i)
+          const isSel = i === selected && item.enabled
+          // 버튼 바탕: 선택된 항목은 밝게, 비활성 항목은 회색으로
+          ctx.fillStyle = !item.enabled ? 'rgba(60,70,60,0.55)' : isSel ? '#ffd76a' : 'rgba(255,255,255,0.85)'
+          ctx.beginPath()
+          ctx.roundRect(r.x, r.y, r.w, r.h, 12)
+          ctx.fill()
+          ctx.lineWidth = isSel ? 3 : 1.5
+          ctx.strokeStyle = isSel ? '#b8860b' : 'rgba(0,0,0,0.3)'
+          ctx.stroke()
+          // 글자
+          ctx.fillStyle = !item.enabled ? 'rgba(255,255,255,0.45)' : '#233'
+          ctx.fillText(item.label, cx, r.y + r.h / 2)
+          // 선택된 항목 양옆에 화살표
+          if (isSel) {
+            ctx.fillStyle = '#b8860b'
+            ctx.fillText('▶', r.x + 22, r.y + r.h / 2)
+          }
+          // 이어하기가 비활성인 이유를 작게 알려 준다.
+          if (!item.enabled) {
+            ctx.font = `12px ${font}`
+            ctx.fillStyle = 'rgba(255,255,255,0.7)'
+            ctx.fillText('저장된 게임이 없어요', cx, r.y + r.h + 10)
+            ctx.font = `bold 20px ${font}`
+          }
+        })
+
+        ctx.font = `13px ${font}`
+        ctx.fillStyle = 'rgba(255,255,255,0.85)'
+        ctx.fillText('↑↓ 고르기 · Enter 결정 · 마우스로 클릭해도 돼요', cx, canvas.height - 28)
+      }
+
+      // 지금 상태(scene)에 맞는 화면을 그린다.
+      function draw() {
+        // 지난 프레임의 그림을 지운다.
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        if (scene === 'title') drawTitle()
+        else drawPlaying()
+      }
+
+      // ----------------------------------------------------------------
+      // 9. 게임 루프
+      // ----------------------------------------------------------------
+      function loop() {
+        update()
+        draw()
+        requestAnimationFrame(loop)
+      }
+
+      goTitle() // 시작은 타이틀 화면에서!
+      loop() // 최초 1회 실행 -> 이후로는 스스로 계속 반복된다.
+    </script>
+  </body>
+</html>

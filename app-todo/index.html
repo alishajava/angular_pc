@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>할 일 목록</title>
+<style>
+  :root { --bg:#f3f1ec; --card:#fff; --ink:#23262b; --sub:#7b8088; --line:#e6e2d8; --accent:#4a7cf0; --accent-soft:#e6eeff; --done:#aab0b8; --star:#f5b301; --danger:#e0584a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171c; --card:#1d2229; --ink:#eef1f6; --sub:#8e97a5; --line:#2c3440; --accent:#6c97ff; --accent-soft:#23304f; --done:#5f6772; --star:#ffcb3d; --danger:#ff7a6b; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,'Noto Sans KR',sans-serif; min-height:100vh; }
+  .wrap { max-width:620px; margin:0 auto; padding:36px 16px 80px; }
+  h1 { margin:0; font-size:1.7rem; letter-spacing:-.02em; }
+  .date { color:var(--sub); margin:4px 0 18px; }
+  .progress { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px 16px; margin-bottom:14px; }
+  .progress .row { display:flex; justify-content:space-between; font-size:.9rem; color:var(--sub); margin-bottom:8px; }
+  .bar { height:8px; border-radius:99px; background:var(--line); overflow:hidden; }
+  .bar i { display:block; height:100%; width:0; background:linear-gradient(90deg,var(--accent),#7fd1ff); border-radius:99px; transition:width .4s; }
+  form { display:flex; gap:8px; margin-bottom:12px; }
+  form input[type=text] { flex:1; padding:13px 14px; font:inherit; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--ink); min-width:0; }
+  form input[type=date] { padding:0 10px; font:inherit; font-size:.85rem; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--ink); }
+  button { font:inherit; cursor:pointer; }
+  .add { padding:0 18px; border:0; border-radius:12px; background:var(--accent); color:#fff; font-weight:700; }
+  .filters { display:flex; gap:6px; margin-bottom:12px; }
+  .filters button { border:1px solid var(--line); background:var(--card); color:var(--ink); padding:6px 14px; border-radius:99px; font-size:.88rem; }
+  .filters button[aria-pressed=true] { background:var(--accent); border-color:transparent; color:#fff; font-weight:600; }
+  .filters .spacer { flex:1; }
+  .filters .clear { color:var(--danger); border-color:transparent; background:none; }
+  ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+  li { display:flex; align-items:center; gap:10px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 12px; }
+  li.new { animation:pop .25s; }
+  @keyframes pop { from { transform:translateY(6px); opacity:0; } }
+  li .chk { width:24px; height:24px; border-radius:50%; border:2px solid var(--line); background:none; display:grid; place-items:center; flex:none; color:#fff; font-size:14px; line-height:1; padding:0; }
+  li.done .chk { background:var(--accent); border-color:var(--accent); }
+  li .txt { flex:1; min-width:0; word-break:break-word; }
+  li.done .txt { color:var(--done); text-decoration:line-through; }
+  li .due { font-size:.75rem; color:var(--sub); background:var(--accent-soft); padding:2px 8px; border-radius:99px; white-space:nowrap; }
+  li .due.late { color:var(--danger); background:transparent; border:1px solid var(--danger); }
+  li .star, li .del { background:none; border:0; font-size:1.1rem; padding:4px; color:var(--line); }
+  li .star.on { color:var(--star); }
+  li .del { color:var(--sub); opacity:.0; transition:opacity .15s; }
+  li:hover .del, li:focus-within .del { opacity:1; }
+  @media (hover:none) { li .del { opacity:.7; } }
+  li input.edit { flex:1; font:inherit; padding:4px 8px; border-radius:8px; border:1px solid var(--accent); background:var(--card); color:var(--ink); }
+  .empty { text-align:center; color:var(--sub); padding:40px 0; }
+  .empty b { display:block; font-size:2rem; margin-bottom:6px; }
+  footer { margin-top:22px; text-align:center; color:var(--sub); font-size:.8rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>✅ 할 일 목록</h1>
+  <div class="date" id="today"></div>
+  <div class="progress"><div class="row"><span id="progText">할 일을 추가해 보세요</span><span id="progPct">0%</span></div><div class="bar"><i id="progBar"></i></div></div>
+  <form id="form">
+    <input type="text" id="input" placeholder="무엇을 해야 하나요?" maxlength="120" autocomplete="off" />
+    <input type="date" id="due" title="마감일 (선택)" />
+    <button class="add" type="submit">추가</button>
+  </form>
+  <div class="filters" id="filters">
+    <button data-f="all" aria-pressed="true">전체</button>
+    <button data-f="active">진행 중</button>
+    <button data-f="done">완료</button>
+    <span class="spacer"></span>
+    <button class="clear" id="clearDone">완료 삭제</button>
+  </div>
+  <ul id="list"></ul>
+  <footer>더블클릭으로 수정 · ⭐ 중요 표시는 맨 위로 · 자동 저장돼요</footer>
+</div>
+<script>
+const KEY = 'app-todo-v1'
+let todos = []
+try { todos = JSON.parse(localStorage.getItem(KEY)) || [] } catch { todos = [] }
+let filter = 'all'
+let justAdded = 0
+const $ = (id) => document.getElementById(id)
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(todos)) } catch {} }
+const todayStr = () => new Date().toISOString().slice(0, 10)
+$('today').textContent = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })
+
+function render() {
+  const list = $('list')
+  list.innerHTML = ''
+  const shown = todos.filter((t) => filter === 'all' || (filter === 'done' ? t.done : !t.done))
+    .sort((a, b) => (a.done - b.done) || (b.star - a.star) || (a.id - b.id))
+  for (const t of shown) {
+    const li = document.createElement('li')
+    li.className = (t.done ? 'done' : '') + (t.id === justAdded ? ' new' : '')
+    const chk = document.createElement('button'); chk.className = 'chk'; chk.textContent = t.done ? '✓' : ''; chk.setAttribute('aria-label', '완료 토글')
+    chk.onclick = () => { t.done = !t.done; save(); render() }
+    const txt = document.createElement('span'); txt.className = 'txt'; txt.textContent = t.text
+    txt.ondblclick = () => {
+      const inp = document.createElement('input'); inp.className = 'edit'; inp.value = t.text
+      txt.replaceWith(inp); inp.focus(); inp.select()
+      const done = () => { const v = inp.value.trim(); if (v) t.text = v; save(); render() }
+      inp.onblur = done; inp.onkeydown = (e) => { if (e.key === 'Enter') done(); if (e.key === 'Escape') render() }
+    }
+    li.append(chk, txt)
+    if (t.due) {
+      const d = document.createElement('span'); d.className = 'due' + (!t.done && t.due < todayStr() ? ' late' : '')
+      d.textContent = (t.due < todayStr() && !t.done ? '⚠ ' : '') + t.due.slice(5).replace('-', '/')
+      li.append(d)
+    }
+    const star = document.createElement('button'); star.className = 'star' + (t.star ? ' on' : ''); star.textContent = '★'; star.setAttribute('aria-label', '중요')
+    star.onclick = () => { t.star = !t.star; save(); render() }
+    const del = document.createElement('button'); del.className = 'del'; del.textContent = '✕'; del.setAttribute('aria-label', '삭제')
+    del.onclick = () => { todos = todos.filter((x) => x !== t); save(); render() }
+    li.append(star, del)
+    list.append(li)
+  }
+  if (!shown.length) list.innerHTML = `<div class="empty"><b>${filter === 'done' ? '🎯' : '🌿'}</b>${filter === 'done' ? '완료한 일이 아직 없어요' : '할 일이 없어요. 여유로운 하루!'}</div>`
+  const total = todos.length, done = todos.filter((t) => t.done).length
+  const pct = total ? Math.round((done / total) * 100) : 0
+  $('progBar').style.width = pct + '%'
+  $('progPct').textContent = pct + '%'
+  $('progText').textContent = total ? `${total}개 중 ${done}개 완료${done === total ? ' 🎉' : ''}` : '할 일을 추가해 보세요'
+  document.querySelectorAll('#filters [data-f]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.f === filter)))
+}
+$('form').onsubmit = (e) => {
+  e.preventDefault()
+  const v = $('input').value.trim()
+  if (!v) return
+  justAdded = Date.now()
+  todos.push({ id: justAdded, text: v, done: false, star: false, due: $('due').value || '' })
+  $('input').value = ''; $('due').value = ''
+  save(); render()
+}
+document.querySelectorAll('#filters [data-f]').forEach((b) => (b.onclick = () => { filter = b.dataset.f; render() }))
+$('clearDone').onclick = () => { if (todos.some((t) => t.done) && confirm('완료한 일을 모두 지울까요?')) { todos = todos.filter((t) => !t.done); save(); render() } }
+render()
+</script>
+</body>
+</html>
