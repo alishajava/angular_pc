@@ -70,6 +70,42 @@ function makeInitialState() {
 const mouse = { x: -99, y: -99 }
 let state = makeInitialState()
 
+// ---- 저장 / 이어하기: 단서를 누를 때마다 자동 저장 ----
+const SAVE_KEY = 'tunguska-save-v1'
+function readSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    const d = raw ? JSON.parse(raw) : null
+    return d && d.scene && Array.isArray(d.inventory) && d.flags ? d : null
+  } catch {
+    return null
+  }
+}
+function saveGame() {
+  if (!state.started) return
+  try {
+    if (state.completed) return localStorage.removeItem(SAVE_KEY)
+    const scene = fade.target || state.scene
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ scene, inventory: state.inventory, flags: state.flags, message: state.message }))
+  } catch { /* 저장 공간 없음 */ }
+}
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY) } catch { /* noop */ }
+}
+function continueGame() {
+  const d = readSave()
+  if (!d) return false
+  state = { ...makeInitialState(), scene: d.scene, inventory: d.inventory, flags: { ...makeInitialState().flags, ...d.flags }, message: d.message || '', started: true }
+  fade.t = 1
+  fade.target = null
+  syncUI()
+  return true
+}
+window.addEventListener('keydown', (e) => {
+  if (!state.started && e.code === 'KeyC' && continueGame()) sfx.start()
+})
+window.addEventListener('beforeunload', saveGame)
+
 function addItem(id) {
   if (!state.inventory.includes(id)) state.inventory.push(id)
 }
@@ -183,6 +219,7 @@ function handleHotspotClick(id) {
   else if (/필요|걸려|부족|뻑뻑|고장/.test(state.message)) sfx.bad()
   else sfx.click()
   syncUI()
+  saveGame()
 }
 
 canvas.addEventListener('click', (e) => {
@@ -308,6 +345,7 @@ buildKeypad()
 document.getElementById('code-cancel').onclick = closeCodeModal
 
 function restart() {
+  clearSave()
   const started = state.started
   state = makeInitialState()
   state.started = started
@@ -1087,6 +1125,11 @@ function drawTitleCard() {
   ctx.fillStyle = '#ffd86a'
   ctx.fillText('화면을 클릭해 시작', W / 2, 376)
   ctx.globalAlpha = 1
+  if (readSave()) {
+    ctx.font = 'bold 16px sans-serif'
+    ctx.fillStyle = '#9fe8c8'
+    ctx.fillText('C 키: 이어하기', W / 2, 410)
+  }
 }
 
 function render() {

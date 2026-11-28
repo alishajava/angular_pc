@@ -271,6 +271,7 @@ function updateEnemies(dt) {
   const wasCleared = r.cleared
   r.enemies = r.enemies.filter((e) => e.hp > 0)
   if (r.enemies.length === 0) r.cleared = true
+  if (r.cleared && !wasCleared) setTimeout(saveGame, 0)
   if (r.cleared && !wasCleared && r.doors.some((d) => d.type === 'R')) {
     sfx.good()
     say('구역 정리 완료 — 다음 문이 열렸다')
@@ -389,7 +390,55 @@ function enterRoom(key, side) {
   currentRoomKey = key
   player.x = ENTRY_COL[side] * TILE + TILE / 2
   player.y = DOOR_ROW * TILE + TILE / 2
+  saveGame()
 }
+
+// ---- 저장 / 이어하기: 방을 옮기거나 부품을 얻을 때 자동 저장 ----
+const SAVE_KEY = 'last-relay-save-v1'
+function readSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    const d = raw ? JSON.parse(raw) : null
+    return d && ROOMS[d.room] && d.player ? d : null
+  } catch {
+    return null
+  }
+}
+function saveGame() {
+  if (phase !== 'playing') return
+  try {
+    const rooms = {}
+    for (const key of Object.keys(ROOMS)) {
+      rooms[key] = { cleared: !!ROOMS[key].cleared, collected: ROOMS[key].items.map((it) => !!it.collected) }
+    }
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ room: currentRoomKey, player: { hp: player.hp, maxHp: player.maxHp, atk: player.atk }, rooms }))
+  } catch { /* 저장 공간 없음 */ }
+}
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY) } catch { /* noop */ }
+}
+function continueGame() {
+  const d = readSave()
+  if (!d) return false
+  currentRoomKey = d.room
+  for (const key of Object.keys(ROOMS)) {
+    const sr = d.rooms && d.rooms[key]
+    if (!sr) continue
+    if (sr.cleared) {
+      ROOMS[key].enemies = []
+      ROOMS[key].cleared = true
+    }
+    ROOMS[key].items.forEach((it, i) => { if (sr.collected && sr.collected[i]) it.collected = true })
+  }
+  player.hp = Math.max(20, d.player.hp)
+  player.maxHp = d.player.maxHp
+  player.atk = d.player.atk
+  player.x = ENTRY_COL.L * TILE + TILE / 2
+  player.y = DOOR_ROW * TILE + TILE / 2
+  phase = 'playing'
+  return true
+}
+window.addEventListener('beforeunload', saveGame)
 
 function triggerAttack() {
   if (player.attackCooldown > 0) return
@@ -430,6 +479,7 @@ function resolveAttackHits() {
 
 function collectItem(item) {
   item.collected = true
+  setTimeout(saveGame, 0)
   sfx.pickup()
   burst(item.x, item.y, item.type === 'h' ? '#5cff8f' : '#ff8f5c', 16, 130, 0.5, 3)
   if (item.type === 'h') {
@@ -536,7 +586,10 @@ window.addEventListener('keydown', (e) => {
     return
   }
   if (e.repeat) return
-  if (phase === 'title' && (key === 'enter' || key === ' ')) {
+  if (phase === 'title' && key === 'c' && continueGame()) {
+    sfx.start()
+  } else if (phase === 'title' && (key === 'enter' || key === ' ')) {
+    clearSave()
     phase = 'intro'
     sfx.click()
   } else if (phase === 'intro' && (key === 'enter' || key === ' ')) {
@@ -1476,6 +1529,10 @@ function drawIntro() {
   ctx.fillStyle = '#ffd23f'
   ctx.font = 'bold 14px sans-serif'
   ctx.fillText('Enter 또는 Space로 진행', canvas.width / 2, 322)
+  if (readSave()) {
+    ctx.fillStyle = '#9fe8c8'
+    ctx.fillText('C 키: 이어하기', canvas.width / 2, 352)
+  }
   ctx.globalAlpha = 1
   ctx.textAlign = 'left'
 }

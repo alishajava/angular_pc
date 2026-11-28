@@ -788,6 +788,7 @@ function sleep(auto) {
   sfx.sleep()
   state.day += 1
   state.tod = DAY_START
+  setTimeout(saveGame, 1500)
   for (const t of world.trees) {
     t.hasFruit = t.fruiting
     t.woodCharges = t.fruiting ? 2 : 3
@@ -1029,6 +1030,10 @@ window.addEventListener('keydown', (e) => {
   heldKeys.add(key)
 
   if (state.phase === 'title') {
+    if (key === 'c' && continueGame()) {
+      sfx.start()
+      return
+    }
     if (key === ' ' || key === 'enter') {
       state.phase = 'intro'
       sfx.click()
@@ -2050,6 +2055,13 @@ function drawTitle() {
     ctx.restore()
   }
   drawTitleText('아늑한 섬 생활', '커다란 섬을 거닐며 낚시하고, 꽃을 따고, 이웃과 친해지는 느긋한 하루', '클릭 또는 스페이스를 눌러 시작', 130)
+  const sv = readSave()
+  if (sv) {
+    ctx.textAlign = 'center'
+    ctx.font = 'bold 17px sans-serif'
+    ctx.fillStyle = '#2f6f4a'
+    ctx.fillText(`C 키: 이어하기 (${sv.day}일차)`, VIEW_W / 2, VIEW_H - 28)
+  }
 }
 
 function drawIntro() {
@@ -2085,6 +2097,61 @@ function render(t) {
   drawToast()
   drawShopPanel()
 }
+
+
+// ---- 저장 / 이어하기: 15초마다, 하루가 바뀔 때, 창을 닫을 때 자동 저장 ----
+const SAVE_KEY = 'island-life-save-v1'
+function readSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    const d = raw ? JSON.parse(raw) : null
+    return d && d.inv && d.friend && d.day >= 1 ? d : null
+  } catch {
+    return null
+  }
+}
+function saveGame() {
+  if (state.phase !== 'play') return
+  try {
+    const outside = state.room === 'outside'
+    const b = world.buildings[0]
+    const pos = outside ? { x: player.x, y: player.y } : { x: footX(b.door.c), y: footY(b.door.r) + 4 }
+    localStorage.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        day: state.day, tod: state.tod, bells: state.bells, inv: state.inv, furniture: [...state.furniture],
+        furnitureCelebrated: state.furnitureCelebrated, task: state.task, fishLeft: state.fishLeft,
+        friend: state.friend, rewarded: state.rewarded, x: pos.x, y: pos.y,
+      }),
+    )
+  } catch { /* 저장 공간 없음 */ }
+}
+function continueGame() {
+  const d = readSave()
+  if (!d) return false
+  state.day = d.day
+  state.tod = d.tod
+  state.bells = d.bells
+  state.inv = { wood: 0, fruit: 0, fish: 0, shell: 0, flower: 0, ...d.inv }
+  state.furniture = new Set(d.furniture || [])
+  state.furnitureCelebrated = !!d.furnitureCelebrated
+  state.task = d.task || newTask()
+  state.fishLeft = d.fishLeft ?? 8
+  state.friend = { tori: 0, mei: 0, moka: 0, bori: 0, ...d.friend }
+  state.rewarded = d.rewarded || {}
+  state.room = 'outside'
+  state.shopOpen = false
+  player.x = d.x
+  player.y = d.y
+  player.act = null
+  player.fish = null
+  state.phase = 'play'
+  snapCamera()
+  return true
+}
+setInterval(saveGame, 15000)
+window.addEventListener('beforeunload', saveGame)
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveGame() })
 
 let lastTime = performance.now()
 function loop(time) {

@@ -179,6 +179,53 @@ function talkTargets() {
   return PEOPLE.filter((p) => !p.isPlayer).length
 }
 
+// ---------- 저장 / 이어하기: 조사 중 단서를 얻을 때, 심문을 시작할 때 자동 저장 ----
+const SAVE_KEY = 'detective-save-v1'
+function readSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    const d = raw ? JSON.parse(raw) : null
+    return d && Array.isArray(d.evidence) && d.stage ? d : null
+  } catch {
+    return null
+  }
+}
+function saveGame() {
+  if (state.phase !== 'investigate' && state.phase !== 'exam') return
+  try {
+    localStorage.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        stage: state.phase === 'exam' && state.exam ? `exam:${state.exam.id}` : 'investigate',
+        invMode: state.invMode,
+        evidence: state.evidence,
+        examined: HOTSPOTS.filter((h) => h.examined).map((h) => h.id),
+        talked: PEOPLE.filter((p) => p.talked).map((p) => ({ id: p.id, next: p.next })),
+      }),
+    )
+  } catch { /* 저장 공간 없음 */ }
+}
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY) } catch { /* noop */ }
+}
+function continueGame() {
+  const d = readSave()
+  if (!d) return false
+  state.invMode = d.invMode === 'top' ? 'top' : 'classic'
+  state.evidence = [...d.evidence]
+  for (const h of HOTSPOTS) h.examined = (d.examined || []).includes(h.id)
+  for (const p of PEOPLE) {
+    const t = (d.talked || []).find((x) => x.id === p.id)
+    p.talked = !!t
+    p.next = t ? t.next : 0
+  }
+  state.hearts = MAX_HEARTS
+  if (d.stage.startsWith('exam:') && EXAMS[d.stage.slice(5)]) startExam(d.stage.slice(5))
+  else startInvestigation()
+  return true
+}
+window.addEventListener('beforeunload', saveGame)
+
 function resetCase() {
   state.phase = 'title'
   state.line = { who: 'seojin', mood: 'determined', text: IDLE_LINE, shown: 999 }
@@ -201,6 +248,7 @@ function resetCase() {
 function giveEvidence(id) {
   if (!id || state.evidence.includes(id)) return
   state.evidence.push(id)
+  setTimeout(saveGame, 0)
   state.popup = { id, until: performance.now() + 2800 }
   playEvidenceSound()
 }
@@ -243,6 +291,7 @@ function startExam(id) {
     pressCount: def.statements.map(() => 0),
   }
   showStatement()
+  saveGame()
 }
 function currentStatement() {
   return state.exam.def.statements[state.exam.idx]
@@ -321,6 +370,7 @@ function finishReaction() {
     if (ex.id === 'kim') startSequence(KIM_CLEAR, 'courtKim', () => startExam('choi'))
     else
       startSequence(CHOI_CLEAR, 'finale', () => {
+        clearSave()
         state.phase = 'ending'
         state.starTimer = 0
       })
@@ -335,6 +385,7 @@ function startInvestigation() {
   state.phase = 'investigate'
   state.line = { who: 'seojin', mood: 'determined', text: IDLE_LINE, shown: 999 }
   if (state.invMode === 'top') tv.reset()
+  saveGame()
 }
 
 // The top-down mode: the detective walks the scene himself.
@@ -503,6 +554,9 @@ canvas.addEventListener('click', (e) => {
 
   if (state.phase === 'title') {
     playClickSound()
+    const cb = titleButtons().cont
+    if (cb && inRect(mx, my, cb) && continueGame()) return
+    clearSave()
     state.invMode = inRect(mx, my, titleButtons().top) ? 'top' : 'classic'
     startSequence(INTRO, 'intro', startInvestigation)
     return
@@ -1564,6 +1618,7 @@ function drawTitle(t) {
   const tb = titleButtons()
   drawButton(tb.classic, '클래식 조사 · 클릭으로 단서 찾기', '#2f5fa0', { font: 'bold 14px sans-serif' })
   drawButton(tb.top, '탑뷰 조사 · 직접 돌아다니며 찾기', '#2e6b4a', { font: 'bold 14px sans-serif' })
+  if (tb.cont) drawButton(tb.cont, `이어하기 · ${readSave().stage.startsWith('exam') ? '증언 심문 중' : '현장 조사 중'}`, '#a06a1f', { font: 'bold 15px sans-serif' })
   ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
   ctx.fillStyle = '#cfd8ff'
   ctx.font = '13px sans-serif'
@@ -1572,9 +1627,11 @@ function drawTitle(t) {
   ctx.globalAlpha = 1
 }
 function titleButtons() {
+  const sv = readSave()
   return {
     classic: { x: 90, y: 508, w: 340, h: 48 },
     top: { x: 470, y: 508, w: 340, h: 48 },
+    cont: sv ? { x: 300, y: 446, w: 300, h: 46 } : null,
   }
 }
 

@@ -211,6 +211,43 @@ function makeInitialState(chapter = 0) {
     banner: { text: CHAPTERS[chapter].name, sub: CHAPTERS[chapter].title, t: 0 },
   }
 }
+// ---- 저장 / 이어하기: 챕터가 시작될 때와 웨이브를 깰 때마다 저장 ----
+const SAVE_KEY = 'brawler-save-v1'
+function readSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    const d = raw ? JSON.parse(raw) : null
+    return d && typeof d.chapter === 'number' && CHAPTERS[d.chapter] ? d : null
+  } catch {
+    return null
+  }
+}
+function saveProgress() {
+  const p = state.player
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ chapter: state.chapter, waveIndex: state.waveIndex, hp: p.hp, gauge: p.gauge, grenades: p.grenades, gun: p.gun }))
+  } catch { /* 저장 공간 없음 */ }
+}
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY) } catch { /* noop */ }
+}
+function continueGame() {
+  const d = readSave()
+  if (!d) return false
+  state = makeInitialState(d.chapter)
+  const p = state.player
+  state.waveIndex = Math.min(d.waveIndex || 0, curWaves().length - 1)
+  p.hp = clamp(d.hp || PLAYER_MAX_HP, 20, PLAYER_MAX_HP)
+  p.gauge = d.gauge || 0
+  p.grenades = d.grenades ?? 1
+  p.gun = d.gun || null
+  // 이전 웨이브가 끝난 지점 근처에서 다시 시작한다
+  const w = curWaves()[state.waveIndex]
+  p.x = Math.max(120, w.triggerX - 320)
+  state.cameraX = clamp(p.x - canvas.width * 0.35, 0, WORLD_WIDTH - canvas.width)
+  return true
+}
+
 let state = makeInitialState()
 state.phase = 'title' // 첫 화면에서는 시작 입력을 기다린다 (R 재시작은 바로 플레이)
 let muteNoticeUntil = 0
@@ -239,8 +276,10 @@ window.addEventListener('keydown', (e) => {
   if (state.phase === 'title') {
     if (!isRepeat && (key.length === 1 || key === 'enter' || key.startsWith('arrow') || e.code.startsWith('Key') || e.code.startsWith('Digit'))) {
       e.preventDefault()
+      if (e.code === 'KeyC' && continueGame()) { sfx.start(); return }
       const ch = e.code === 'Digit3' ? 2 : e.code === 'Digit2' ? 1 : 0 // 2/3 키: 챕터 2/3부터
       state = makeInitialState(ch)
+      saveProgress()
       sfx.start()
     }
     return
@@ -800,9 +839,11 @@ function checkWaveCleared() {
   state.waveIndex += 1
   // 웨이브 보상: 화면 가운데에 아이템이 하나 나타난다
   spawnItem(state.player.x + 120, DEPTH_MID + (Math.random() - 0.5) * 80)
+  if (state.waveIndex < curWaves().length) saveProgress()
   if (state.waveIndex >= curWaves().length) {
     state.enemies = []
     state.phase = state.chapter >= CHAPTERS.length - 1 ? 'cleared' : 'chapterclear'
+    if (state.phase === 'cleared') clearSave()
     sfx.fanfare()
   } else {
     sfx.good()
@@ -818,6 +859,7 @@ function startNextChapter() {
   next.player.grenades = old.grenades
   next.player.gun = old.gun
   state = next
+  saveProgress()
   sfx.start()
 }
 
@@ -2255,6 +2297,12 @@ function drawTitleScreen() {
   ctx.fillStyle = 'rgba(255,255,255,0.9)'
   ctx.fillText('A/D 이동 · W/S 앞뒤 · 스페이스 점프 · J 펀치 · K 킥 · J+K 던지기 · L 필살기 · M 소리', W / 2, H - 82)
   ctx.fillText('G 수류탄 · F 총/유탄발사기 — 아이템을 주우세요 · 2/3 키: 챕터 2/3부터', W / 2, H - 60)
+  const sv = readSave()
+  if (sv) {
+    ctx.fillStyle = '#9fe8a0'
+    ctx.font = 'bold 16px sans-serif'
+    ctx.fillText(`C 키: 이어하기 (${CHAPTERS[sv.chapter].name} · WAVE ${Math.min(sv.waveIndex + 1, CHAPTERS[sv.chapter].waves.length)})`, W / 2, H - 104)
+  }
   ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
   ctx.font = 'bold 20px sans-serif'
   ctx.fillStyle = '#ffe066'

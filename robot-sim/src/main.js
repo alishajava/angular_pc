@@ -570,11 +570,12 @@ function getAimDirection(yaw, pitch) {
 // --- Audio (Web Audio synthesis, no asset files) -----------------------------
 let audioCtx = null
 let masterGain = null
+let soundMuted = false // M 키로 소리 끄기/켜기
 function ensureAudio() {
   if (audioCtx) return audioCtx
   audioCtx = new (window.AudioContext || window.webkitAudioContext)()
   masterGain = audioCtx.createGain()
-  masterGain.gain.value = 0.4
+  masterGain.gain.value = soundMuted ? 0 : 0.4
   masterGain.connect(audioCtx.destination)
   return audioCtx
 }
@@ -1122,6 +1123,10 @@ window.addEventListener('keydown', (e) => {
   keys.add(e.code)
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') boosting = true
   if (e.code === 'KeyE') activateShield()
+  if (e.code === 'KeyM') {
+    soundMuted = !soundMuted
+    if (masterGain) masterGain.gain.value = soundMuted ? 0 : 0.4
+  }
   if (e.code === 'Space') {
     e.preventDefault()
     thrustHeld = true
@@ -1283,7 +1288,28 @@ const state = {
   nextWaveTime: 0,
 }
 
+// ---- 저장 / 이어하기: 웨이브가 시작될 때마다 진행 상황을 저장 ----
+const SAVE_KEY = 'robot-sim-save-v1'
+function readSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    const d = raw ? JSON.parse(raw) : null
+    return d && d.wave >= 1 && d.wave <= WAVE_TOTAL ? d : null
+  } catch {
+    return null
+  }
+}
+function saveProgress(n) {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ wave: n, kills: state.kills, hp: Math.max(30, Math.round(player.hp)) }))
+  } catch { /* 저장 공간 없음 */ }
+}
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY) } catch { /* noop */ }
+}
+
 function startWave(n) {
+  saveProgress(n)
   state.wave = n
   const count = Math.min(2 + n, 9)
   for (let i = 0; i < count; i++) spawnEnemy(n)
@@ -1317,6 +1343,7 @@ function checkWaveClear() {
 
 function triggerEnd(victory) {
   state.phase = 'ended'
+  if (victory) clearSave()
   if (victory) playVictorySound()
   else playDefeatSound()
   blasterHeld = false
@@ -1411,12 +1438,35 @@ function animate() {
     const k = 0.25 + 0.75 * (Math.sin(performance.now() / 420 + b.phase) > 0.2 ? 1 : 0)
     b.mat.color.setRGB(k, k * 0.12, k * 0.12)
   }
+  watchPerf()
   renderer.render(scene, camera)
+}
+// 자동 화질 조절: 프레임이 느리면 해상도를 한 단계씩 낮춘다 (다시 올리지는 않는다)
+let qTier = 0
+let pFrames = 0
+let pSum = 0
+let pLast = performance.now()
+function watchPerf() {
+  const t = performance.now()
+  const ms = t - pLast
+  pLast = t
+  if (ms > 250) return
+  pFrames++
+  pSum += ms
+  if (pFrames < 90) return
+  const avg = pSum / pFrames
+  pFrames = 0
+  pSum = 0
+  if (avg > 26 && qTier < 2) {
+    qTier++
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, qTier === 1 ? 1 : 0.75))
+    renderer.setSize(window.innerWidth, window.innerHeight)
+  }
 }
 animate()
 
 // --- Reset / screen flow -----------------------------------------------------
-function resetGame() {
+function resetGame(from = null) {
   for (const en of [...enemies]) scene.remove(en.group)
   enemies.length = 0
   enemyHitboxes.length = 0
@@ -1447,12 +1497,13 @@ function resetGame() {
   stopThrusterSound()
 
   state.wave = 0
-  state.kills = 0
+  state.kills = from ? from.kills : 0
   state.waveTransition = false
   state.victoryPending = false
   state.phase = 'playing'
+  if (from) player.hp = from.hp
 
-  startWave(1)
+  startWave(from ? from.wave : 1)
 }
 
 startBtn.addEventListener('click', () => {
@@ -1463,6 +1514,22 @@ startBtn.addEventListener('click', () => {
   resetGame()
   canvas.requestPointerLock()
 })
+
+// 이어서 출격: 저장된 웨이브부터 시작
+const continueBtn = document.getElementById('continue-btn')
+const savedRun = readSave()
+if (continueBtn && savedRun) {
+  continueBtn.style.display = ''
+  continueBtn.textContent = `이어서 출격 (WAVE ${savedRun.wave})`
+  continueBtn.addEventListener('click', () => {
+    ensureAudio()
+    titleScreen.style.display = 'none'
+    hud.style.display = 'block'
+    endScreen.style.display = 'none'
+    resetGame(readSave())
+    canvas.requestPointerLock()
+  })
+}
 
 retryBtn.addEventListener('click', () => {
   ensureAudio()

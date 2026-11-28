@@ -376,6 +376,7 @@ function enterRoom(key, side, pos = null) {
   }
   for (const it of room().interactables) it.touching = true
   particles.length = 0
+  saveGame()
 }
 
 // ---------------------------------------------------------- interactions ----
@@ -436,6 +437,7 @@ function triggerInteraction(item) {
     inventory.push('key')
     sfx.pickup()
     sparkle(item.x, item.y, '#ffe066', 18)
+    saveGame()
     say('시스템', '낡은 열쇠를 주웠다. 손잡이에 "창고용"이라고 새겨져 있다.')
     return
   }
@@ -486,8 +488,44 @@ const MOVE_KEYS = {
 const held = (names) => names.some((k) => heldKeys.has(k))
 
 function restart() {
+  clearSave()
   location.reload()
 }
+
+// ---- 저장 / 이어하기: 방을 옮길 때마다 자동 저장 ----
+const SAVE_KEY = 'topview-adventure-save-v1'
+function readSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    const d = raw ? JSON.parse(raw) : null
+    return d && ROOMS[d.room] && Array.isArray(d.inventory) ? d : null
+  } catch {
+    return null
+  }
+}
+function saveGame() {
+  if (state.phase !== 'play' || state.ending) return
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ room: currentRoomKey, inventory: [...inventory], x: player.x, y: player.y, facing: player.facing }))
+  } catch { /* 저장 공간 없음 */ }
+}
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY) } catch { /* noop */ }
+}
+function continueGame() {
+  const d = readSave()
+  if (!d) return false
+  inventory.length = 0
+  inventory.push(...d.inventory)
+  if (inventory.includes('key')) {
+    for (const rm of Object.values(ROOMS)) for (const it of rm.interactables) if (it.type === 'K') it.collected = true
+  }
+  enterRoom(d.room, null, { x: d.x, y: d.y, facing: d.facing })
+  state.phase = 'play'
+  return true
+}
+window.addEventListener('beforeunload', saveGame)
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveGame() })
 
 window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase()
@@ -501,7 +539,12 @@ window.addEventListener('keydown', (e) => {
   }
   if (key === 'r' && state.ending) return restart()
   if (state.phase === 'title') {
+    if (key === 'c' && continueGame()) {
+      sfx.start()
+      return
+    }
     if (key === ' ' || key === 'enter') {
+      clearSave()
       state.phase = 'play'
       sfx.start()
     }
@@ -1818,6 +1861,13 @@ function render() {
   ctx.clearRect(0, 0, W, H)
   if (state.phase === 'title') {
     drawTitle()
+    const sv = readSave()
+    if (sv) {
+      ctx.textAlign = 'center'
+      ctx.font = 'bold 17px sans-serif'
+      ctx.fillStyle = '#ffe9a8'
+      ctx.fillText('C 키: 이어하기', W / 2, H - 22)
+    }
     return
   }
   drawScene()

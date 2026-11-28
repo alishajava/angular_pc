@@ -33,11 +33,12 @@ function choice(arr) {
 // ---------- Audio ----------
 let audioCtx = null
 let masterGain = null
+let soundMuted = false // M 키로 소리 끄기/켜기
 function ensureAudio() {
   if (audioCtx) return audioCtx
   audioCtx = new (window.AudioContext || window.webkitAudioContext)()
   masterGain = audioCtx.createGain()
-  masterGain.gain.value = 0.4
+  masterGain.gain.value = soundMuted ? 0 : 0.4
   masterGain.connect(audioCtx.destination)
   return audioCtx
 }
@@ -289,6 +290,40 @@ function makeInitialState() {
   }
 }
 let state = makeInitialState()
+
+// ---------- Save / continue ----------
+// 매 턴이 시작될 때(그리고 창을 닫을 때) 상태를 localStorage에 저장하고, 타이틀에서 '이어하기'로 불러온다.
+const SAVE_KEY = 'sengoku-strategy-save-v1'
+function hasSave() {
+  try { return !!localStorage.getItem(SAVE_KEY) } catch { return false }
+}
+function readSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    const d = raw ? JSON.parse(raw) : null
+    return d && d.regions && d.factions ? d : null
+  } catch { return null }
+}
+function saveGame() {
+  if (state.phase === 'title' || state.phase === 'intro' || state.phase === 'ending') return
+  try {
+    // 전투 화면 같은 임시 상태는 저장하지 않는다 (전투 중이면 그 전 턴 저장이 그대로 남는다)
+    if (state.phase === 'battle' || state.phase === 'targeting' || state.phase === 'forceSelect') return
+    const snap = { ...state, battle: null, toast: null, pendingAttack: null, attackFromId: null, selectedRegionId: null, diplomacyFactionId: null }
+    localStorage.setItem(SAVE_KEY, JSON.stringify(snap))
+  } catch { /* 저장 공간 없음 */ }
+}
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY) } catch { /* noop */ }
+}
+function continueGame() {
+  const d = readSave()
+  if (!d) return false
+  state = { ...makeInitialState(), ...d, phase: 'turnStart', battle: null, toast: null }
+  return true
+}
+window.addEventListener('beforeunload', saveGame)
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveGame() })
 
 function region(id) {
   return state.regions.find((r) => r.id === id)
@@ -729,7 +764,7 @@ function regionCountFor(factionId) {
 function checkVictoryConditions() {
   for (const id of FACTION_ORDER) {
     if (regionCountFor(id) === state.regions.length) {
-      state.phase = 'ending'
+      state.phase = 'ending'; clearSave()
       state.gameOverText =
         id === 'player'
           ? '천하통일! 당신의 세력이 천하를 평정했습니다.\n\n— 승리 —'
@@ -738,14 +773,14 @@ function checkVictoryConditions() {
     }
   }
   if (regionCountFor('player') === 0) {
-    state.phase = 'ending'
+    state.phase = 'ending'; clearSave()
     state.gameOverText = '모든 영지를 잃었습니다.\n\n— 패배 —'
     return
   }
   if (state.turnCount >= MAX_SEASONS) {
     const ranking = FACTION_ORDER.map((id) => ({ id, count: regionCountFor(id) })).sort((a, b) => b.count - a.count)
     const top = ranking[0]
-    state.phase = 'ending'
+    state.phase = 'ending'; clearSave()
     state.gameOverText =
       top.id === 'player'
         ? `${MAX_SEASONS}계절이 지났습니다. 당신의 세력이 가장 많은 영지를 지배하며 당대 최강으로 남았습니다.\n\n— 승리 —`
@@ -908,6 +943,7 @@ function endTurn() {
   if (state.phase === 'map') {
     state.selectedRegionId = null
     state.phase = 'turnStart'
+    saveGame()
   }
 }
 
@@ -1148,7 +1184,11 @@ canvas.addEventListener('click', (e) => {
   const my = (e.clientY - rect.top) * scaleY
 
   if (state.phase === 'title') {
-    state.phase = 'intro'
+    const cb = continueButtonRect()
+    if (cb && mx >= cb.x && mx <= cb.x + cb.w && my >= cb.y && my <= cb.y + cb.h) {
+      if (continueGame()) return
+    }
+    state = { ...makeInitialState(), phase: 'intro' }
     return
   }
   if (state.phase === 'intro') {
@@ -1198,6 +1238,11 @@ canvas.addEventListener('click', (e) => {
 window.addEventListener('keydown', (e) => {
   if (e.key.toLowerCase() === 'r') {
     state = makeInitialState()
+  }
+  if (state.phase === 'title' && (e.key.toLowerCase() === 'c' || e.code === 'KeyC')) continueGame()
+  if (e.code === 'KeyM') {
+    soundMuted = !soundMuted
+    if (masterGain) masterGain.gain.value = soundMuted ? 0 : 0.4
   }
 })
 
@@ -1584,6 +1629,11 @@ function drawToast() {
   ctx.fillText(state.toast, CANVAS_W / 2, 27)
 }
 
+function continueButtonRect() {
+  if (!hasSave() || !readSave()) return null
+  return { x: CANVAS_W / 2 - 170, y: 276, w: 340, h: 42 }
+}
+
 function drawTitle() {
   const W = CANVAS_W
   const H = CANVAS_H
@@ -1717,7 +1767,18 @@ function drawTitle() {
   ctx.globalAlpha = 0.55 + Math.sin(t * 3) * 0.45
   ctx.font = 'bold 17px sans-serif'
   ctx.fillStyle = '#fff'
-  ctx.fillText('클릭하여 시작', W / 2, 252)
+  ctx.fillText('클릭하여 새로 시작', W / 2, 252)
+  const cbtn = continueButtonRect()
+  if (cbtn) {
+    const sv = readSave()
+    ctx.globalAlpha = 1
+    ctx.fillStyle = 'rgba(20,8,12,0.65)'
+    ctx.beginPath(); ctx.roundRect(cbtn.x, cbtn.y, cbtn.w, cbtn.h, 12); ctx.fill()
+    ctx.strokeStyle = '#ffd9a0'; ctx.lineWidth = 2; ctx.stroke()
+    ctx.fillStyle = '#ffe9b8'
+    ctx.font = 'bold 18px sans-serif'
+    ctx.fillText(`이어하기 (C) · ${sv.year}년차 ${SEASON_NAMES[sv.season]}`, cbtn.x + cbtn.w / 2, cbtn.y + 27)
+  }
   ctx.globalAlpha = 1
 }
 

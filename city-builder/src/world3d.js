@@ -546,7 +546,35 @@ export function createWorld3D({ canvas, tiles, COLS, ROWS, TILE, VIEW_W, VIEW_H,
     const night = applyTime()
     if (lampsDirty) rebuildLamps()
     updateCars(dt * scale, night, now)
+    watchPerf()
     renderer.render(scene, camera)
+  }
+  // 자동 화질 조절: 프레임이 느리면 해상도 → 그림자 순으로 한 단계씩 낮춘다 (다시 올리지는 않는다)
+  let qTier = 0
+  let pFrames = 0
+  let pSum = 0
+  let pLast = performance.now()
+  function watchPerf() {
+    const t = performance.now()
+    const ms = t - pLast
+    pLast = t
+    if (ms > 250) return
+    pFrames++
+    pSum += ms
+    if (pFrames < 90) return
+    const avg = pSum / pFrames
+    pFrames = 0
+    pSum = 0
+    if (avg > 26 && qTier < 2) {
+      qTier++
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, qTier === 1 ? 1 : 0.75))
+      renderer.setSize(VIEW_W, VIEW_H, false)
+      if (qTier >= 1 && sun.shadow.mapSize.x > 1024) {
+        sun.shadow.mapSize.set(1024, 1024)
+        if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null }
+      }
+      if (qTier >= 2) sun.castShadow = false
+    }
   }
   // 파괴된 건물의 연기 목록 정리
   function pruneSmokers() { for (let i = smokers.length - 1; i >= 0; i--) if (!smokers[i].group.parent) smokers.splice(i, 1) }

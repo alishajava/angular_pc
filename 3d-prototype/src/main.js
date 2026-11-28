@@ -1961,6 +1961,58 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight)
 })
 
+// ---- 저장 / 이어하기: 5초마다, 창을 닫을 때 자동 저장. 다시 열면 그 자리에서 이어서 시작 ----
+const SAVE_KEY = '3d-prototype-save-v1'
+function saveGame() {
+  try {
+    const focus = driving ? car.group.position : player.position
+    localStorage.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        dayTime, yaw, px: focus.x, pz: focus.z,
+        car: { x: car.group.position.x, z: car.group.position.z, ry: car.group.rotation.y },
+        questState, questTargetId, banner: questBannerEl ? questBannerEl.textContent : '',
+      }),
+    )
+  } catch { /* 저장 공간 없음 */ }
+}
+function restoreSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    const d = raw ? JSON.parse(raw) : null
+    if (!d || typeof d.px !== 'number') return false
+    dayTime = d.dayTime ?? dayTime
+    if (typeof d.yaw === 'number') yaw = d.yaw
+    if (d.car) {
+      car.group.position.x = d.car.x
+      car.group.position.z = d.car.z
+      car.group.rotation.y = d.car.ry
+    }
+    // 차에 타고 있었다면 차 바로 옆에서 이어서 시작한다
+    player.position.x = d.px + (d.car && Math.abs(d.px - d.car.x) < 0.01 ? 2.2 : 0)
+    player.position.z = d.pz
+    if ((d.questState === 'active' || d.questState === 'none') && (d.questState === 'none' || npcById(d.questTargetId))) {
+      questState = d.questState
+      questTargetId = d.questTargetId
+      if (d.banner) setQuestBanner(d.banner)
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+if (restoreSave()) speak('저장된 곳에서 이어서 시작합니다. (N 키: 새로 시작)')
+setInterval(saveGame, 5000)
+window.addEventListener('beforeunload', saveGame)
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveGame() })
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyN') {
+    try { localStorage.removeItem(SAVE_KEY) } catch { /* noop */ }
+    window.removeEventListener('beforeunload', saveGame)
+    location.reload()
+  }
+})
+
 // 자동 화질 조절: 프레임이 느리면 해상도 → 그림자 순으로 한 단계씩 낮춘다 (올리지는 않아 깜빡임이 없다)
 let qualityTier = 0
 const DPR_BY_TIER = [1.5, 1, 0.75]

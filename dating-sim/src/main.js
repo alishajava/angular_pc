@@ -627,6 +627,35 @@ function makeInitialState() {
 
 let state = makeInitialState()
 
+// ---- 저장 / 이어하기: 하루가 시작될 때마다 자동 저장 ----
+const SAVE_KEY = 'dating-sim-save-v1'
+function readSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    const d = raw ? JSON.parse(raw) : null
+    return d && Array.isArray(d.chars) && d.day >= 1 ? d : null
+  } catch {
+    return null
+  }
+}
+function saveGame() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ day: state.day, chars: state.chars.map((c) => ({ id: c.id, affection: c.affection, stage: c.stage })) }))
+  } catch { /* 저장 공간 없음 */ }
+}
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY) } catch { /* noop */ }
+}
+function loadSave(d) {
+  state = makeInitialState()
+  state.day = d.day
+  for (const sc of d.chars) {
+    const c = state.chars.find((x) => x.id === sc.id)
+    if (c) { c.affection = sc.affection; c.stage = sc.stage }
+  }
+  state.screen = 'day'
+}
+
 function heartsFor(affection) {
   const filled = Math.max(0, Math.min(5, Math.round((affection / 9) * 5)))
   return '♥'.repeat(filled) + '♡'.repeat(5 - filled)
@@ -657,19 +686,28 @@ function render() {
         <h1>동아리 연애 시뮬레이션</h1>
         <div class="subtitle">6일간의 선택이 엔딩을 결정합니다</div>
         <button class="primary-btn" id="start-btn">시작하기</button>
+        ${readSave() ? `<button class="primary-btn" id="continue-btn" style="margin-top:.6rem;background:#fff;color:#c1507a;border:2px solid #e8a0bd">이어하기 · ${readSave().day}일차</button>` : ''}
         <div class="hint">여러 장소를 돌아다니다 보면 우연히 누군가와 마주치게 됩니다. 매일 누가 어디 있을지는 달라져요. 선택에 따라 호감도가 달라집니다.</div>
       </div>
     `
     applyBackground(document.getElementById('bg'), 'title')
     document.getElementById('start-btn').onclick = () => {
+      clearSave()
       state = makeInitialState()
       state.screen = 'day'
+      render()
+    }
+    const cont = document.getElementById('continue-btn')
+    if (cont) cont.onclick = () => {
+      const d = readSave()
+      if (d) loadSave(d)
       render()
     }
     return
   }
 
   if (state.screen === 'day') {
+    saveGame()
     app.innerHTML = `<canvas id="field-canvas" width="${FIELD_W}" height="${FIELD_H}" style="width:100%;height:100%;display:block;"></canvas>`
     field.playerX = PLAYER_START.x
     field.playerY = PLAYER_START.y
@@ -757,6 +795,7 @@ function render() {
       </div>
     `
     applyBackground(document.getElementById('bg'), bg)
+    clearSave()
     if (!state.endingSoundPlayed) {
       state.endingSoundPlayed = true
       if (isGood) sfx.fanfare()
