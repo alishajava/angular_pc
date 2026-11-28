@@ -406,6 +406,7 @@ function doActivity(act, st) {
 }
 function afterResult() {
   saveGame()
+  floatText(girl.x, girl.y - 50, '💾 자동 저장', '#ffe066')
   if (S.turn >= TOTAL_TURNS) return transition(showEnding)
   transition(() => {
     const prevAge = ageAt(viewTurn)
@@ -514,11 +515,27 @@ window.addEventListener('keydown', (e) => {
     else if (key === 'enter' || key === ' ' || key === 'e') chooseOption(ui.menu.sel)
     return
   }
+  if (key === 'escape') return openPauseMenu()
   if (key === ' ' || key === 'enter' || key === 'e') {
     const it = nearestInteractable()
     if (it) activate(it)
   }
 })
+// Esc 메뉴: 계속하기 / 지금 저장 / 저장하고 타이틀로
+function openPauseMenu() {
+  sfx.click()
+  ui.menu = {
+    title: '메뉴',
+    sel: 0,
+    options: [
+      { label: '계속하기', desc: '마을로 돌아가요', ok: true, fn: () => { ui.menu = null } },
+      { label: '💾 지금 저장하기', desc: '현재 상태를 저장해요 (한 계절이 끝날 때도 자동 저장돼요)', ok: true, fn: () => { saveGame(); ui.menu = null; floatText(player.x, player.y - 40, '💾 저장했어요', '#ffe066'); sfx.good() } },
+      { label: '🏠 저장하고 타이틀로', desc: '타이틀에서 "이어하기"로 다시 올 수 있어요', ok: true, fn: () => { saveGame(); ui.menu = null; showTitle() } },
+    ],
+  }
+}
+window.addEventListener('beforeunload', () => { if (S && !lockInput) saveGame() })
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && S && !lockInput) saveGame() })
 window.addEventListener('keyup', (e) => {
   held.delete(keyName(e))
   if (e.metaKey) clearHeld()
@@ -867,7 +884,7 @@ function drawHud() {
     ctx.fillStyle = '#ffe9d4'
     ctx.font = `12px ${FONT}`
     ctx.textAlign = 'center'
-    ctx.fillText('방향키/WASD로 걷고, 건물 앞에서 E 또는 Space — 한 계절에 한 번 딸과 함께 활동을 해요', W / 2, H - 33)
+    ctx.fillText('방향키/WASD로 걷고, 건물 앞에서 E 또는 Space — 한 계절에 한 번 활동 · Esc: 메뉴(저장)', W / 2, H - 33)
   }
 }
 function drawPrompt() {
@@ -1065,7 +1082,7 @@ function showTitle() {
       <button class="mini-btn" id="gallery-btn">🖼 이벤트 CG 갤러리 (${unlockedCgs().length}/${CG_LIST.length})</button>
       ${save ? `<button class="mini-btn" id="cont-btn">이어하기 · ${save.name} ${ageAt(save.turn)}세 ${SEASON_NAMES[save.turn % 4]}</button>` : ''}
       <div class="hint">마을을 걸어 다니며 서당·연무장·화실·사찰·시장·집·나루터에서 딸과 함께 활동하세요. 한 계절에 한 번, 총 32계절. 무리하면 병이 나요. 길에 떨어진 엽전·약초·글귀도 주워 보세요. 18살이 되면 엔딩이 결정됩니다.</div>
-      <div class="hint">조작: 방향키/WASD 이동 · E/Space 상호작용 · 숫자키/클릭 선택 · Esc 닫기 · M 소리</div></div>`)
+      <div class="hint">조작: 방향키/WASD 이동 · E/Space 상호작용 · 숫자키/클릭 선택 · Esc 메뉴(저장) · M 소리</div></div>`)
     document.querySelectorAll('.swatch').forEach((el) => (el.onclick = () => { hairKey = el.dataset.hair; render() }))
     document.getElementById('gallery-btn').onclick = () => showGallery(() => render(), hairKey)
     document.getElementById('start-btn').onclick = () => {
