@@ -78,9 +78,10 @@ function buildMap() {
   prop('stall', 14, 11, 2, 2, { goods: 'cloth', color: '#e0a030' })
   prop('stall', 16, 11, 2, 2, { goods: 'pot', color: '#5aa06a' })
   station('market', 'work', 13.5, 10.45, '시장', 50)
-  prop('crate', 9, 14, 1, 1)
-  prop('crate', 17, 14, 1, 1)
-  prop('haystack', 10, 15, 1, 1)
+  // 시장 뒤쪽 통로가 막히지 않도록 상자·짚더미는 가장자리(맨 아랫줄)에 둔다
+  prop('crate', 8, 16, 1, 1)
+  prop('crate', 17, 16, 1, 1)
+  prop('haystack', 12, 16, 1, 1)
 
   // 나루터 (남동쪽 강)
   rect(18, 11, 6, 6) // 물

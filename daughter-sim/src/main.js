@@ -68,9 +68,11 @@ function canMoveTo(x, y) {
     if (solidAt(Math.floor(cx / TILE), Math.floor(cy / TILE))) return false
   }
   // 사람과는 부딪히지만, 이미 겹쳐 있으면 멀어지는 방향으로는 움직일 수 있게 한다
+  // 서 있는 사람과만 부딪힌다. 돌아다니는 사람(할머니·아이)은 지나갈 수 있어서 길을 막지 못한다.
   for (const n of runtimeNpcs) {
+    if (n.wander) continue
     const d = Math.hypot(x - n.x, y - n.y)
-    if (d < 16 && d < Math.hypot(player.x - n.x, player.y - n.y) + 0.01) return false
+    if (d < 14 && d < Math.hypot(player.x - n.x, player.y - n.y) + 0.01) return false
   }
   return true
 }
@@ -587,6 +589,22 @@ function updatePlayer(dt) {
     if (canMoveTo(tx, player.y)) player.x = tx
     const ty = player.y + dy * PLAYER_SPEED * dt
     if (canMoveTo(player.x, ty)) player.y = ty
+    // 서 있는 사람에게 정면으로 막혀 제자리걸음이면, 옆으로 미끄러지며 돌아가게 한다
+    if (Math.abs(player.x - ox) < 0.01 && Math.abs(player.y - oy) < 0.01) {
+      const n = runtimeNpcs.find((q) => !q.wander && Math.hypot(player.x + dx * 12 - q.x, player.y + dy * 12 - q.y) < 30)
+      if (n) {
+        const px = -dy
+        const py = dx
+        const away = Math.sign((player.x - n.x) * px + (player.y - n.y) * py) || 1
+        // 한 번 정한 쪽으로 계속 돌아간다 (위아래로 떨리지 않게). 막히면 반대쪽으로 바꾼다.
+        const order = player.slide ? [player.slide, -player.slide] : [away, -away]
+        for (const g of order) {
+          const sx = player.x + px * g * PLAYER_SPEED * dt
+          const sy = player.y + py * g * PLAYER_SPEED * dt
+          if (canMoveTo(sx, sy)) { player.x = sx; player.y = sy; player.slide = g; break }
+        }
+      }
+    } else player.slide = 0
     const last = girl.trail[girl.trail.length - 1]
     if (!last || Math.hypot(player.x - last.x, player.y - last.y) >= 5) girl.trail.push({ x: player.x, y: player.y })
     if (girl.trail.length > 400) girl.trail.shift()
